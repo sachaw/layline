@@ -5,7 +5,7 @@
 #![cfg(feature = "emit")]
 
 use layline_codegen::__derive::field_rows;
-use layline_codegen::emit::{Module, generate};
+use layline_codegen::emit::{Derive, Module, generate};
 use layline_codegen::{BitOrder, Container, Endian, Field, Item, Kind, LayoutDef, Scalar, Stated};
 
 #[test]
@@ -70,4 +70,30 @@ fn the_published_rows_are_where_the_derive_puts_a_prefixed_layout() {
         .map(|f| (f.name.to_string(), f.extent.start(), f.extent.width()))
         .collect();
     assert_eq!(host, compiled, "the model and the derive disagree");
+}
+
+/// A derive behind a `cfg` reaches generated code without making the dependency required.
+#[test]
+fn a_gated_derive_is_one_cfg_attr_per_predicate() {
+    let module = Module::new(vec![Item::Layout(LayoutDef::new(
+        "Head",
+        Container::Bytes { bytes: 2, endian: Endian::Be },
+        vec![Field::new("len", Kind::Scalar(Scalar::U(16)))],
+    ))])
+    .with_derives(vec![
+        "Copy".into(),
+        Derive::new("serde::Serialize").with_cfg("feature = \"serde\""),
+        Derive::new("serde::Deserialize").with_cfg("feature = \"serde\""),
+        Derive::new("arbitrary::Arbitrary").with_cfg("test"),
+    ]);
+
+    let emitted = generate(&module).expect("the module emits").source;
+    assert!(emitted.contains("#[derive(Debug, Clone, PartialEq, Copy)]"), "{emitted}");
+    assert!(
+        emitted.contains(
+            "#[cfg_attr(feature = \"serde\", derive(serde::Serialize, serde::Deserialize))]"
+        ),
+        "the two serde derives share one attribute:\n{emitted}"
+    );
+    assert!(emitted.contains("#[cfg_attr(test, derive(arbitrary::Arbitrary))]"), "{emitted}");
 }

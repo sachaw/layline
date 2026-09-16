@@ -29,6 +29,8 @@ use cursor::too_deep;
 use recursion::{names_self, open_ended_expr, unbounded_recursion};
 use table::covers_table;
 
+#[cfg(feature = "emit")]
+use crate::emit::Derive;
 use crate::root::Prelude;
 #[cfg(feature = "emit")]
 use crate::walk::derive_attr;
@@ -71,7 +73,7 @@ pub struct MessageParts {
 #[cfg(feature = "emit")]
 pub(crate) fn emit_message(
     m: &MessageDef,
-    derives: &[String],
+    derives: &[Derive],
     root: &Root,
     cyclic: &[(String, bool)],
 ) -> Result<(TokenStream, Vec<row::SegmentDef>), Error> {

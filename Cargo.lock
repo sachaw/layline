@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "layline"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "layline-codegen",
  "layline-core",
@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "layline-codegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "layline",
  "layline-core",
@@ -25,14 +25,14 @@ dependencies = [
 
 [[package]]
 name = "layline-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_core",
 ]
 
 [[package]]
 name = "layline-derive"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "layline",
  "layline-codegen",

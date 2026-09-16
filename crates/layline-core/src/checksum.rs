@@ -35,6 +35,9 @@ pub trait CrcWord: crate::sealed::CrcWord + WireInt + Copy {
 
     /// The low `BITS` bits of `register`.
     fn from_register(register: u64) -> Self;
+
+    /// This word as a register.
+    fn register(self) -> u64;
 }
 
 macro_rules! crc_word {
@@ -46,6 +49,10 @@ macro_rules! crc_word {
 
             fn from_register(register: u64) -> Self {
                 register as $t
+            }
+
+            fn register(self) -> u64 {
+                self as u64
             }
         }
     )*};
@@ -100,22 +107,22 @@ impl<W: CrcWord, const POLY: u64, const INIT: u64, const XOROUT: u64, const REFL
     for Crc<W, POLY, INIT, XOROUT, REFLECT>
 {
     type Output = W;
-    type State = u64;
+    type State = W;
 
-    fn init() -> u64 {
+    fn init() -> W {
         const {
             let mask = crate::mask::mask64(W::BITS);
             assert!(POLY & !mask == 0, "a Crc's POLY is wider than its word");
             assert!(INIT & !mask == 0, "a Crc's INIT is wider than its word");
             assert!(XOROUT & !mask == 0, "a Crc's XOROUT is wider than its word");
         }
-        INIT
+        W::from_register(INIT)
     }
 
-    fn update(state: u64, bytes: &[u8]) -> u64 {
+    fn update(state: W, bytes: &[u8]) -> W {
         let top = 1u64 << (W::BITS - 1);
         let mask = crate::mask::mask64(W::BITS);
-        let mut crc = state;
+        let mut crc = state.register();
         for &byte in bytes {
             if REFLECT {
                 crc ^= u64::from(byte);
@@ -129,11 +136,11 @@ impl<W: CrcWord, const POLY: u64, const INIT: u64, const XOROUT: u64, const REFL
                 }
             }
         }
-        crc
+        W::from_register(crc)
     }
 
-    fn finish(state: u64) -> W {
-        W::from_register(state ^ XOROUT)
+    fn finish(state: W) -> W {
+        W::from_register(state.register() ^ XOROUT)
     }
 }
 
@@ -276,6 +283,21 @@ mod tests {
             <Crc<u64, 0x42F0_E1EB_A9EA_3693, 0, 0, false> as Checksum>::compute(CHECK),
             0x6C40_DF5F_0B49_7347
         );
+    }
+
+    /// The annotations fail to compile unless the state is the register's own width.
+    #[test]
+    fn a_crc_folds_in_its_own_width() {
+        type Fcs16 = Crc<u16, 0x8408, 0xFFFF, 0xFFFF, true>;
+        let state: u16 = <Fcs16 as Checksum>::init();
+        let state: u16 = <Fcs16 as Checksum>::update(state, b"1234");
+        let fcs = <Fcs16 as Checksum>::finish(<Fcs16 as Checksum>::update(state, b"56789"));
+        assert_eq!(fcs, 0x906E, "RFC 1662's check value, folded in two runs");
+
+        let narrow: u8 = <Crc<u8, 0x07, 0x00, 0x00, false> as Checksum>::init();
+        let middle: u32 = <Crc32 as Checksum>::init();
+        let wide: u64 = <Crc<u64, 0x42F0_E1EB_A9EA_3693, 0, 0, false> as Checksum>::init();
+        assert_eq!((narrow, middle, wide), (0, 0xFFFF_FFFF, 0));
     }
 
     #[test]

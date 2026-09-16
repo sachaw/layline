@@ -14,27 +14,64 @@ pub fn collection_ty(kind: &Kind) -> String {
     carrier_tokens(kind).to_string().replace(' ', "")
 }
 
-/// `#[derive(Debug, Clone, PartialEq, ...)]` for a generated item.
+/// `#[derive(Debug, Clone, PartialEq, ...)]` for a generated item, then one `#[cfg_attr(..)]`
+/// for each predicate the derives name.
 ///
 /// # Errors
 ///
-/// [`Error::Invalid`], naming `derives`, for an entry that is not a path a `#[derive]` can name.
+/// [`Error::Invalid`], naming `derives`, for an entry that is not a path a `#[derive]` can name,
+/// a `cfg` that is not a predicate, or a path listed twice.
 #[cfg(feature = "emit")]
-pub fn derive_attr(derives: &[String]) -> Result<TokenStream, Error> {
-    let mut extras = TokenStream::new();
+pub fn derive_attr(derives: &[crate::emit::Derive]) -> Result<TokenStream, Error> {
+    let mut always = TokenStream::new();
+    let mut gated: Vec<(String, syn::Meta, Vec<syn::Path>)> = Vec::new();
+    let mut listed: Vec<&str> = Vec::new();
+
     for d in derives {
-        let path: syn::Path = syn::parse_str(d).map_err(|_| {
-            Error::Invalid(
-                String::from("derives"),
-                Invalid::Other(format!(
-                    "`{d}` is not a valid derive path. \
-                     Write one derive per entry, such as `serde::Serialize`"
-                )),
-            )
+        let path: syn::Path = syn::parse_str(&d.path).map_err(|_| {
+            invalid(format!(
+                "`{}` is not a valid derive path. \
+                 Write one derive per entry, such as `serde::Serialize`",
+                d.path
+            ))
         })?;
-        extras.extend(quote!(, #path));
+        if listed.contains(&d.path.as_str()) {
+            return Err(invalid(format!(
+                "`{}` appears twice in `derives`. List each derive once",
+                d.path
+            )));
+        }
+        listed.push(&d.path);
+
+        let Some(cfg) = &d.cfg else {
+            always.extend(quote!(, #path));
+            continue;
+        };
+        let meta: syn::Meta = syn::parse_str(cfg).map_err(|_| {
+            invalid(format!(
+                "`{cfg}` is not a valid `cfg` predicate. \
+                 Write one predicate, such as `feature = \"serde\"`"
+            ))
+        })?;
+        let key = quote!(#meta).to_string();
+        match gated.iter_mut().find(|(seen, _, _)| *seen == key) {
+            Some((_, _, paths)) => paths.push(path),
+            None => gated.push((key, meta, vec![path])),
+        }
     }
-    Ok(quote! { #[derive(Debug, Clone, PartialEq #extras)] })
+
+    let gates =
+        gated.iter().map(|(_, cfg, paths)| quote! { #[cfg_attr(#cfg, derive(#(#paths),*))] });
+    Ok(quote! {
+        #[derive(Debug, Clone, PartialEq #always)]
+        #(#gates)*
+    })
+}
+
+/// An [`Error::Invalid`] naming the `derives` entry that is wrong.
+#[cfg(feature = "emit")]
+fn invalid(why: String) -> Error {
+    Error::Invalid(String::from("derives"), Invalid::Other(why))
 }
 
 /// Parses a type path that validation already accepted.

@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MPL-2.0"
@@ -19,5 +19,5 @@ keywords = ["binary", "parsing", "bitfield", "protocol", "no-std"]
 categories = ["encoding", "parser-implementations", "embedded", "no-std"]
 
 [workspace.dependencies]
-layline-core = { path = "crates/layline-core", version = "0.1.0", default-features = false }
-layline-derive = { path = "crates/layline-derive", version = "0.1.0" }
+layline-core = { path = "crates/layline-core", version = "0.2.0", default-features = false }
+layline-derive = { path = "crates/layline-derive", version = "0.2.0" }

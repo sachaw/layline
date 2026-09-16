@@ -5,6 +5,8 @@ use quote::quote;
 use super::derive_attr;
 use super::tokens::ident;
 use super::{doc_attr, emit_field, endian_arg, path};
+#[cfg(feature = "emit")]
+use crate::emit::Derive;
 use crate::root::Prelude;
 use crate::{BitOrder, Container, DispatchDef, EnumDef, Error, LayoutDef, Root, Scalar};
 
@@ -66,7 +68,7 @@ pub fn layout_parts(l: &LayoutDef, root: &Root) -> Result<LayoutParts, Error> {
 #[cfg(feature = "emit")]
 pub(crate) fn emit_layout(
     l: &LayoutDef,
-    derives: &[String],
+    derives: &[Derive],
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let name = ident(&l.name);
@@ -192,7 +194,7 @@ pub fn enum_parts(e: &EnumDef, root: &Root) -> Result<EnumParts, Error> {
 #[cfg(feature = "emit")]
 pub(crate) fn emit_enum(
     e: &EnumDef,
-    derives: &[String],
+    derives: &[Derive],
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let name = ident(&e.name);
@@ -261,7 +263,7 @@ pub fn dispatch_parts(d: &DispatchDef, root: &Root) -> Result<DispatchParts, Err
 #[cfg(feature = "emit")]
 pub(crate) fn emit_dispatch(
     d: &DispatchDef,
-    derives: &[String],
+    derives: &[Derive],
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let name = ident(&d.name);

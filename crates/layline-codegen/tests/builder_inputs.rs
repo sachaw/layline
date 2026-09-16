@@ -112,6 +112,31 @@ fn a_module_string_that_does_not_parse_is_invalid() {
     generate(&fine).expect("valid paths");
 }
 
+#[cfg(feature = "emit")]
+#[test]
+fn a_derive_that_cannot_be_written_is_invalid() {
+    use layline_codegen::Error;
+    use layline_codegen::Item;
+    use layline_codegen::emit::{Derive, Module, generate};
+
+    let item = || Item::Layout(bytes(1, vec![Field::new("a", Kind::Scalar(Scalar::U(8)))]));
+
+    let cfg =
+        Module::new(vec![item()]).with_derives(vec![Derive::new("Copy").with_cfg("feature = ")]);
+    let Err(Error::Invalid(what, Invalid::Other(why))) = generate(&cfg) else {
+        panic!("expected `Error::Invalid` for a `cfg` that is not a predicate");
+    };
+    assert_eq!(what, "derives");
+    assert!(why.contains("`cfg` predicate"), "{why}");
+
+    let twice = Module::new(vec![item()])
+        .with_derives(vec!["Copy".into(), Derive::new("Copy").with_cfg("test")]);
+    let Err(Error::Invalid(_, Invalid::Other(why))) = generate(&twice) else {
+        panic!("expected `Error::Invalid` for a derive listed twice");
+    };
+    assert!(why.contains("appears twice"), "{why}");
+}
+
 // ---------------------------------------------------------------------------
 // Message parameters
 // ---------------------------------------------------------------------------

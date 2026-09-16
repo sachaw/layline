@@ -8,6 +8,8 @@ use super::body::{Bind, Item, Own, Walked, walk_segments};
 use super::cursor::too_deep;
 use super::recursion::{names_self, open_ended_expr};
 use super::table::covers_table;
+#[cfg(feature = "emit")]
+use crate::emit::Derive;
 use crate::root::Prelude;
 #[cfg(feature = "emit")]
 use crate::walk::derive_attr;
@@ -35,7 +37,7 @@ pub struct ChoiceParts {
 #[cfg(feature = "emit")]
 pub(crate) fn emit_choice(
     c: &ChoiceDef,
-    derives: &[String],
+    derives: &[Derive],
     root: &Root,
     cyclic: &[(String, bool)],
 ) -> Result<(TokenStream, Vec<row::ArmDef>), Error> {
