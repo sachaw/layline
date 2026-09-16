@@ -147,3 +147,63 @@ fn a_refused_payload_is_kept_whole() {
     kept.encode_into(&mut out).expect("fits");
     assert_eq!(out, bad, "encode returns the kept bytes");
 }
+
+/// The fallback body is any type that is `From<&[u8]>` and `Deref<Target = [u8]>`,
+/// so a catalogue can keep an unknown body without allocating.
+mod inline_body {
+    use layline::{Dispatch, Layout};
+
+    #[derive(Layout, Debug, Clone, PartialEq)]
+    #[layout(bytes = 4)]
+    pub struct Ping {
+        pub seq: u32,
+    }
+
+    /// A body of exactly four bytes, truncating or zero-padding so decode stays total.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Raw([u8; 4]);
+
+    impl From<&[u8]> for Raw {
+        fn from(bytes: &[u8]) -> Self {
+            let mut out = [0u8; 4];
+            let take = bytes.len().min(4);
+            out[..take].copy_from_slice(&bytes[..take]);
+            Self(out)
+        }
+    }
+
+    impl core::ops::Deref for Raw {
+        type Target = [u8];
+
+        fn deref(&self) -> &[u8] {
+            &self.0
+        }
+    }
+
+    #[derive(Dispatch, Debug, Clone, PartialEq)]
+    #[dispatch(id = u8)]
+    pub enum Frame {
+        #[value(1)]
+        Ping(Ping),
+        #[other]
+        Unknown { id: u8, body: Raw },
+    }
+
+    #[test]
+    fn an_unlisted_id_keeps_its_body_without_allocating() {
+        let wire = [9u8, 8, 7, 6];
+        let frame = Frame::decode(0xAB, &wire);
+        assert_eq!(frame, Frame::Unknown { id: 0xAB, body: Raw(wire) });
+        assert_eq!(frame.unlisted(), Some(0xAB));
+
+        let mut room = [0u8; 4];
+        let mut out = layline::Fixed::new(&mut room);
+        frame.encode_into(&mut out).expect("four bytes");
+        assert_eq!(out.into_written(), wire, "the bytes go back out as they came in");
+    }
+
+    #[test]
+    fn a_listed_id_still_decodes_its_payload() {
+        assert_eq!(Frame::decode(1, &1u32.to_le_bytes()), Frame::Ping(Ping { seq: 1 }));
+    }
+}

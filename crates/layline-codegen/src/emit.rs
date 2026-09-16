@@ -150,11 +150,12 @@ fn emit_source(module: &Module, audit: &mut String) -> Result<String, Error> {
             pub use #root::ParseError;
         });
     }
-    if module
-        .items
-        .iter()
-        .any(|i| matches!(i, Item::Message(_) | Item::Choice(_) | Item::Dispatch(_)))
-    {
+    let allocates = |i: &Item| match i {
+        Item::Message(_) | Item::Choice(_) => true,
+        Item::Dispatch(d) => d.other_body.is_none(),
+        _ => false,
+    };
+    if module.items.iter().any(allocates) {
         tokens.extend(quote! {
             #[allow(unused_imports)]
             use #root::__private::{Box, String, Vec};

@@ -270,16 +270,27 @@ pub fn dispatch_parts(d: &DispatchDef, root: &Root) -> Result<DispatchParts, Err
         quote! { #doc #[value(#id)] #variant(#ty), }
     });
     let other = ident(&d.other);
+    let body = match &d.other_body {
+        Some(ty) => {
+            let ty = path(ty);
+            quote!(#ty)
+        }
+        None => quote!(#vec<#u8>),
+    };
+    let prefix = (d.prefix > 0).then(|| {
+        let k = Literal::u32_unsuffixed(d.prefix);
+        quote! { , prefix = #k }
+    });
     Ok(DispatchParts {
         arms: quote! {
             #(#arms)*
             /// An unknown id, kept with its body.
             #[other]
-            #other { id: #id_ty, body: #vec<#u8> },
+            #other { id: #id_ty, body: #body },
         },
         attrs: quote! {
             #[derive(#root::Dispatch)]
-            #[dispatch(id = #id_ty #crate_arg)]
+            #[dispatch(id = #id_ty #prefix #crate_arg)]
         },
     })
 }

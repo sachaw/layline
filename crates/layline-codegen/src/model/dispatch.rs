@@ -24,6 +24,15 @@ pub struct DispatchDef {
     pub doc: Option<String>,
     /// Derives for this catalogue, written after the module's.
     pub derives: Vec<Derive>,
+    /// The id's width in bits inside every payload: `#[dispatch(.., prefix = K)]`.
+    ///
+    /// Zero reads the id from elsewhere, and each payload's `Layout::PREFIX_BITS` must match.
+    pub prefix: u32,
+    /// The fallback variant's body type. `None` is `Vec<u8>`.
+    ///
+    /// Any type that is `From<&[u8]>` and `Deref<Target = [u8]>` works, such as a fixed-size
+    /// type that keeps the body without allocating.
+    pub other_body: Option<String>,
 }
 
 impl DispatchDef {
@@ -37,7 +46,24 @@ impl DispatchDef {
             other: String::from("Unknown"),
             doc: None,
             derives: Vec::new(),
+            prefix: 0,
+            other_body: None,
         }
+    }
+
+    /// Sets the id's width in bits inside every payload.
+    ///
+    /// Each payload declares the same width with `Container::Word { prefix, .. }`, and the
+    /// generated code asserts that they agree.
+    #[must_use]
+    pub fn with_prefix(self, prefix: u32) -> Self {
+        Self { prefix, ..self }
+    }
+
+    /// Sets the fallback variant's body type, in place of `Vec<u8>`.
+    #[must_use]
+    pub fn with_other_body(self, ty: &str) -> Self {
+        Self { other_body: Some(String::from(ty)), ..self }
     }
 
     /// Sets the derives written on this catalogue, after the module's.

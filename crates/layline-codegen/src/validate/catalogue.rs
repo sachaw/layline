@@ -35,6 +35,16 @@ pub(crate) fn validate_dispatch(d: &DispatchDef) -> Result<(), Invalid> {
         )));
     }
 
+    if let Some(body) = &d.other_body {
+        type_path(&d.other, "the fallback's body", body)?;
+    }
+    if d.prefix > 64 {
+        return Err(Invalid::Other(format!(
+            "dispatch `{name}`: `prefix = {}` is wider than 64 bits",
+            d.prefix
+        )));
+    }
+
     distinct(d.arms.iter().map(|a| a.id))?;
 
     let (lo, hi) = bounds(matches!(d.id, Scalar::I(_)), bits);

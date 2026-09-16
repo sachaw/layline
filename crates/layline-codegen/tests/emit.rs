@@ -169,3 +169,39 @@ fn a_default_variant_and_a_default_derive_have_to_agree() {
 
     emit(catalogue().with_default("Idle"), vec!["Default".into()]).expect("agreeing is accepted");
 }
+
+/// A catalogue states where its id sits, and what keeps an unknown body.
+#[test]
+fn a_dispatch_states_its_prefix_and_its_fallback_body() {
+    use layline_codegen::{DispatchArm, DispatchDef};
+
+    let arms = vec![DispatchArm::new(0b101, "Ping", "Ping")];
+    let plain = DispatchDef::new("Frame", Scalar::U(8), arms.clone());
+    let emitted = generate(&Module::new(vec![Item::Dispatch(plain)])).expect("emits").source;
+    assert!(emitted.contains("#[dispatch(id = u8)]"), "{emitted}");
+    assert!(emitted.contains("body: Vec<u8>"), "the default keeps allocating:\n{emitted}");
+
+    let stated = DispatchDef::new("Frame", Scalar::U(8), arms)
+        .with_prefix(7)
+        .with_other_body("UnknownCwBody");
+    let emitted = generate(&Module::new(vec![Item::Dispatch(stated)])).expect("emits").source;
+    assert!(emitted.contains("#[dispatch(id = u8, prefix = 7)]"), "{emitted}");
+    assert!(emitted.contains("body: UnknownCwBody"), "{emitted}");
+    assert!(!emitted.contains("Vec<u8>"), "nothing is left of the default:\n{emitted}");
+    assert!(
+        !emitted.contains("__private"),
+        "a catalogue that keeps its body without allocating needs no prelude:\n{emitted}"
+    );
+}
+
+#[test]
+fn a_fallback_body_has_to_be_a_type_path() {
+    use layline_codegen::{DispatchArm, DispatchDef, Error};
+
+    let d = DispatchDef::new("Frame", Scalar::U(8), vec![DispatchArm::new(1, "Ping", "Ping")])
+        .with_other_body("not a type!!");
+    let Err(Error::Invalid(_, why)) = generate(&Module::new(vec![Item::Dispatch(d)])) else {
+        panic!("a fallback body that is not a type path must be refused");
+    };
+    assert!(format!("{why:?}").contains("not a Rust type path"), "{why:?}");
+}
