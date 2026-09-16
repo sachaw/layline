@@ -279,6 +279,7 @@ fn a_fixed_run_of_text_advances_the_stated_numbering() {
     {
         let table = layline_codegen::__derive::message_parts(
             &msg("M", segments(9)),
+            &[],
             &layline_codegen::Root::default(),
         )
         .expect("renders")
@@ -319,6 +320,7 @@ fn the_published_table_starts_where_a_stated_position_says() {
 
     let table = layline_codegen::__derive::message_parts(
         &msg("M", segments()),
+        &[],
         &layline_codegen::Root::default(),
     )
     .expect("renders")

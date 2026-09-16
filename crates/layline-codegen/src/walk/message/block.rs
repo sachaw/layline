@@ -52,7 +52,7 @@ impl Walk<'_> {
         let decls = fields.iter().map(|f| block_field(f, root));
         item.items.extend(hidden_block(root, &sub, &len, &self.endian, quote! { #(#decls)* }));
         for f in fields {
-            self.public_fields.extend(emit_message_field(f, false, root));
+            self.public_fields.extend(emit_message_field(f, false, root, &self.skip));
         }
 
         let mut reserve = TokenStream::new();

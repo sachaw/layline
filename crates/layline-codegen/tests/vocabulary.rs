@@ -107,7 +107,7 @@ fn every_published_attribute_has_a_model_fact_or_a_reason() {
     let rendered: String = every_spelling()
         .iter()
         .map(|l| {
-            let parts = layout_parts(l, &Root::default()).expect("renders");
+            let parts = layout_parts(l, &[], &Root::default()).expect("renders");
             format!("{} {}", parts.attrs, parts.fields)
         })
         .collect::<Vec<_>>()
@@ -147,7 +147,7 @@ fn no_derive_only_attribute_is_produced_by_a_model_fact() {
     let rendered: String = every_spelling()
         .iter()
         .map(|l| {
-            let parts = layout_parts(l, &Root::default()).expect("renders");
+            let parts = layout_parts(l, &[], &Root::default()).expect("renders");
             format!("{} {}", parts.attrs, parts.fields)
         })
         .collect::<Vec<_>>()
@@ -170,7 +170,7 @@ fn a_nested_array_renders_the_type_and_the_rows() {
         Container::Bytes { bytes: 72, endian: Endian::Be },
         vec![Field::new("m", Kind::Array(Scalar::F64, vec![3, 3]))],
     );
-    let parts = layout_parts(&matrix, &Root::default()).expect("renders");
+    let parts = layout_parts(&matrix, &[], &Root::default()).expect("renders");
     let rendered = parts.fields.to_string();
     assert!(rendered.contains("[[f64 ; 3] ; 3]"), "unexpected type in:\n{rendered}");
 

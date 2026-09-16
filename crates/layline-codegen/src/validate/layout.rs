@@ -81,6 +81,18 @@ fn assertions(layout: &LayoutDef) -> Result<(), Invalid> {
     let asserts = |f: &Field| f.magic.is_some() || matches!(f.kind, Kind::Checksum { .. });
 
     for f in &layout.fields {
+        if f.range.is_some()
+            && let Kind::Scalar(s @ (Scalar::U(_) | Scalar::I(_))) = &f.kind
+            && s.bits() > super::WIDEST_BOUND
+        {
+            return Err(Invalid::field(
+                &f.name,
+                format!(
+                    "`#[range]` is stated in 64 bits, and this field is {} bits wide",
+                    s.bits()
+                ),
+            ));
+        }
         if f.range.is_some() && !matches!(f.kind, Kind::Scalar(Scalar::U(_) | Scalar::I(_))) {
             return Err(Invalid::field(
                 &f.name,

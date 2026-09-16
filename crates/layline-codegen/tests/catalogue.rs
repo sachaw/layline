@@ -59,7 +59,7 @@ fn every_claim_a_field_makes_reaches_the_declaration() {
                 .with_range(Range::new(None, Some(255))),
         ],
     );
-    let parts = layout_parts(&l, &Root::default()).expect("renders");
+    let parts = layout_parts(&l, &[], &Root::default()).expect("renders");
     let rendered = parts.fields.to_string();
     assert!(rendered.contains("magic"), "the constant is missing: {rendered}");
     assert!(rendered.contains("range"), "the bound is missing: {rendered}");
@@ -107,7 +107,7 @@ fn an_arm_binds_the_base_its_checksum_counts_from() {
         ],
     );
     let choice = ChoiceDef::new("Summed", vec![arm]);
-    let parts = choice_parts(&choice, &Root::default()).expect("renders");
+    let parts = choice_parts(&choice, &[], &Root::default()).expect("renders");
     let codec = parts.codec.to_string();
     assert!(codec.contains("__base"), "the checksum reads `__base`: {codec}");
     assert!(codec.contains("let __base = out . len ()"), "the arm sets `__base`: {codec}");
@@ -118,10 +118,10 @@ fn the_walk_refuses_a_model_the_validator_refuses() {
     let root = Root::default();
 
     assert!(validate(&Item::Message(open_then_block())).is_err(), "the validator refuses it");
-    assert!(message_parts(&open_then_block(), &root).is_err(), "the generator rejects it too");
+    assert!(message_parts(&open_then_block(), &[], &root).is_err(), "the generator rejects it too");
 
     assert!(validate(&Item::Choice(duplicate_arms())).is_err(), "the validator refuses it");
-    assert!(choice_parts(&duplicate_arms(), &root).is_err(), "the generator rejects it too");
+    assert!(choice_parts(&duplicate_arms(), &[], &root).is_err(), "the generator rejects it too");
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn a_dispatcher_owned_prefix_reaches_the_declaration() {
     );
     validate(&Item::Layout(l.clone())).expect("the fields fill the bits after the prefix");
 
-    let parts = layout_parts(&l, &Root::default()).expect("renders");
+    let parts = layout_parts(&l, &[], &Root::default()).expect("renders");
     let rendered = parts.attrs.to_string();
     assert!(rendered.contains("prefix = 8"), "the prefix is missing: {rendered}");
 
@@ -148,7 +148,7 @@ fn a_dispatcher_owned_prefix_reaches_the_declaration() {
         Container::word(32, Endian::Be, layline_codegen::BitOrder::Msb),
         vec![Field::new("all", Kind::Scalar(Scalar::U(32)))],
     );
-    let rendered = layout_parts(&whole, &Root::default()).expect("renders").attrs.to_string();
+    let rendered = layout_parts(&whole, &[], &Root::default()).expect("renders").attrs.to_string();
     assert!(!rendered.contains("prefix"), "`prefix = 0` is omitted: {rendered}");
 }
 

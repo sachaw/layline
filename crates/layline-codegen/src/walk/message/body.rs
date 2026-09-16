@@ -65,15 +65,24 @@ pub(super) struct Item<'a> {
     /// Hidden layouts the bodies read through.
     pub(super) items: TokenStream,
     pub(super) checks: Vec<Check>,
+    /// The attribute a spare field carries, from this item's serde derive.
+    pub(super) skip: TokenStream,
 }
 
 impl<'a> Item<'a> {
-    pub(super) fn new(name: &'a str, endian: Endian, root: &'a Root, needs: &'a [Param]) -> Self {
+    pub(super) fn new(
+        name: &'a str,
+        endian: Endian,
+        root: &'a Root,
+        needs: &'a [Param],
+        skip: TokenStream,
+    ) -> Self {
         Self {
             name,
             endian,
             root,
             needs,
+            skip,
             block_n: 0,
             opt_n: 0,
             ck_n: 0,
@@ -130,6 +139,8 @@ pub(super) struct Walk<'a> {
     pub(super) env: Env,
     pub(super) slots: Vec<Slot>,
     pub(super) rows: Rows,
+    /// The attribute a spare field carries.
+    pub(super) skip: TokenStream,
 }
 
 /// Generate decode, encode and the table for `segments` in one pass.
@@ -163,6 +174,7 @@ pub(super) fn walk_segments(
         env: Env::new(root),
         slots: Vec::new(),
         rows: Rows::new(),
+        skip: item.skip.clone(),
     };
     for p in item.needs {
         let id = ident(&p.name);

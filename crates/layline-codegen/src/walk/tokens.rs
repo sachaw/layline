@@ -274,8 +274,9 @@ fn coverage_range(over: &Coverage) -> TokenStream {
 }
 
 /// One field declaration, with its docs, width attribute, `#[at]` position and value checks.
-pub fn emit_field(f: &Field, bit_addressed: bool, root: &Root) -> TokenStream {
-    let Field { name, kind, doc, stated, magic: _, range: _, visibility } = f;
+pub fn emit_field(f: &Field, bit_addressed: bool, root: &Root, skip: &TokenStream) -> TokenStream {
+    let Field { name, kind, doc, stated, magic: _, range: _, spare, visibility } = f;
+    let skip = spare.then(|| skip.clone());
     let name = ident(name);
     let doc = doc_attr(doc);
     let attrs = field_attrs(kind, bit_addressed);
@@ -283,7 +284,27 @@ pub fn emit_field(f: &Field, bit_addressed: bool, root: &Root) -> TokenStream {
     let asserts = assert_attr(f);
     let ty = kind_ty(kind, root);
     let vis = visibility_tokens(visibility);
-    quote! { #doc #attrs #at #asserts #vis #name: #ty, }
+    quote! { #doc #skip #attrs #at #asserts #vis #name: #ty, }
+}
+
+/// The attribute a spare field carries so serde leaves it out.
+///
+/// Gated exactly as the module's serde derive is, so the two cannot drift. Writes nothing when
+/// nothing derives serde.
+pub(crate) fn serde_skip(module: &[crate::Derive], item: &[crate::Derive]) -> TokenStream {
+    let serde = module
+        .iter()
+        .chain(item)
+        .find(|d| matches!(d.path.rsplit("::").next(), Some("Serialize" | "Deserialize")));
+    match serde.map(|d| &d.cfg) {
+        None => quote!(),
+        Some(None) => quote!(#[serde(skip)]),
+        Some(Some(cfg)) => match syn::parse_str::<syn::Meta>(cfg) {
+            Ok(cfg) => quote!(#[cfg_attr(#cfg, serde(skip))]),
+            // `derive_attr` refuses the predicate first, so this never reaches a generated file.
+            Err(_) => quote!(),
+        },
+    }
 }
 
 /// A field's visibility, `pub` unless the model says otherwise.
@@ -321,7 +342,7 @@ pub(crate) fn hidden_block(
 ///
 /// `#[at]` counts from the start of the record, but a block can start partway through it.
 pub(crate) fn block_field(f: &Field, root: &Root) -> TokenStream {
-    let Field { name, kind, doc: _, stated: _, magic: _, range: _, visibility: _ } = f;
+    let Field { name, kind, doc: _, stated: _, magic: _, range: _, spare: _, visibility: _ } = f;
     let name = ident(name);
     let attrs = field_attrs(kind, false);
     let asserts = assert_attr(f);
@@ -332,15 +353,21 @@ pub(crate) fn block_field(f: &Field, root: &Root) -> TokenStream {
 /// One field of a message struct, wrapped in `Option` when `optional`.
 ///
 /// It has no width attribute. The hidden layout that reads the field sets its width.
-pub fn emit_message_field(f: &Field, optional: bool, root: &Root) -> TokenStream {
+pub fn emit_message_field(
+    f: &Field,
+    optional: bool,
+    root: &Root,
+    skip: &TokenStream,
+) -> TokenStream {
     let Prelude { option, .. } = root.prelude();
-    let Field { name, kind, doc, stated: _, magic: _, range: _, visibility } = f;
+    let Field { name, kind, doc, stated: _, magic: _, range: _, spare, visibility } = f;
+    let skip = spare.then(|| skip.clone());
     let name = ident(name);
     let doc = doc_attr(doc);
     let ty = kind_ty(kind, root);
     let ty = if optional { quote!(#option<#ty>) } else { ty };
     let vis = visibility_tokens(visibility);
-    quote! { #doc #vis #name: #ty, }
+    quote! { #doc #skip #vis #name: #ty, }
 }
 
 #[cfg(test)]

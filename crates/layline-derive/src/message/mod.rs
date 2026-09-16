@@ -36,7 +36,7 @@ pub fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
         .map_err(|why| invalid(&parsed, &why))?;
     check_predicates(&parsed)?;
 
-    let parts = layline_codegen::__derive::message_parts(&msg, &parsed.root)
+    let parts = layline_codegen::__derive::message_parts(&msg, &[], &parsed.root)
         .map_err(|why| syn::Error::new(parsed.ident.span(), format!("{why}")))?;
 
     let spanned = parts.checks.into_iter().map(|c| {

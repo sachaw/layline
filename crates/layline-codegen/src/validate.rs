@@ -182,9 +182,23 @@ fn kind_paths(at: &str, kind: &Kind) -> Result<(), Invalid> {
     }
 }
 
+/// The widest field a layout can read, in bits.
+pub(crate) const WIDEST_FIELD: u64 = 128;
+
+/// The widest value a `#[range]` states, in bits: its bounds are `i64`.
+pub(crate) const WIDEST_BOUND: u64 = 64;
+
 /// Checks a field's name and type paths.
 fn field_names(f: &Field) -> Result<(), Invalid> {
     ident("field", &f.name)?;
+    if let Kind::Scalar(s @ (crate::Scalar::U(_) | crate::Scalar::I(_))) = &f.kind
+        && !(1..=WIDEST_FIELD).contains(&s.bits())
+    {
+        return Err(Invalid::field(
+            &f.name,
+            format!("{} bits wide, and a field reads 1 to {WIDEST_FIELD}", s.bits()),
+        ));
+    }
     if let Some(vis) = &f.visibility
         && !is_visibility(vis)
     {

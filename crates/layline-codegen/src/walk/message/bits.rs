@@ -96,12 +96,14 @@ fn bit_codec_check(owner: &str, f: &Field, root: &Root) -> Option<Check> {
 /// Encode writes presence bits and padding. Decode reads the bits and skips the padding.
 pub(super) fn bits_parts(
     m: &MessageDef,
+    derives: &[crate::Derive],
     root: &Root,
 ) -> Result<(MessageParts, Vec<row::SegmentDef>), Error> {
     let Prelude { ok, some, none, result, u8, u32, usize, bool, .. } = root.prelude();
     let name = ident(&m.name);
     let msb = matches!(m.bits, Some(BitOrder::Msb));
 
+    let skip = crate::walk::tokens::serde_skip(derives, &m.derives);
     let declared = bit_declared(m)?;
     let flags = bit_flags(&declared);
 
@@ -119,7 +121,7 @@ pub(super) fn bits_parts(
         let width = f.kind.width();
         let ident = ident(&f.name);
         let optional = !matches!(presence, BitPresence::Always);
-        fields.extend(emit_message_field(f, optional, root));
+        fields.extend(emit_message_field(f, optional, root, &skip));
         build.extend(quote!(#ident,));
         checks.extend(bit_codec_check(&m.name, f, root));
 

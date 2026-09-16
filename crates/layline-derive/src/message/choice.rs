@@ -171,7 +171,7 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
     layline_codegen::validate(&layline_codegen::Item::Choice(choice.clone()))
         .map_err(|why| invalid(input, &choice, &why))?;
 
-    let parts = layline_codegen::__derive::choice_parts(&choice, &root)
+    let parts = layline_codegen::__derive::choice_parts(&choice, &[], &root)
         .map_err(|why| syn::Error::new(input.ident.span(), format!("{why}")))?;
 
     let spanned = parts.checks.into_iter().map(|c| {

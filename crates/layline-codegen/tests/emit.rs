@@ -258,3 +258,81 @@ fn a_fallback_variant_states_its_own_documentation() {
     assert!(emitted.contains("/// An id this build does not carry, kept with its bytes."));
     assert!(!emitted.contains("An unknown id"), "{emitted}");
 }
+
+/// Bits the format reserves carry no information, so serde leaves them out.
+#[test]
+fn a_spare_field_is_skipped_by_serde_under_the_derives_own_cfg() {
+    use layline_codegen::Derive;
+
+    let layout = || {
+        LayoutDef::new(
+            "Word",
+            Container::word(16, Endian::Be, BitOrder::Msb),
+            vec![
+                Field::new("label", Kind::Scalar(Scalar::U(5))),
+                Field::new("spare", Kind::Scalar(Scalar::U(11))).with_spare(),
+            ],
+        )
+    };
+    let emit = |derives: Vec<Derive>| {
+        generate(&Module::new(vec![Item::Layout(layout())]).with_derives(derives))
+            .expect("emits")
+            .source
+    };
+
+    let gated = emit(vec![Derive::new("serde::Serialize").with_cfg("feature = \"serde\"")]);
+    assert!(gated.contains("#[cfg_attr(feature = \"serde\", serde(skip))]"), "{gated}");
+    assert_eq!(gated.matches("serde(skip)").count(), 1, "only the spare field:\n{gated}");
+
+    let plain = emit(vec!["serde::Serialize".into()]);
+    assert!(plain.contains("#[serde(skip)]"), "an ungated derive gates nothing:\n{plain}");
+
+    let none = emit(Vec::new());
+    assert!(!none.contains("serde"), "nothing to skip from:\n{none}");
+}
+
+/// A cryptovariable wider than 64 bits is a `u128`, which the derive reads.
+#[test]
+fn a_field_may_be_wider_than_sixty_four_bits() {
+    let layout = LayoutDef::new(
+        "J31_1",
+        Container::word(72, Endian::Be, BitOrder::Msb),
+        vec![
+            Field::new("cryptovariable_part_ii", Kind::Scalar(Scalar::U(68))),
+            Field::new("spare", Kind::Scalar(Scalar::U(4))),
+        ],
+    );
+    let emitted = generate(&Module::new(vec![Item::Layout(layout)])).expect("emits").source;
+    assert!(emitted.contains("pub cryptovariable_part_ii: u128"), "{emitted}");
+    assert!(emitted.contains("#[bits(68)]"), "{emitted}");
+}
+
+#[test]
+fn a_field_wider_than_a_u128_is_refused() {
+    use layline_codegen::Error;
+
+    let layout = LayoutDef::new(
+        "Wide",
+        Container::word(136, Endian::Be, BitOrder::Msb),
+        vec![Field::new("too_wide", Kind::Scalar(Scalar::U(136)))],
+    );
+    let Err(Error::Invalid(_, why)) = generate(&Module::new(vec![Item::Layout(layout)])) else {
+        panic!("a field wider than 128 bits must be refused");
+    };
+    assert!(format!("{why:?}").contains("a field reads 1 to 128"), "{why:?}");
+}
+
+#[test]
+fn a_range_on_a_field_wider_than_its_bounds_is_refused() {
+    use layline_codegen::{Error, Range};
+
+    let layout = LayoutDef::new(
+        "Wide",
+        Container::word(72, Endian::Be, BitOrder::Msb),
+        vec![Field::new("wide", Kind::Scalar(Scalar::U(72))).with_range(Range::new(None, Some(9)))],
+    );
+    let Err(Error::Invalid(_, why)) = generate(&Module::new(vec![Item::Layout(layout)])) else {
+        panic!("a `#[range]` on a field wider than 64 bits must be refused");
+    };
+    assert!(format!("{why:?}").contains("stated in 64 bits"), "{why:?}");
+}

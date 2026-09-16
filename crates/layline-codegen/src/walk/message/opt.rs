@@ -26,7 +26,7 @@ impl Walk<'_> {
         let ident = ident(&f.name);
         let ty = kind_ty(&f.kind, root);
         let opt_ty = quote!(#option<#ty>);
-        self.public_fields.extend(emit_message_field(f, true, root));
+        self.public_fields.extend(emit_message_field(f, true, root, &self.skip));
         self.binds.push(Bind { name: ident.clone(), ty: opt_ty, value: quote!(#ident) });
 
         let present = match when {

@@ -5,7 +5,6 @@ use quote::quote;
 use super::derive_attr;
 use super::tokens::ident;
 use super::{doc_attr, emit_field, endian_arg, path};
-#[cfg(feature = "emit")]
 use crate::Derive;
 use crate::root::Prelude;
 use crate::{BitOrder, Container, DispatchDef, EnumDef, Error, LayoutDef, Root, Scalar};
@@ -25,7 +24,7 @@ pub struct LayoutParts {
 /// # Errors
 ///
 /// [`Error::Invalid`], naming the layout, when [`validate`](crate::validate()) refuses it.
-pub fn layout_parts(l: &LayoutDef, root: &Root) -> Result<LayoutParts, Error> {
+pub fn layout_parts(l: &LayoutDef, derives: &[Derive], root: &Root) -> Result<LayoutParts, Error> {
     crate::validate::validate_layout(l).map_err(|why| Error::Invalid(l.name.clone(), why))?;
 
     let c = &l.container;
@@ -50,7 +49,8 @@ pub fn layout_parts(l: &LayoutDef, root: &Root) -> Result<LayoutParts, Error> {
     let view = l.view.then(|| quote! { , view });
     let crate_arg = root.crate_arg();
     let bit_addressed = c.is_bit_addressed();
-    let fields = l.fields.iter().map(|f| emit_field(f, bit_addressed, root));
+    let skip = super::tokens::serde_skip(derives, &l.derives);
+    let fields = l.fields.iter().map(|f| emit_field(f, bit_addressed, root, &skip));
     Ok(LayoutParts {
         attrs: quote! {
             #[derive(#root::Layout)]
@@ -74,7 +74,7 @@ pub(crate) fn emit_layout(
     let name = ident(&l.name);
     let der = derive_attr(derives, &l.derives)?;
     let doc = doc_attr(&l.doc);
-    let LayoutParts { attrs, fields } = layout_parts(l, root)?;
+    let LayoutParts { attrs, fields } = layout_parts(l, derives, root)?;
     Ok(quote! {
         #doc
         #der
@@ -340,7 +340,7 @@ mod tests {
             vec![Field::new("magic", Kind::Scalar(Scalar::U(32)))],
         );
         let Err(Error::Invalid(name, crate::Invalid::Tiling { covered_bits, declared_bits })) =
-            layout_parts(&short, &Root::default())
+            layout_parts(&short, &[], &Root::default())
         else {
             panic!("32 bits do not fill 64: the model is invalid, and validation names it");
         };
@@ -355,7 +355,7 @@ mod tests {
             Container::Bytes { bytes: 4, endian: Endian::Le },
             vec![Field::new("value", Kind::Scalar(Scalar::U(32)))],
         );
-        let parts = layout_parts(&l, &Root::default()).expect("it tiles");
+        let parts = layout_parts(&l, &[], &Root::default()).expect("it tiles");
         let attrs = parts.attrs.to_string();
         let fields = parts.fields.to_string();
         assert!(attrs.contains("layline :: Layout") && attrs.contains("bytes = 4"), "{attrs}");
@@ -411,10 +411,10 @@ mod tests {
             Container::Bytes { bytes: 2, endian: Endian::Le },
             vec![Field::new("n", Kind::Scalar(Scalar::U(16)))],
         );
-        let without = layout_parts(&l, &Root::default()).expect("lowers").attrs.to_string();
+        let without = layout_parts(&l, &[], &Root::default()).expect("lowers").attrs.to_string();
         assert!(!without.contains("view"), "{without}");
         l.view = true;
-        let with = layout_parts(&l, &Root::default()).expect("lowers").attrs.to_string();
+        let with = layout_parts(&l, &[], &Root::default()).expect("lowers").attrs.to_string();
         assert!(with.contains("# [layout (bytes = 2 , view)]"), "{with}");
     }
 }

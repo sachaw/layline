@@ -393,11 +393,11 @@ mod tests {
             derives: Vec::new(),
         };
         assert!(matches!(
-            message_parts(&msg(Coverage::from_field("nope")), &Root::default()),
+            message_parts(&msg(Coverage::from_field("nope")), &[], &Root::default()),
             Err(Error::Invalid(..)),
         ));
-        assert!(message_parts(&msg(Coverage::from_field("magic")), &Root::default()).is_ok());
-        assert!(message_parts(&msg(Coverage::whole()), &Root::default()).is_ok());
+        assert!(message_parts(&msg(Coverage::from_field("magic")), &[], &Root::default()).is_ok());
+        assert!(message_parts(&msg(Coverage::whole()), &[], &Root::default()).is_ok());
     }
 
     #[test]
@@ -430,6 +430,7 @@ mod tests {
                 doc: None,
                 derives: Vec::new(),
             },
+            &[],
             &Root::default(),
         );
         let Err(err) = out else {
@@ -462,7 +463,7 @@ mod tests {
             derives: Vec::new(),
         };
 
-        let out = message_parts(&msg(opt("b", Kind::Scalar(Scalar::U(8)))), &Root::default());
+        let out = message_parts(&msg(opt("b", Kind::Scalar(Scalar::U(8)))), &[], &Root::default());
         let Err(Error::Refused(why)) = out else {
             panic!("two presence writes over one `bool` must be refused");
         };
@@ -478,6 +479,7 @@ mod tests {
                 at: None,
                 doc: None,
             }),
+            &[],
             &Root::default(),
         );
         assert!(matches!(out, Err(Error::Refused(_))), "a count over a presence flag");

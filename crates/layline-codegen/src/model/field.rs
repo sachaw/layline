@@ -85,7 +85,7 @@ impl Stated {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Scalar {
-    /// An unsigned integer of this many bits: 8, 16, 32 or 64 in byte mode, any width in bit modes.
+    /// An unsigned integer of this many bits, at most 128: 8, 16, 32, 64 or 128 in byte mode.
     U(u64),
     /// A signed integer of this many bits, sign-extended.
     I(u64),
@@ -120,13 +120,15 @@ impl Scalar {
                 0..=8 => "u8",
                 9..=16 => "u16",
                 17..=32 => "u32",
-                _ => "u64",
+                33..=64 => "u64",
+                _ => "u128",
             },
             Scalar::I(n) => match n {
                 0..=8 => "i8",
                 9..=16 => "i16",
                 17..=32 => "i32",
-                _ => "i64",
+                33..=64 => "i64",
+                _ => "i128",
             },
         }
     }
@@ -342,6 +344,11 @@ pub struct Field {
     pub magic: Option<Vec<u8>>,
     /// The `#[range]` of allowed values.
     pub range: Option<Range>,
+    /// Whether the field is spare: bits the format reserves that carry no information.
+    ///
+    /// The bits round-trip like any other field. Serde leaves a spare field out, under the same
+    /// `cfg` as the module's serde derive.
+    pub spare: bool,
     /// The field's visibility, such as `pub(crate)`. `None` is `pub`.
     ///
     /// A field the generated type keeps in step with something else, such as a label that a
@@ -360,8 +367,15 @@ impl Field {
             stated: None,
             magic: None,
             range: None,
+            spare: false,
             visibility: None,
         }
+    }
+
+    /// Marks the field spare: its bits carry no information.
+    #[must_use]
+    pub fn with_spare(self) -> Self {
+        Self { spare: true, ..self }
     }
 
     /// Sets the visibility, such as `pub(crate)` or `""` for private.

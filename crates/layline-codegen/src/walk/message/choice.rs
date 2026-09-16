@@ -8,7 +8,6 @@ use super::body::{Bind, Item, Own, Walked, walk_segments};
 use super::cursor::too_deep;
 use super::recursion::{names_self, open_ended_expr};
 use super::table::covers_table;
-#[cfg(feature = "emit")]
 use crate::Derive;
 use crate::root::Prelude;
 #[cfg(feature = "emit")]
@@ -44,7 +43,8 @@ pub(crate) fn emit_choice(
     let name = ident(&c.name);
     let der = derive_attr(derives, &c.derives)?;
     let doc = doc_attr(&c.doc);
-    let (ChoiceParts { variants, checks, blocks, codec }, arms) = lower_choice(c, root, cyclic)?;
+    let (ChoiceParts { variants, checks, blocks, codec }, arms) =
+        lower_choice(c, derives, root, cyclic)?;
     let checks = checks.into_iter().map(|c| c.tokens);
     Ok((
         quote! {
@@ -70,13 +70,14 @@ pub(crate) fn emit_choice(
 ///
 /// [`Error::Invalid`] when [`validate`](crate::validate()) refuses it. [`Error::Refused`] for a
 /// shape that cannot be generated.
-pub fn choice_parts(c: &ChoiceDef, root: &Root) -> Result<ChoiceParts, Error> {
-    lower_choice(c, root, &[]).map(|(parts, _)| parts)
+pub fn choice_parts(c: &ChoiceDef, derives: &[Derive], root: &Root) -> Result<ChoiceParts, Error> {
+    lower_choice(c, derives, root, &[]).map(|(parts, _)| parts)
 }
 
 /// [`choice_parts`] plus each arm's rows. `cyclic` says which types on `c`'s cycles are open-ended.
 fn lower_choice(
     c: &ChoiceDef,
+    derives: &[Derive],
     root: &Root,
     cyclic: &[(String, bool)],
 ) -> Result<(ChoiceParts, Vec<row::ArmDef>), Error> {
@@ -84,7 +85,8 @@ fn lower_choice(
         root.prelude();
     crate::validate::validate_choice(c).map_err(|why| Error::Invalid(c.name.clone(), why))?;
     let name = ident(&c.name);
-    let mut item = Item::new(&c.name, c.endian, root, &[]);
+    let skip = crate::walk::tokens::serde_skip(derives, &c.derives);
+    let mut item = Item::new(&c.name, c.endian, root, &[], skip);
 
     let mut variants = TokenStream::new();
     let mut decode_arms = TokenStream::new();

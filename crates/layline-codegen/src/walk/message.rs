@@ -29,7 +29,6 @@ use cursor::too_deep;
 use recursion::{names_self, open_ended_expr, unbounded_recursion};
 use table::covers_table;
 
-#[cfg(feature = "emit")]
 use crate::Derive;
 use crate::root::Prelude;
 #[cfg(feature = "emit")]
@@ -82,7 +81,8 @@ pub(crate) fn emit_message(
     let name = ident(&m.name);
     let der = derive_attr(derives, &m.derives)?;
     let doc = doc_attr(&m.doc);
-    let (MessageParts { fields, checks, blocks, codec }, rows) = lower_message(m, root, cyclic)?;
+    let (MessageParts { fields, checks, blocks, codec }, rows) =
+        lower_message(m, derives, root, cyclic)?;
     let checks = checks.into_iter().map(|c| c.tokens);
     Ok((
         quote! {
@@ -108,23 +108,29 @@ pub(crate) fn emit_message(
 ///
 /// [`Error::Invalid`] when [`validate`](crate::validate()) refuses it. [`Error::Refused`] for a
 /// shape that cannot be generated.
-pub fn message_parts(m: &MessageDef, root: &Root) -> Result<MessageParts, Error> {
-    lower_message(m, root, &[]).map(|(parts, _)| parts)
+pub fn message_parts(
+    m: &MessageDef,
+    derives: &[Derive],
+    root: &Root,
+) -> Result<MessageParts, Error> {
+    lower_message(m, derives, root, &[]).map(|(parts, _)| parts)
 }
 
 /// [`message_parts`] plus the table rows. `cyclic` says which types on `m`'s cycles are open-ended.
 fn lower_message(
     m: &MessageDef,
+    derives: &[Derive],
     root: &Root,
     cyclic: &[(String, bool)],
 ) -> Result<(MessageParts, Vec<row::SegmentDef>), Error> {
     let Prelude { ok, result, u8, u32, usize, bool, .. } = root.prelude();
     crate::validate::validate_message(m).map_err(|why| Error::Invalid(m.name.clone(), why))?;
     if m.bits.is_some() {
-        return bits_parts(m, root);
+        return bits_parts(m, derives, root);
     }
     let name = ident(&m.name);
-    let mut item = Item::new(&m.name, m.endian, root, &m.needs);
+    let skip = super::tokens::serde_skip(derives, &m.derives);
+    let mut item = Item::new(&m.name, m.endian, root, &m.needs, skip);
     if let Some(r) = references(&m.segments)
         .into_iter()
         .find(|r| !r.avoidable && names_self(r.to.name(), &m.name))
