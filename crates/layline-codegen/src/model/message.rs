@@ -4,6 +4,8 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use super::Derive;
+
 use super::{BitOrder, By, Coverage, Discriminant, Endian, Field, Kind, Len, Scalar, Stated};
 
 /// How many elements a collection has.
@@ -446,6 +448,10 @@ pub struct MessageDef {
     pub needs: Vec<Param>,
     /// The segments, in wire order.
     pub segments: Vec<Segment>,
+    /// Documentation.
+    pub doc: Option<String>,
+    /// Derives for this message, written after the module's.
+    pub derives: Vec<Derive>,
 }
 
 impl MessageDef {
@@ -458,7 +464,21 @@ impl MessageDef {
             bits: None,
             needs: Vec::new(),
             segments,
+            doc: None,
+            derives: Vec::new(),
         }
+    }
+
+    /// Sets the documentation.
+    #[must_use]
+    pub fn with_doc(self, doc: &str) -> Self {
+        Self { doc: Some(String::from(doc)), ..self }
+    }
+
+    /// Sets the derives written on this message, after the module's.
+    #[must_use]
+    pub fn with_derives(self, derives: Vec<Derive>) -> Self {
+        Self { derives, ..self }
     }
 
     /// Sets the parameters.

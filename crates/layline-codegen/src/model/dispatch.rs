@@ -3,6 +3,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use super::Derive;
+
 use super::Scalar;
 
 /// Bodies selected by an id the enclosing message has already read, as `#[derive(Dispatch)]`
@@ -20,13 +22,28 @@ pub struct DispatchDef {
     pub other: String,
     /// Documentation.
     pub doc: Option<String>,
+    /// Derives for this catalogue, written after the module's.
+    pub derives: Vec<Derive>,
 }
 
 impl DispatchDef {
     /// A dispatch with its fallback variant named `Unknown`.
     #[must_use]
     pub fn new(name: &str, id: Scalar, arms: Vec<DispatchArm>) -> Self {
-        Self { name: String::from(name), id, arms, other: String::from("Unknown"), doc: None }
+        Self {
+            name: String::from(name),
+            id,
+            arms,
+            other: String::from("Unknown"),
+            doc: None,
+            derives: Vec::new(),
+        }
+    }
+
+    /// Sets the derives written on this catalogue, after the module's.
+    #[must_use]
+    pub fn with_derives(self, derives: Vec<Derive>) -> Self {
+        Self { derives, ..self }
     }
 
     /// Renames the fallback variant.

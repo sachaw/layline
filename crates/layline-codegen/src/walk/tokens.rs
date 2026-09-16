@@ -17,17 +17,19 @@ pub fn collection_ty(kind: &Kind) -> String {
 /// `#[derive(Debug, Clone, PartialEq, ...)]` for a generated item, then one `#[cfg_attr(..)]`
 /// for each predicate the derives name.
 ///
+/// The item's own derives follow the module's.
+///
 /// # Errors
 ///
 /// [`Error::Invalid`], naming `derives`, for an entry that is not a path a `#[derive]` can name,
 /// a `cfg` that is not a predicate, or a path listed twice.
 #[cfg(feature = "emit")]
-pub fn derive_attr(derives: &[crate::emit::Derive]) -> Result<TokenStream, Error> {
+pub fn derive_attr(module: &[crate::Derive], item: &[crate::Derive]) -> Result<TokenStream, Error> {
     let mut always = TokenStream::new();
     let mut gated: Vec<(String, syn::Meta, Vec<syn::Path>)> = Vec::new();
     let mut listed: Vec<&str> = Vec::new();
 
-    for d in derives {
+    for d in module.iter().chain(item) {
         let path: syn::Path = syn::parse_str(&d.path).map_err(|_| {
             invalid(format!(
                 "`{}` is not a valid derive path. \

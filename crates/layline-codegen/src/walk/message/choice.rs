@@ -9,7 +9,7 @@ use super::cursor::too_deep;
 use super::recursion::{names_self, open_ended_expr};
 use super::table::covers_table;
 #[cfg(feature = "emit")]
-use crate::emit::Derive;
+use crate::Derive;
 use crate::root::Prelude;
 #[cfg(feature = "emit")]
 use crate::walk::derive_attr;
@@ -42,7 +42,7 @@ pub(crate) fn emit_choice(
     cyclic: &[(String, bool)],
 ) -> Result<(TokenStream, Vec<row::ArmDef>), Error> {
     let name = ident(&c.name);
-    let der = derive_attr(derives)?;
+    let der = derive_attr(derives, &c.derives)?;
     let doc = doc_attr(&c.doc);
     let (ChoiceParts { variants, checks, blocks, codec }, arms) = lower_choice(c, root, cyclic)?;
     let checks = checks.into_iter().map(|c| c.tokens);

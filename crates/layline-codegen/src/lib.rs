@@ -31,8 +31,9 @@ mod source;
 pub use layline_core::table::StatedUnit;
 pub use model::{
     Absence, Arm, BitOrder, By, ChoiceDef, Collection, Container, Count, CoverFrom, CoverTo,
-    Coverage, Covered, Discriminant, DispatchArm, DispatchDef, Endian, EnumDef, Field, Item, Kind,
-    LayoutDef, Len, MessageDef, Param, Presence, Range, Scalar, Segment, Stated, Unit, Variant,
+    Coverage, Covered, Derive, Discriminant, DispatchArm, DispatchDef, Endian, EnumDef, Field,
+    Item, Kind, LayoutDef, Len, MessageDef, Param, Presence, Range, Scalar, Segment, Stated, Unit,
+    Variant,
 };
 #[cfg(feature = "walk")]
 pub use root::{Root, Spelling};

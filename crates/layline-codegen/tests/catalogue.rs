@@ -195,3 +195,15 @@ fn a_body_catalogue_is_checked_before_it_is_tokens() {
         "an arm cannot be both listed and the fallback",
     );
 }
+
+#[test]
+fn a_default_variant_has_to_be_one_of_the_variants() {
+    let e = base().with_other("Other").with_default("Missing");
+    assert!(refused(&e).contains("`Missing` is not one of its variants"));
+}
+
+#[test]
+fn the_fallback_variant_cannot_be_the_default() {
+    let e = base().with_other("Other").with_default("Other");
+    assert!(refused(&e).contains("the fallback, which carries a value"));
+}

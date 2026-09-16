@@ -30,10 +30,12 @@ use recursion::{names_self, open_ended_expr, unbounded_recursion};
 use table::covers_table;
 
 #[cfg(feature = "emit")]
-use crate::emit::Derive;
+use crate::Derive;
 use crate::root::Prelude;
 #[cfg(feature = "emit")]
 use crate::walk::derive_attr;
+#[cfg(feature = "emit")]
+use crate::walk::doc_attr;
 use crate::walk::tokens::ident;
 use crate::walk::{references, row, scalar_ty};
 use crate::{Error, MessageDef, Root};
@@ -78,11 +80,13 @@ pub(crate) fn emit_message(
     cyclic: &[(String, bool)],
 ) -> Result<(TokenStream, Vec<row::SegmentDef>), Error> {
     let name = ident(&m.name);
-    let der = derive_attr(derives)?;
+    let der = derive_attr(derives, &m.derives)?;
+    let doc = doc_attr(&m.doc);
     let (MessageParts { fields, checks, blocks, codec }, rows) = lower_message(m, root, cyclic)?;
     let checks = checks.into_iter().map(|c| c.tokens);
     Ok((
         quote! {
+            #doc
             #der
             pub struct #name {
                 #fields

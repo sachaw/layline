@@ -2,6 +2,7 @@
 
 mod choice;
 mod coverage;
+mod derive;
 mod dispatch;
 mod enumeration;
 mod field;
@@ -10,6 +11,7 @@ mod message;
 
 pub use choice::{Arm, ChoiceDef, Discriminant};
 pub use coverage::{CoverFrom, CoverTo, Coverage, Covered};
+pub use derive::Derive;
 pub use dispatch::{DispatchArm, DispatchDef};
 pub use enumeration::{EnumDef, Variant};
 pub use field::{By, Field, Kind, Len, Range, Scalar, Stated};

@@ -16,7 +16,7 @@ use quote::quote;
 pub use committed::{Change, Committed, Drift, Drifted};
 
 use crate::walk::{emit_choice, emit_dispatch, emit_enum, emit_layout, emit_message};
-use crate::{Error, Invalid, Item, Root, Spelling};
+use crate::{Derive, Error, Invalid, Item, Root, Spelling};
 
 /// A module to generate.
 #[derive(Debug, Clone)]
@@ -83,54 +83,6 @@ impl Module {
     #[must_use]
     pub fn with_derives(self, derives: Vec<Derive>) -> Self {
         Self { derives, ..self }
-    }
-}
-
-/// A derive written on every generated struct and enum.
-///
-/// A bare path derives unconditionally. [`with_cfg`](Self::with_cfg) puts the derive behind a
-/// `cfg` predicate, which is how an optional dependency reaches generated code.
-///
-/// ```
-/// use layline_codegen::emit::Derive;
-///
-/// let always: Derive = "Copy".into();
-/// let gated = Derive::new("serde::Serialize").with_cfg("feature = \"serde\"");
-/// assert_eq!(always.cfg, None);
-/// assert_eq!(gated.path, "serde::Serialize");
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Derive {
-    /// The derive path, such as `serde::Serialize`.
-    pub path: String,
-    /// The `cfg` predicate the derive sits behind, such as `feature = "serde"`.
-    pub cfg: Option<String>,
-}
-
-impl Derive {
-    /// An unconditional derive of `path`.
-    #[must_use]
-    pub fn new(path: &str) -> Self {
-        Self { path: String::from(path), cfg: None }
-    }
-
-    /// Sets [`cfg`](Self::cfg).
-    #[must_use]
-    pub fn with_cfg(self, cfg: &str) -> Self {
-        Self { cfg: Some(String::from(cfg)), ..self }
-    }
-}
-
-impl From<&str> for Derive {
-    fn from(path: &str) -> Self {
-        Self::new(path)
-    }
-}
-
-impl From<String> for Derive {
-    fn from(path: String) -> Self {
-        Self { path, cfg: None }
     }
 }
 
@@ -302,6 +254,7 @@ mod tests {
                     other: None,
                     other_bytes: None,
                     doc: None,
+                    derives: Vec::new(),
                 }),
                 Item::Message(MessageDef {
                     name: "VelocityReport".into(),
@@ -316,6 +269,8 @@ mod tests {
                         window: None,
                         doc: None,
                     }],
+                    doc: None,
+                    derives: Vec::new(),
                 }),
             ],
             ..Module::new(Vec::new())
@@ -384,6 +339,7 @@ mod tests {
                 other: None,
                 other_bytes: None,
                 doc: None,
+                derives: Vec::new(),
             })],
             ..Module::new(Vec::new())
         };
@@ -432,6 +388,8 @@ mod tests {
                     doc: None,
                 },
             ],
+            doc: None,
+            derives: Vec::new(),
         };
         assert!(matches!(
             message_parts(&msg(Coverage::from_field("nope")), &Root::default()),
@@ -468,6 +426,8 @@ mod tests {
                         doc: None,
                     },
                 ],
+                doc: None,
+                derives: Vec::new(),
             },
             &Root::default(),
         );
@@ -497,6 +457,8 @@ mod tests {
                 opt("a", Kind::Scalar(Scalar::U(8))),
                 extra,
             ],
+            doc: None,
+            derives: Vec::new(),
         };
 
         let out = message_parts(&msg(opt("b", Kind::Scalar(Scalar::U(8)))), &Root::default());
@@ -535,6 +497,7 @@ mod tests {
                     other: Some("Unknown".into()),
                     other_bytes: None,
                     doc: None,
+                    derives: Vec::new(),
                 }),
                 Item::Message(MessageDef {
                     name: "Packet".into(),
@@ -553,6 +516,8 @@ mod tests {
                         },
                         Segment::Block(vec![Field::new("trailer", Kind::Scalar(Scalar::U(8)))]),
                     ],
+                    doc: None,
+                    derives: Vec::new(),
                 }),
             ],
             ..Module::new(Vec::new())

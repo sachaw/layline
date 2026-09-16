@@ -4,6 +4,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use super::Derive;
+
 use layline_core::table::StatedUnit;
 
 use super::{Field, Kind, Scalar, Stated};
@@ -334,13 +336,36 @@ pub struct LayoutDef {
     pub fields: Vec<Field>,
     /// Whether to generate a `<Name>View` that reads fields in place: `#[layout(.., view)]`.
     pub view: bool,
+    /// Documentation.
+    pub doc: Option<String>,
+    /// Derives for this layout, written after the module's.
+    pub derives: Vec<Derive>,
 }
 
 impl LayoutDef {
     /// A layout with no view.
     #[must_use]
     pub fn new(name: &str, container: Container, fields: Vec<Field>) -> Self {
-        Self { name: String::from(name), container, fields, view: false }
+        Self {
+            name: String::from(name),
+            container,
+            fields,
+            view: false,
+            doc: None,
+            derives: Vec::new(),
+        }
+    }
+
+    /// Sets the documentation.
+    #[must_use]
+    pub fn with_doc(self, doc: &str) -> Self {
+        Self { doc: Some(String::from(doc)), ..self }
+    }
+
+    /// Sets the derives written on this layout, after the module's.
+    #[must_use]
+    pub fn with_derives(self, derives: Vec<Derive>) -> Self {
+        Self { derives, ..self }
     }
 
     /// Adds a `<Name>View`.

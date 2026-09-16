@@ -71,6 +71,19 @@ pub(crate) fn validate_enum(e: &EnumDef) -> Result<(), Invalid> {
     if let Some(other) = &e.other {
         ident("fallback variant", other)?;
     }
+    if let Some(default) = &e.default {
+        if Some(default) == e.other.as_ref() {
+            return Err(Invalid::Other(format!(
+                "catalogue `{name}`: the default variant `{default}` is the fallback, which \
+                 carries a value. Name a listed variant"
+            )));
+        }
+        if !e.variants.iter().any(|v| &v.name == default) {
+            return Err(Invalid::Other(format!(
+                "catalogue `{name}`: the default variant `{default}` is not one of its variants"
+            )));
+        }
+    }
     let (bits, signed) = match e.repr {
         Scalar::U(b) => (b, false),
         Scalar::I(b) => (b, true),

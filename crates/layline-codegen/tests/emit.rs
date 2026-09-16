@@ -5,7 +5,8 @@
 #![cfg(feature = "emit")]
 
 use layline_codegen::__derive::field_rows;
-use layline_codegen::emit::{Derive, Module, generate};
+use layline_codegen::Derive;
+use layline_codegen::emit::{Module, generate};
 use layline_codegen::{BitOrder, Container, Endian, Field, Item, Kind, LayoutDef, Scalar, Stated};
 
 #[test]
@@ -96,4 +97,75 @@ fn a_gated_derive_is_one_cfg_attr_per_predicate() {
         "the two serde derives share one attribute:\n{emitted}"
     );
     assert!(emitted.contains("#[cfg_attr(test, derive(arbitrary::Arbitrary))]"), "{emitted}");
+}
+
+/// An enum takes the derives it is given and no others, as a layout does.
+#[test]
+fn an_enum_derives_only_what_it_is_given() {
+    use layline_codegen::{EnumDef, Variant};
+
+    let catalogue = EnumDef::new("Mode", Scalar::U(2), vec![Variant::new(0, "Idle")])
+        .with_other("Unlisted")
+        .with_derives(vec!["Copy".into(), "Eq".into()]);
+    let emitted = generate(&Module::new(vec![Item::Enum(catalogue)])).expect("emits").source;
+    assert!(emitted.contains("#[derive(Debug, Clone, PartialEq, Copy, Eq)]"), "{emitted}");
+    assert_eq!(emitted.matches("Copy").count(), 1, "one derive, not two:\n{emitted}");
+}
+
+/// A module holding both kinds states `Copy` once, and both items take it.
+#[test]
+fn an_item_adds_its_own_derives_to_the_modules() {
+    use layline_codegen::{EnumDef, Variant};
+
+    let catalogue = EnumDef::new("Mode", Scalar::U(2), vec![Variant::new(0, "Idle")])
+        .with_other("Unlisted")
+        .with_default("Idle")
+        .with_derives(vec!["Default".into()]);
+    let layout = LayoutDef::new(
+        "Head",
+        Container::Bytes { bytes: 2, endian: Endian::Be },
+        vec![Field::new("len", Kind::Scalar(Scalar::U(16)))],
+    )
+    .with_doc("The header, from figure 30.");
+
+    let module = Module::new(vec![Item::Enum(catalogue), Item::Layout(layout)])
+        .with_derives(vec!["Copy".into(), "Eq".into()]);
+    let emitted = generate(&module).expect("emits").source;
+
+    assert!(emitted.contains("#[derive(Debug, Clone, PartialEq, Copy, Eq, Default)]"), "{emitted}");
+    assert!(emitted.contains("#[default]"), "the default variant is marked:\n{emitted}");
+    assert!(emitted.contains("/// The header, from figure 30."), "{emitted}");
+    assert!(
+        emitted.contains("#[derive(Debug, Clone, PartialEq, Copy, Eq)]"),
+        "the layout takes the module's derives alone:\n{emitted}"
+    );
+}
+
+#[test]
+fn a_default_variant_and_a_default_derive_have_to_agree() {
+    use layline_codegen::{Derive, EnumDef, Error, Variant};
+
+    let catalogue =
+        || EnumDef::new("Mode", Scalar::U(2), vec![Variant::new(0, "Idle")]).with_other("Unlisted");
+    let emit = |e: EnumDef, derives: Vec<Derive>| {
+        generate(&Module::new(vec![Item::Enum(e)]).with_derives(derives))
+    };
+
+    let Err(Error::Invalid(_, why)) = emit(catalogue().with_default("Idle"), Vec::new()) else {
+        panic!("a default variant with nothing deriving `Default` must be refused");
+    };
+    assert!(format!("{why:?}").contains("Add an ungated `Default`"), "{why:?}");
+
+    let Err(Error::Invalid(_, why)) = emit(catalogue(), vec!["Default".into()]) else {
+        panic!("deriving `Default` with no default variant must be refused");
+    };
+    assert!(format!("{why:?}").contains("with_default"), "{why:?}");
+
+    let gated = vec![Derive::new("Default").with_cfg("feature = \"x\"")];
+    let Err(Error::Invalid(_, why)) = emit(catalogue().with_default("Idle"), gated) else {
+        panic!("a gated `Default` leaves `#[default]` without a derive when the cfg is off");
+    };
+    assert!(format!("{why:?}").contains("ungated"), "{why:?}");
+
+    emit(catalogue().with_default("Idle"), vec!["Default".into()]).expect("agreeing is accepted");
 }

@@ -6,7 +6,7 @@ use super::derive_attr;
 use super::tokens::ident;
 use super::{doc_attr, emit_field, endian_arg, path};
 #[cfg(feature = "emit")]
-use crate::emit::Derive;
+use crate::Derive;
 use crate::root::Prelude;
 use crate::{BitOrder, Container, DispatchDef, EnumDef, Error, LayoutDef, Root, Scalar};
 
@@ -72,9 +72,11 @@ pub(crate) fn emit_layout(
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let name = ident(&l.name);
-    let der = derive_attr(derives)?;
+    let der = derive_attr(derives, &l.derives)?;
+    let doc = doc_attr(&l.doc);
     let LayoutParts { attrs, fields } = layout_parts(l, root)?;
     Ok(quote! {
+        #doc
         #der
         #attrs
         pub struct #name {
@@ -111,7 +113,8 @@ pub fn enum_parts(e: &EnumDef, root: &Root) -> Result<EnumParts, Error> {
     let variants = e.variants.iter().map(|v| {
         let variant = ident(&v.name);
         let vdoc = doc_attr(&Some(v.doc.clone().unwrap_or_else(|| format!("{}.", v.value))));
-        quote! { #vdoc #variant, }
+        let default = (e.default.as_deref() == Some(v.name.as_str())).then(|| quote!(#[default]));
+        quote! { #vdoc #default #variant, }
     });
     let other_ident = e.other.as_deref().map(ident);
     let other = other_ident.as_ref().map(|other| {
@@ -198,19 +201,45 @@ pub(crate) fn emit_enum(
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let name = ident(&e.name);
-    let der = derive_attr(derives)?;
+    default_agrees(e, derives)?;
+    let der = derive_attr(derives, &e.derives)?;
     let doc = doc_attr(&e.doc);
     let EnumParts { variants, codec, .. } = enum_parts(e, root)?;
     Ok(quote! {
         #doc
         #der
-        #[derive(Copy, Eq)]
         pub enum #name {
             #variants
         }
 
         #codec
     })
+}
+
+/// Refuses an enumeration whose `#[default]` variant and `Default` derive disagree.
+///
+/// A `cfg`-gated `Default` does not count: with the predicate off, `#[default]` has no derive to
+/// belong to and the generated code does not compile.
+#[cfg(feature = "emit")]
+fn default_agrees(e: &EnumDef, module: &[Derive]) -> Result<(), Error> {
+    let derived = module
+        .iter()
+        .chain(&e.derives)
+        .any(|d| d.cfg.is_none() && d.path.rsplit("::").next() == Some("Default"));
+    let invalid = |why: alloc::string::String| {
+        Err(Error::Invalid(e.name.clone(), crate::Invalid::Other(why)))
+    };
+    match (&e.default, derived) {
+        (Some(variant), false) => invalid(format!(
+            "`{variant}` is the default variant, and nothing derives `Default`. \
+             Add an ungated `Default` to the derives"
+        )),
+        (None, true) => invalid(alloc::string::String::from(
+            "`Default` is derived and no variant is the default. \
+             Mark one with `EnumDef::with_default`",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// A [`DispatchDef`] as token parts, for a caller that writes its own enum line.
@@ -267,7 +296,7 @@ pub(crate) fn emit_dispatch(
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let name = ident(&d.name);
-    let der = derive_attr(derives)?;
+    let der = derive_attr(derives, &d.derives)?;
     let doc = doc_attr(&d.doc);
     let DispatchParts { arms, attrs } = dispatch_parts(d, root)?;
     Ok(quote! {

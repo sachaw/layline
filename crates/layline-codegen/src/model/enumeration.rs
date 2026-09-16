@@ -3,6 +3,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use super::Derive;
+
 use super::Scalar;
 
 /// An enumeration of named values, with an optional fallback variant for unlisted values.
@@ -19,13 +21,39 @@ pub struct EnumDef {
     pub other: Option<String>,
     /// Documentation.
     pub doc: Option<String>,
+    /// The variant marked `#[default]`, which needs an ungated `Default` derive.
+    pub default: Option<String>,
+    /// Derives for this enumeration, written after the module's.
+    pub derives: Vec<Derive>,
 }
 
 impl EnumDef {
     /// An enumeration with no fallback, so it must list every value.
     #[must_use]
     pub fn new(name: &str, repr: Scalar, variants: Vec<Variant>) -> Self {
-        Self { name: String::from(name), repr, variants, other: None, doc: None }
+        Self {
+            name: String::from(name),
+            repr,
+            variants,
+            other: None,
+            doc: None,
+            default: None,
+            derives: Vec::new(),
+        }
+    }
+
+    /// Marks `variant` `#[default]`, which the derives must match with an ungated `Default`.
+    ///
+    /// The variant must be a listed one, not the fallback, which carries a value.
+    #[must_use]
+    pub fn with_default(self, variant: &str) -> Self {
+        Self { default: Some(String::from(variant)), ..self }
+    }
+
+    /// Sets the derives written on this enumeration, after the module's.
+    #[must_use]
+    pub fn with_derives(self, derives: Vec<Derive>) -> Self {
+        Self { derives, ..self }
     }
 
     /// Adds a fallback variant `other(repr)` that holds any unlisted value.

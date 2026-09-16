@@ -3,6 +3,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use super::Derive;
+
 use super::{Endian, Segment};
 
 /// What a switch selects on.
@@ -74,6 +76,8 @@ pub struct ChoiceDef {
     pub other_bytes: Option<usize>,
     /// Documentation.
     pub doc: Option<String>,
+    /// Derives for this choice, written after the module's.
+    pub derives: Vec<Derive>,
 }
 
 impl ChoiceDef {
@@ -87,7 +91,14 @@ impl ChoiceDef {
             other: None,
             other_bytes: None,
             doc: None,
+            derives: Vec::new(),
         }
+    }
+
+    /// Sets the derives written on this choice, after the module's.
+    #[must_use]
+    pub fn with_derives(self, derives: Vec<Derive>) -> Self {
+        Self { derives, ..self }
     }
 
     /// Sets the byte order.

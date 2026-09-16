@@ -115,9 +115,10 @@ fn a_module_string_that_does_not_parse_is_invalid() {
 #[cfg(feature = "emit")]
 #[test]
 fn a_derive_that_cannot_be_written_is_invalid() {
+    use layline_codegen::Derive;
     use layline_codegen::Error;
     use layline_codegen::Item;
-    use layline_codegen::emit::{Derive, Module, generate};
+    use layline_codegen::emit::{Module, generate};
 
     let item = || Item::Layout(bytes(1, vec![Field::new("a", Kind::Scalar(Scalar::U(8)))]));
 
