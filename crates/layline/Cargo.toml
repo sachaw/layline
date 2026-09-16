@@ -1,0 +1,34 @@
+[package]
+name = "layline"
+description = "Binary wire formats as Rust types."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+include = ["/src", "/LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["derive", "alloc"]
+serde = ["layline-core/serde"]
+derive = ["dep:layline-derive"]
+alloc = ["layline-core/alloc"]
+frame = ["layline-core/frame"]
+num = ["layline-core/num"]
+
+[dependencies]
+layline-core = { workspace = true }
+layline-derive = { workspace = true, optional = true }
+
+[dev-dependencies]
+layline-core = { path = "../layline-core", features = ["alloc", "frame", "num"] }
+layline-codegen = { path = "../layline-codegen" }

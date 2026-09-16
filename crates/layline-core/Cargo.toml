@@ -1,0 +1,26 @@
+[package]
+name = "layline-core"
+description = "Runtime for layline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/layline-core"
+keywords.workspace = true
+categories.workspace = true
+include = ["/src", "/LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+frame = []
+num = []
+alloc = []
+serde = ["dep:serde_core"]
+
+[dependencies]
+serde_core = { version = "1", default-features = false, optional = true }

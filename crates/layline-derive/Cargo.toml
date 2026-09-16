@@ -1,0 +1,33 @@
+[package]
+name = "layline-derive"
+description = "Derive macros for layline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/layline-derive"
+keywords.workspace = true
+categories.workspace = true
+include = ["/src", "/LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full"] }
+
+layline-codegen = { path = "../layline-codegen", version = "=0.1.0", default-features = false, features = [
+    "walk",
+] }
+
+[dev-dependencies]
+layline = { path = "../layline", features = ["alloc"] }
+layline-core = { path = "../layline-core", features = ["num"] }
