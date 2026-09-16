@@ -205,3 +205,56 @@ fn a_fallback_body_has_to_be_a_type_path() {
     };
     assert!(format!("{why:?}").contains("not a Rust type path"), "{why:?}");
 }
+
+/// A field the type keeps in step with something else is not the caller's to set.
+#[test]
+fn a_field_states_its_own_visibility() {
+    let layout = LayoutDef::new(
+        "J12_5I",
+        Container::word(16, Endian::Be, BitOrder::Msb),
+        vec![
+            Field::new("label", Kind::Scalar(Scalar::U(5))).with_visibility("pub(crate)"),
+            Field::new("sublabel", Kind::Scalar(Scalar::U(3))).with_visibility(""),
+            Field::new("track_number", Kind::Scalar(Scalar::U(8))),
+        ],
+    );
+    let emitted = generate(&Module::new(vec![Item::Layout(layout)])).expect("emits").source;
+    assert!(emitted.contains("pub(crate) label: u8"), "{emitted}");
+    assert!(emitted.contains("sublabel: u8"), "{emitted}");
+    assert!(!emitted.contains("pub sublabel"), "an empty visibility is private:\n{emitted}");
+    assert!(emitted.contains("pub track_number: u8"), "the default is unchanged:\n{emitted}");
+}
+
+#[test]
+fn a_visibility_has_to_be_one_rust_writes() {
+    use layline_codegen::Error;
+
+    let layout = LayoutDef::new(
+        "Head",
+        Container::Bytes { bytes: 1, endian: Endian::Be },
+        vec![Field::new("a", Kind::Scalar(Scalar::U(8))).with_visibility("publicish")],
+    );
+    let Err(Error::Invalid(_, why)) = generate(&Module::new(vec![Item::Layout(layout)])) else {
+        panic!("a visibility Rust cannot write must be refused");
+    };
+    assert!(format!("{why:?}").contains("not a Rust visibility"), "{why:?}");
+}
+
+/// The fallback carries the catalogue's own sentence about unlisted values.
+#[test]
+fn a_fallback_variant_states_its_own_documentation() {
+    use layline_codegen::{DispatchArm, DispatchDef, EnumDef, Variant};
+
+    let catalogue = EnumDef::new("Mode", Scalar::U(2), vec![Variant::new(0, "Idle")])
+        .with_other("Unlisted")
+        .with_other_doc("A code this catalogue does not list, kept rather than lost.");
+    let emitted = generate(&Module::new(vec![Item::Enum(catalogue)])).expect("emits").source;
+    assert!(emitted.contains("/// A code this catalogue does not list, kept rather than lost."));
+    assert!(!emitted.contains("An undefined value"), "{emitted}");
+
+    let frame = DispatchDef::new("Frame", Scalar::U(8), vec![DispatchArm::new(1, "Ping", "Ping")])
+        .with_other_doc("An id this build does not carry, kept with its bytes.");
+    let emitted = generate(&Module::new(vec![Item::Dispatch(frame)])).expect("emits").source;
+    assert!(emitted.contains("/// An id this build does not carry, kept with its bytes."));
+    assert!(!emitted.contains("An unknown id"), "{emitted}");
+}

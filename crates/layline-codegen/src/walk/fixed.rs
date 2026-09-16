@@ -118,10 +118,12 @@ pub fn enum_parts(e: &EnumDef, root: &Root) -> Result<EnumParts, Error> {
     });
     let other_ident = e.other.as_deref().map(ident);
     let other = other_ident.as_ref().map(|other| {
-        quote! {
-            /// An undefined value, kept as its raw number.
-            #other(#repr),
-        }
+        let odoc = doc_attr(&Some(
+            e.other_doc
+                .clone()
+                .unwrap_or_else(|| String::from("An undefined value, kept as its raw number.")),
+        ));
+        quote! { #odoc #other(#repr), }
     });
 
     let from_arms = e.variants.iter().map(|v| {
@@ -281,10 +283,13 @@ pub fn dispatch_parts(d: &DispatchDef, root: &Root) -> Result<DispatchParts, Err
         let k = Literal::u32_unsuffixed(d.prefix);
         quote! { , prefix = #k }
     });
+    let other_doc = doc_attr(&Some(
+        d.other_doc.clone().unwrap_or_else(|| String::from("An unknown id, kept with its body.")),
+    ));
     Ok(DispatchParts {
         arms: quote! {
             #(#arms)*
-            /// An unknown id, kept with its body.
+            #other_doc
             #[other]
             #other { id: #id_ty, body: #body },
         },

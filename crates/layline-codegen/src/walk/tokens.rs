@@ -275,14 +275,27 @@ fn coverage_range(over: &Coverage) -> TokenStream {
 
 /// One field declaration, with its docs, width attribute, `#[at]` position and value checks.
 pub fn emit_field(f: &Field, bit_addressed: bool, root: &Root) -> TokenStream {
-    let Field { name, kind, doc, stated, magic: _, range: _ } = f;
+    let Field { name, kind, doc, stated, magic: _, range: _, visibility } = f;
     let name = ident(name);
     let doc = doc_attr(doc);
     let attrs = field_attrs(kind, bit_addressed);
     let at = stated_attr(*stated);
     let asserts = assert_attr(f);
     let ty = kind_ty(kind, root);
-    quote! { #doc #attrs #at #asserts pub #name: #ty, }
+    let vis = visibility_tokens(visibility);
+    quote! { #doc #attrs #at #asserts #vis #name: #ty, }
+}
+
+/// A field's visibility, `pub` unless the model says otherwise.
+fn visibility_tokens(visibility: &Option<alloc::string::String>) -> TokenStream {
+    match visibility {
+        Some(vis) => {
+            let vis: syn::Visibility =
+                syn::parse_str(vis).expect("`validate` admits only visibilities");
+            quote!(#vis)
+        }
+        None => quote!(pub),
+    }
 }
 
 /// A message's hidden `#[derive(Layout)]` block, checked by the derive like any layout.
@@ -308,7 +321,7 @@ pub(crate) fn hidden_block(
 ///
 /// `#[at]` counts from the start of the record, but a block can start partway through it.
 pub(crate) fn block_field(f: &Field, root: &Root) -> TokenStream {
-    let Field { name, kind, doc: _, stated: _, magic: _, range: _ } = f;
+    let Field { name, kind, doc: _, stated: _, magic: _, range: _, visibility: _ } = f;
     let name = ident(name);
     let attrs = field_attrs(kind, false);
     let asserts = assert_attr(f);
@@ -321,12 +334,13 @@ pub(crate) fn block_field(f: &Field, root: &Root) -> TokenStream {
 /// It has no width attribute. The hidden layout that reads the field sets its width.
 pub fn emit_message_field(f: &Field, optional: bool, root: &Root) -> TokenStream {
     let Prelude { option, .. } = root.prelude();
-    let Field { name, kind, doc, stated: _, magic: _, range: _ } = f;
+    let Field { name, kind, doc, stated: _, magic: _, range: _, visibility } = f;
     let name = ident(name);
     let doc = doc_attr(doc);
     let ty = kind_ty(kind, root);
     let ty = if optional { quote!(#option<#ty>) } else { ty };
-    quote! { #doc pub #name: #ty, }
+    let vis = visibility_tokens(visibility);
+    quote! { #doc #vis #name: #ty, }
 }
 
 #[cfg(test)]

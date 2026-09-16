@@ -342,13 +342,32 @@ pub struct Field {
     pub magic: Option<Vec<u8>>,
     /// The `#[range]` of allowed values.
     pub range: Option<Range>,
+    /// The field's visibility, such as `pub(crate)`. `None` is `pub`.
+    ///
+    /// A field the generated type keeps in step with something else, such as a label that a
+    /// catalogue arm already decided, is not the caller's to set.
+    pub visibility: Option<String>,
 }
 
 impl Field {
     /// A field with no documentation or attributes.
     #[must_use]
     pub fn new(name: &str, kind: Kind) -> Self {
-        Self { name: String::from(name), kind, doc: None, stated: None, magic: None, range: None }
+        Self {
+            name: String::from(name),
+            kind,
+            doc: None,
+            stated: None,
+            magic: None,
+            range: None,
+            visibility: None,
+        }
+    }
+
+    /// Sets the visibility, such as `pub(crate)` or `""` for private.
+    #[must_use]
+    pub fn with_visibility(self, visibility: &str) -> Self {
+        Self { visibility: Some(String::from(visibility)), ..self }
     }
 
     /// Sets the documentation.

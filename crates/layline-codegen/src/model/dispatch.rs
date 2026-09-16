@@ -28,6 +28,8 @@ pub struct DispatchDef {
     ///
     /// Zero reads the id from elsewhere, and each payload's `Layout::PREFIX_BITS` must match.
     pub prefix: u32,
+    /// Documentation for the fallback variant. `None` writes a general sentence.
+    pub other_doc: Option<String>,
     /// The fallback variant's body type. `None` is `Vec<u8>`.
     ///
     /// Any type that is `From<&[u8]>` and `Deref<Target = [u8]>` works, such as a fixed-size
@@ -47,8 +49,15 @@ impl DispatchDef {
             doc: None,
             derives: Vec::new(),
             prefix: 0,
+            other_doc: None,
             other_body: None,
         }
+    }
+
+    /// Sets the fallback variant's documentation.
+    #[must_use]
+    pub fn with_other_doc(self, doc: &str) -> Self {
+        Self { other_doc: Some(String::from(doc)), ..self }
     }
 
     /// Sets the id's width in bits inside every payload.

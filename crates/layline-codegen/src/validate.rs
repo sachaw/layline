@@ -185,5 +185,25 @@ fn kind_paths(at: &str, kind: &Kind) -> Result<(), Invalid> {
 /// Checks a field's name and type paths.
 fn field_names(f: &Field) -> Result<(), Invalid> {
     ident("field", &f.name)?;
+    if let Some(vis) = &f.visibility
+        && !is_visibility(vis)
+    {
+        return Err(Invalid::field(
+            &f.name,
+            format!("`{vis}` is not a Rust visibility, such as `pub(crate)`"),
+        ));
+    }
     kind_paths(&f.name, &f.kind)
+}
+
+/// With the `walk` feature on, `syn` parses the visibility. Without it, the spelling is checked.
+#[cfg(feature = "walk")]
+fn is_visibility(vis: &str) -> bool {
+    syn::parse_str::<syn::Visibility>(vis).is_ok()
+}
+
+#[cfg(not(feature = "walk"))]
+fn is_visibility(vis: &str) -> bool {
+    matches!(vis, "" | "pub" | "pub(crate)" | "pub(self)" | "pub(super)")
+        || (vis.starts_with("pub(in ") && vis.ends_with(')'))
 }

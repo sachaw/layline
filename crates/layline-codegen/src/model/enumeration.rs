@@ -25,6 +25,8 @@ pub struct EnumDef {
     pub default: Option<String>,
     /// Derives for this enumeration, written after the module's.
     pub derives: Vec<Derive>,
+    /// Documentation for the fallback variant. `None` writes a general sentence.
+    pub other_doc: Option<String>,
 }
 
 impl EnumDef {
@@ -39,7 +41,14 @@ impl EnumDef {
             doc: None,
             default: None,
             derives: Vec::new(),
+            other_doc: None,
         }
+    }
+
+    /// Sets the fallback variant's documentation.
+    #[must_use]
+    pub fn with_other_doc(self, doc: &str) -> Self {
+        Self { other_doc: Some(String::from(doc)), ..self }
     }
 
     /// Marks `variant` `#[default]`, which the derives must match with an ungated `Default`.
