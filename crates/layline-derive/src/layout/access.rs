@@ -427,6 +427,10 @@ impl Plan<'_> {
                     }}
                 }
             }
+            Body::Repeat { .. } if native_leaf(body) => {
+                let off = Literal::usize_unsuffixed((at / 8) as usize);
+                self.read_run(body, quote!(#off), 0, &place.buf)
+            }
             Body::Repeat { body, len } => {
                 let stride = body.width();
                 let elems = (0..*len).map(|i| self.read(body, at + i as u64 * stride, idx, place));
@@ -455,6 +459,10 @@ impl Plan<'_> {
                 let (buf, a, b) = (&w.place.buf, (at / 8) as usize, (at / 8) as usize + bytes);
                 quote! { #buf[#a..#b].copy_from_slice(&#value.encode()); }
             }
+            Body::Repeat { .. } if native_leaf(body) => {
+                let off = Literal::usize_unsuffixed((at / 8) as usize);
+                self.write_run(body, quote!(#off), 0, &w.place.buf, value)
+            }
             Body::Repeat { body, len } => {
                 let stride = body.width();
                 let writes = (0..*len).map(|i| {
@@ -463,6 +471,111 @@ impl Plan<'_> {
                 });
                 quote! { #(#writes)* }
             }
+        }
+    }
+}
+
+/// Whether a body is an array of scalars, which reads and writes as a run of bytes.
+fn native_leaf(body: &Body) -> bool {
+    match body {
+        Body::Packed(Packed { reading: Reading::Native(_), .. }) => true,
+        Body::Repeat { body, .. } => native_leaf(body),
+        _ => false,
+    }
+}
+
+impl Plan<'_> {
+    /// Reads a scalar array at the byte offset `off`: one copy for bytes, a loop otherwise.
+    fn read_run(
+        &self,
+        body: &Body,
+        off: TokenStream,
+        depth: usize,
+        buf: &TokenStream,
+    ) -> TokenStream {
+        match body {
+            Body::Packed(Packed { reading: Reading::Native(s), .. }) => {
+                self.scalar_at(*s, &off, buf)
+            }
+            Body::Repeat { body: inner, len }
+                if matches!(
+                    **inner,
+                    Body::Packed(Packed { reading: Reading::Native(Prim::U8), .. })
+                ) =>
+            {
+                quote! {{
+                    let mut __run = [0u8; #len];
+                    __run.copy_from_slice(&#buf[#off..#off + #len]);
+                    __run
+                }}
+            }
+            Body::Repeat { body: inner, .. } => {
+                let i = quote::format_ident!("__i{}", depth);
+                let stride = (inner.width() / 8) as usize;
+                let elem = self.read_run(inner, quote!(__at), depth + 1, buf);
+                quote! {
+                    ::core::array::from_fn(|#i| {
+                        let __at = #off + #i * #stride;
+                        #elem
+                    })
+                }
+            }
+            _ => unreachable!("native_leaf admits only scalar arrays"),
+        }
+    }
+
+    fn scalar_at(&self, s: Prim, off: &TokenStream, buf: &TokenStream) -> TokenStream {
+        match s {
+            Prim::U8 => quote! { #buf[#off] },
+            Prim::I8 => quote! { #buf[#off] as ::core::primitive::i8 },
+            _ => {
+                let ty = s.ident();
+                let (from, _) = byte_fns(self.endian);
+                let bytes = (0..s.width()).map(|i| quote! { #buf[#off + #i] });
+                quote! { ::core::primitive::#ty::#from([ #(#bytes),* ]) }
+            }
+        }
+    }
+
+    /// Writes a scalar array at the byte offset `off`, as [`read_run`](Self::read_run) reads it.
+    fn write_run(
+        &self,
+        body: &Body,
+        off: TokenStream,
+        depth: usize,
+        buf: &TokenStream,
+        value: &TokenStream,
+    ) -> TokenStream {
+        match body {
+            Body::Packed(Packed { reading: Reading::Native(s), .. }) => match s {
+                Prim::U8 => quote! { #buf[#off] = #value; },
+                Prim::I8 => quote! { #buf[#off] = #value as ::core::primitive::u8; },
+                _ => {
+                    let (_, to) = byte_fns(self.endian);
+                    let w = s.width();
+                    quote! { #buf[#off..#off + #w].copy_from_slice(&#value.#to()); }
+                }
+            },
+            Body::Repeat { body: inner, len }
+                if matches!(
+                    **inner,
+                    Body::Packed(Packed { reading: Reading::Native(Prim::U8), .. })
+                ) =>
+            {
+                quote! { #buf[#off..#off + #len].copy_from_slice(&#value); }
+            }
+            Body::Repeat { body: inner, len } => {
+                let i = quote::format_ident!("__i{}", depth);
+                let stride = (inner.width() / 8) as usize;
+                let elem = self.write_run(inner, quote!(__at), depth + 1, buf, &quote!(#value[#i]));
+                quote! {
+                    for #i in 0..#len {
+                        let __at = #off + #i * #stride;
+                        #elem
+                    }
+                }
+            }
+            _ => unreachable!("native_leaf admits only scalar arrays"),
         }
     }
 }
