@@ -249,6 +249,7 @@ fn plan_word(l: WordLayout, root: &Root) -> Plan<'_> {
         items,
         asserts: Asserts::default(),
         internal: Internal(false),
+        truncate: false,
     }
 }
 
@@ -301,6 +302,7 @@ fn plan_words(l: WordsLayout, root: &Root) -> Plan<'_> {
         items,
         asserts: Asserts::default(),
         internal: Internal(false),
+        truncate: false,
     }
 }
 
@@ -361,10 +363,11 @@ fn plan_bytes(l: ByteLayout, root: &Root) -> Plan<'_> {
         items,
         asserts: Asserts::default(),
         internal: Internal(false),
+        truncate: false,
     }
 }
 
-fn reading_of(wk: &WordKind) -> Reading {
+pub(super) fn reading_of(wk: &WordKind) -> Reading {
     match wk {
         WordKind::Uint(prim) => Reading::Uint(*prim),
         WordKind::Int(_) => Reading::Int,

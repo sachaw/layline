@@ -12,7 +12,7 @@ fn an_unknown_layout_key_is_named() {
 pub struct W {
     pub a: u16,
 }"#,
-        "`W`: expected `bits`, `bytes`, `words`, `endian`, `order`, `prefix`, `prefix_value`, `view`, `internal`, or `crate`",
+        "`W`: expected `bits`, `bytes`, `words`, `endian`, `order`, `prefix`, `prefix_value`, `view`, `truncate`, `internal`, or `crate`",
     );
 }
 
@@ -58,7 +58,7 @@ pub enum Kind {
     #[other]
     Other(u8),
 }"#,
-        "expected `#[bits(N)]` or `#[bits(N, crate = <path>)]`",
+        "`Kind`: expected `crate = <path>`, `truncate`, or `order = lsb | msb` after the width",
     );
 }
 

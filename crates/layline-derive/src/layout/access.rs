@@ -8,8 +8,10 @@ use layline_codegen::{Endian, Root};
 use super::{Body, Packed, Plan, Prim, Reading};
 
 pub(super) enum Access {
-    /// The whole layout loaded as one integer, indexed through `__LAYLINE_LENSES`.
+    /// The whole layout loaded as one `u128`, indexed through `__LAYLINE_LENSES`.
     Container { idx: usize, wide: bool },
+    /// The whole layout loaded as one native register of `reg` bytes, shifted and masked.
+    Register { start: u32, width: u32, reg: usize },
     /// Only the bytes a field touches, for layouts too wide to load whole.
     Window {
         /// First wire byte.
@@ -51,8 +53,13 @@ pub(super) struct Place {
 }
 
 impl Access {
+    /// Whether the access works in a register of exactly `bits` bits, so a cast would be a no-op.
+    fn register_is(&self, bits: u32) -> bool {
+        matches!(self, Access::Register { reg, .. } if *reg as u32 * 8 == bits)
+    }
+
     fn u64_raw(&self) -> bool {
-        matches!(self, Access::Container { wide: false, .. })
+        matches!(self, Access::Container { wide: false, .. }) || self.register_is(64)
     }
 
     fn wide(&self) -> bool {
@@ -63,7 +70,7 @@ impl Access {
         match self {
             Access::Container { wide: true, .. } => quote!(::core::primitive::u128),
             Access::Container { .. } => quote!(::core::primitive::u64),
-            Access::Window { reg, .. } => {
+            Access::Window { reg, .. } | Access::Register { reg, .. } => {
                 let i = win_ty(*reg);
                 quote!(::core::primitive::#i)
             }
@@ -78,6 +85,47 @@ impl Access {
 impl Plan<'_> {
     pub(super) fn hoisted(&self) -> bool {
         self.grid.is_bit_addressed() && self.grid.interior_boundary().is_none() && self.bits <= 128
+    }
+
+    /// The native register a word-sized `bits = N` layout loads into, in bytes: `N / 8` rounded
+    /// up to 1, 2, 4 or 8. `None` for a layout wider than 64 bits, which loads into a `u128`.
+    pub(super) fn register(&self) -> Option<usize> {
+        (self.hoisted() && self.bits <= 64).then(|| (self.wire_bytes).next_power_of_two())
+    }
+
+    /// The register type, when the register is exactly the wire size and so has no unused bits.
+    pub(super) fn word_ty(&self) -> Option<TokenStream> {
+        let reg = self.register().filter(|&reg| reg == self.wire_bytes)?;
+        let ty = win_ty(reg);
+        Some(quote!(::core::primitive::#ty))
+    }
+
+    /// The register loaded from the wire bytes in `buf`.
+    pub(super) fn register_load(&self, buf: &TokenStream) -> TokenStream {
+        let reg = self.register().expect("a register layout");
+        self.window_bytes(0, self.wire_bytes, reg, buf)
+    }
+
+    /// The wire bytes of the register in `__bits`.
+    pub(super) fn register_store(&self) -> TokenStream {
+        let reg = self.register().expect("a register layout");
+        let n = self.wire_bytes;
+        if reg == 1 {
+            return quote!([__bits]);
+        }
+        let (_, to) = byte_fns(self.endian);
+        if reg == n {
+            return quote!(__bits.#to());
+        }
+        let first = match self.endian {
+            Endian::Le => 0,
+            Endian::Be => reg - n,
+        };
+        let picks = (first..first + n).map(|i| quote!(__b[#i]));
+        quote! {{
+            let __b = __bits.#to();
+            [ #(#picks),* ]
+        }}
     }
 
     pub(super) fn container_window(&self, at: u64, width: u64) -> (usize, usize) {
@@ -122,7 +170,7 @@ impl Plan<'_> {
         }
     }
 
-    fn access(&self, at: u64, p: &Packed, idx: usize) -> Access {
+    fn access(&self, at: u64, p: &Packed, idx: usize, place: &Place) -> Access {
         if let Reading::Native(ty) = p.reading {
             return Access::Whole { ty, offset: (at / 8) as usize };
         }
@@ -136,7 +184,10 @@ impl Plan<'_> {
                     mask: mask_of(p.bits),
                 }
             }
-            (None, true) if self.hoisted() => Access::Container { idx, wide: p.wide() },
+            (None, true) if self.hoisted() && place.hoisted => match self.register() {
+                Some(reg) => Access::Register { start: at as u32, width: p.bits, reg },
+                None => Access::Container { idx, wide: p.wide() },
+            },
             (None, true) => self.window(at, p),
             (None, false) => Access::Whole { ty: uint_scalar(p.bits), offset: (at / 8) as usize },
         }
@@ -144,7 +195,10 @@ impl Plan<'_> {
 
     pub(super) fn load_prologue(&self, place: &Place) -> TokenStream {
         let root = self.root;
-        if self.hoisted() {
+        if self.register().is_some() {
+            let load = self.register_load(&place.buf);
+            quote! { let __raw = #load; }
+        } else if self.hoisted() {
             let (from, _) = wire_fns(self.endian);
             let (bits, wire_bytes) = (self.bits, self.wire_bytes);
             let buf_ref = &place.buf_ref;
@@ -199,6 +253,17 @@ impl Plan<'_> {
                     quote! { #lens.extract(#raw) }
                 }
             }
+            Access::Register { start, width, reg } => {
+                let mut read = quote!(__raw);
+                if *start != 0 {
+                    read = quote! { (#read >> #start) };
+                }
+                if start + width < *reg as u32 * 8 {
+                    let mask = win_literal(*reg, wide_mask_of(*width));
+                    read = quote! { (#read & #mask) };
+                }
+                read
+            }
             Access::Window { offset, len, reg, shift, mask, tail, .. } => {
                 let mut read = self.window_bytes(*offset, *len, *reg, &place.buf);
                 if *shift != 0 {
@@ -240,6 +305,19 @@ impl Plan<'_> {
                     let mut __w = #root::__private::BitWord::<#bits, #wire_bytes>::#from(#buf_ref);
                     __w.set_raw(#lens.#insert(__w.raw(), #raw));
                     #buf = __w.#to();
+                }
+            }
+            Access::Register { start, width, reg } => {
+                let value = if *width < *reg as u32 * 8 {
+                    let mask = win_literal(*reg, wide_mask_of(*width));
+                    quote! { ((#raw) & #mask) }
+                } else {
+                    quote! { (#raw) }
+                };
+                if *start == 0 {
+                    quote! { __bits |= #value; }
+                } else {
+                    quote! { __bits |= #value << #start; }
                 }
             }
             Access::Window { offset, len, reg, shift, mask, tail, .. } => {
@@ -321,7 +399,7 @@ impl Plan<'_> {
     }
 }
 
-fn sign_extend(raw: TokenStream, width: u32, ty: &syn::Type) -> TokenStream {
+pub(super) fn sign_extend(raw: TokenStream, width: u32, ty: &syn::Type) -> TokenStream {
     let shift = 64 - width;
     quote! {
         ((((#raw) as ::core::primitive::u64) << #shift) as ::core::primitive::i64 >> #shift) as #ty
@@ -332,6 +410,7 @@ fn decode_value(p: &Packed, a: &Access, raw: TokenStream, root: &Root) -> TokenS
     let ty = &p.ty;
     match p.reading {
         Reading::Uint(_) if a.wide() => raw,
+        Reading::Uint(prim) if a.register_is(prim) => raw,
         Reading::Native(_) => raw,
         Reading::Uint(_) => quote! { #raw as #ty },
         Reading::Int => sign_extend(raw, p.bits, ty),
@@ -347,6 +426,7 @@ fn encode_raw(p: &Packed, a: &Access, value: &TokenStream, root: &Root) -> Token
     let raw_ty = a.raw_ty();
     match p.reading {
         Reading::Uint(_) if a.wide() => quote!(#value),
+        Reading::Uint(prim) if a.register_is(prim) => quote!(#value),
         Reading::Native(_) => quote!(#value),
         Reading::Uint(_) => quote! { #value as #raw_ty },
         Reading::Int => quote! { (#value as ::core::primitive::i64) as #raw_ty },
@@ -369,8 +449,26 @@ fn widen(raw: TokenStream, a: &Access) -> TokenStream {
     }
 }
 
+/// Whether encode must narrow the body's value to fit: a field narrower than its type.
+pub(super) fn narrowed(body: &Body) -> bool {
+    match body {
+        Body::Packed(p) => match p.reading {
+            Reading::Int | Reading::Codec => p.bits < 64,
+            Reading::Uint(prim) => p.bits < prim,
+            Reading::Bool | Reading::Native(_) => false,
+        },
+        Body::Nested { .. } => false,
+        Body::Repeat { body, .. } => narrowed(body),
+    }
+}
+
 /// Asserts the value fits its width. Otherwise the mask would silently encode a different value.
-fn fits_check(p: &Packed, value: &TokenStream, name: &syn::Ident, root: &Root) -> TokenStream {
+pub(super) fn fits_check(
+    p: &Packed,
+    value: &TokenStream,
+    name: &syn::Ident,
+    root: &Root,
+) -> TokenStream {
     let width = p.bits;
     let msg = format!("field `{name}`: value does not fit #[bits({width})]");
     match p.reading {
@@ -408,7 +506,7 @@ impl Plan<'_> {
     pub(super) fn read(&self, body: &Body, at: u64, idx: usize, place: &Place) -> TokenStream {
         match body {
             Body::Packed(p) => {
-                let access = self.access(at, p, idx);
+                let access = self.access(at, p, idx, place);
                 decode_value(p, &access, self.load(&access, place), self.root)
             }
             Body::Nested { ty, bytes, .. } => {
@@ -448,7 +546,7 @@ impl Plan<'_> {
     ) -> TokenStream {
         match body {
             Body::Packed(p) => {
-                let access = self.access(at, p, w.idx);
+                let access = self.access(at, p, w.idx, w.place);
                 let raw = encode_raw(p, &access, value, self.root);
                 let guard =
                     if w.fits_guard { fits_check(p, value, w.name, self.root) } else { quote!() };
@@ -606,15 +704,18 @@ fn reg_ones(reg: usize) -> u128 {
     wide_mask_of(reg as u32 * 8)
 }
 
-fn win_ty(reg: usize) -> syn::Ident {
-    let name = match reg {
+pub(super) fn win_name(reg: usize) -> &'static str {
+    match reg {
         1 => "u8",
         2 => "u16",
         4 => "u32",
         8 => "u64",
         _ => "u128",
-    };
-    syn::Ident::new(name, Span::call_site())
+    }
+}
+
+pub(super) fn win_ty(reg: usize) -> syn::Ident {
+    syn::Ident::new(win_name(reg), Span::call_site())
 }
 
 pub(super) fn win_literal(reg: usize, v: u128) -> Literal {

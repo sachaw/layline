@@ -47,6 +47,7 @@ pub fn layout_parts(l: &LayoutDef, derives: &[Derive], root: &Root) -> Result<La
         }
     };
     let view = l.view.then(|| quote! { , view });
+    let truncate = l.truncate.then(|| quote! { , truncate });
     let crate_arg = root.crate_arg();
     let bit_addressed = c.is_bit_addressed();
     let skip = super::tokens::serde_skip(derives, &l.derives);
@@ -54,7 +55,7 @@ pub fn layout_parts(l: &LayoutDef, derives: &[Derive], root: &Root) -> Result<La
     Ok(LayoutParts {
         attrs: quote! {
             #[derive(#root::Layout)]
-            #[layout(#key = #units #prefix #prefix_value #view #endian #order #crate_arg)]
+            #[layout(#key = #units #prefix #prefix_value #view #truncate #endian #order #crate_arg)]
         },
         fields: quote! { #(#fields)* },
     })
@@ -416,5 +417,18 @@ mod tests {
         l.view = true;
         let with = layout_parts(&l, &[], &Root::default()).expect("lowers").attrs.to_string();
         assert!(with.contains("# [layout (bytes = 2 , view)]"), "{with}");
+    }
+
+    #[test]
+    fn a_truncating_layout_emits_the_key() {
+        let l = LayoutDef::new(
+            "Reg",
+            Container::word(16, Endian::Le, crate::BitOrder::Lsb),
+            vec![Field::new("n", Kind::Scalar(Scalar::U(16)))],
+        )
+        .with_view()
+        .with_truncate();
+        let attrs = layout_parts(&l, &[], &Root::default()).expect("lowers").attrs.to_string();
+        assert!(attrs.contains("# [layout (bits = 16 , view , truncate)]"), "{attrs}");
     }
 }

@@ -32,6 +32,7 @@ impl<const DATA_BITS: u32, const WIRE_BYTES: usize> BitWord<DATA_BITS, WIRE_BYTE
 
     /// Load from little-endian wire bytes.
     #[must_use]
+    #[inline]
     pub const fn from_wire(bytes: &[u8; WIRE_BYTES]) -> Self {
         let mut bits: u128 = 0;
         let mut i = 0;
@@ -44,6 +45,7 @@ impl<const DATA_BITS: u32, const WIRE_BYTES: usize> BitWord<DATA_BITS, WIRE_BYTE
 
     /// Store as little-endian wire bytes.
     #[must_use]
+    #[inline]
     pub const fn to_wire(&self) -> [u8; WIRE_BYTES] {
         let mut bytes = [0u8; WIRE_BYTES];
         let mut i = 0;
@@ -56,6 +58,7 @@ impl<const DATA_BITS: u32, const WIRE_BYTES: usize> BitWord<DATA_BITS, WIRE_BYTE
 
     /// Load from big-endian wire bytes.
     #[must_use]
+    #[inline]
     pub const fn from_wire_be(bytes: &[u8; WIRE_BYTES]) -> Self {
         let mut bits: u128 = 0;
         let mut i = 0;
@@ -68,6 +71,7 @@ impl<const DATA_BITS: u32, const WIRE_BYTES: usize> BitWord<DATA_BITS, WIRE_BYTE
 
     /// Store as big-endian wire bytes.
     #[must_use]
+    #[inline]
     pub const fn to_wire_be(&self) -> [u8; WIRE_BYTES] {
         let mut bytes = [0u8; WIRE_BYTES];
         let mut i = 0;
@@ -80,11 +84,13 @@ impl<const DATA_BITS: u32, const WIRE_BYTES: usize> BitWord<DATA_BITS, WIRE_BYTE
 
     /// The container bits.
     #[must_use]
+    #[inline]
     pub const fn raw(&self) -> u128 {
         self.bits
     }
 
     /// Replace the container bits, masked to its width.
+    #[inline]
     pub const fn set_raw(&mut self, bits: u128) {
         self.bits = bits & Self::MASK;
     }

@@ -25,11 +25,13 @@ impl Plan<'_> {
             let set_doc = format!("Write `{name}` in place.");
             quote! {
                 #[doc = #get_doc]
+                #[inline]
                 #[must_use]
                 pub fn #name(&self) -> #ty {
                     #read
                 }
                 #[doc = #set_doc]
+                #[inline]
                 pub fn #setter(&mut self, value: #ty) {
                     #write
                 }

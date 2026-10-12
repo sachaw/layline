@@ -135,3 +135,107 @@ pub enum Quadrant {
         "variant `North`: `#[bits(N)]` sets the enum's width. Write it above the enum",
     );
 }
+
+#[test]
+fn group_fields_short_of_the_width() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(21)]
+pub struct Descriptor {
+    #[bits(13)]
+    pub words: u16,
+    #[bits(7)]
+    pub index: u8,
+}"#,
+        "`Descriptor`: the fields cover 20 bits, but #[bits(21)] states 21. \
+         Declare the other 1 bits as a field",
+    );
+}
+
+#[test]
+fn group_fields_past_the_width() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(8)]
+pub struct Pair {
+    #[bits(5)]
+    pub a: u8,
+    #[bits(5)]
+    pub b: u8,
+}"#,
+        "`Pair`: the fields cover 10 bits, but #[bits(8)] states 8. \
+         Narrow the fields by 2 bits, or widen the group",
+    );
+}
+
+#[test]
+fn group_field_without_a_width() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(8)]
+pub struct Pair {
+    #[bits(5)]
+    pub a: u8,
+    pub b: u8,
+}"#,
+        "field `b`: no width",
+    );
+}
+
+#[test]
+fn group_field_with_an_overlay() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(8)]
+pub struct Pair {
+    #[bits(4)]
+    #[overlay(other: Nibble)]
+    pub a: u8,
+    #[bits(4)]
+    pub b: u8,
+}"#,
+        "field `a`: #[overlay] does not apply in a `FieldCodec` group",
+    );
+}
+
+#[test]
+fn truncate_on_an_enum() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(1, truncate)]
+pub enum Kind {
+    #[value(0)]
+    A,
+    #[value(1)]
+    B,
+}"#,
+        "`Kind`: `truncate` and `order` apply to a struct of `#[bits(N)]` fields",
+    );
+}
+
+#[test]
+fn a_group_key_given_twice() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(8, truncate, truncate)]
+pub struct Pair {
+    #[bits(4)]
+    pub a: u8,
+    #[bits(4)]
+    pub b: u8,
+}"#,
+        "`truncate` is given twice",
+    );
+}

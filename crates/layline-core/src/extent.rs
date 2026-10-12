@@ -41,6 +41,7 @@ impl Extent {
         self.start + self.width as u64
     }
 
+    #[inline]
     const fn mask_wide(&self) -> u128 {
         mask128(self.width)
     }

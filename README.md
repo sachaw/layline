@@ -29,6 +29,11 @@ assert_eq!((header.version, header.urgent, header.length), (1, true, 0x205));
 assert_eq!(header.encode(), [0x1A, 0x05]);
 ```
 
+A layout of up to 64 bits is shifts and masks on one integer. At 8, 16, 32 or 64 bits it also
+converts to and from that integer: `Header::from_bits(0x1A05)` is the header above, read
+big-endian. Add `truncate` to `#[layout(..)]` to have encode keep the low bits of an oversized
+value, as a hardware register does, instead of panicking.
+
 ## Messages
 
 ```rust

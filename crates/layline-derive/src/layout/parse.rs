@@ -38,6 +38,8 @@ pub struct Parsed {
     pub declared: Declared,
     pub root: layline_codegen::Root,
     pub internal: Internal,
+    /// `truncate`: encode keeps the low bits of a value wider than its field.
+    pub truncate: bool,
 }
 
 pub fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
@@ -48,7 +50,7 @@ pub fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
         ));
     }
 
-    let (container, root, internal) = container_attr(input)?;
+    let (container, root, internal, truncate) = container_attr(input)?;
     for attr in &input.attrs {
         if let Some(name) = crate::attr::registered(attr, LAYOUT_ATTRS)
             && name != "layout"
@@ -162,12 +164,12 @@ pub fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
             })
         }
     };
-    Ok(Parsed { declared: layout, root, internal })
+    Ok(Parsed { declared: layout, root, internal, truncate })
 }
 
 fn container_attr(
     input: &DeriveInput,
-) -> syn::Result<(ContainerAttr, layline_codegen::Root, Internal)> {
+) -> syn::Result<(ContainerAttr, layline_codegen::Root, Internal, bool)> {
     let ident = &input.ident;
     let attr = crate::attr::single(&input.attrs, "layout", format_args!("`{ident}`"))?.ok_or_else(|| {
         syn::Error::new(
@@ -182,6 +184,7 @@ fn container_attr(
         (None, None, None);
     let (mut prefix, mut prefix_value): (Option<u32>, Option<u128>) = (None, None);
     let (mut view, mut internal, mut endian, mut order, mut root) = (None, None, None, None, None);
+    let mut truncate = None;
     attr.parse_nested_meta(|meta| {
         let is = |key: &str| meta.path.is_ident(key);
         if is("crate") {
@@ -200,6 +203,8 @@ fn container_attr(
             crate::attr::once_key(&mut words, &meta, ident, "layout", || int_value(&meta))
         } else if is("view") {
             crate::attr::once_key(&mut view, &meta, ident, "layout", || Ok(()))
+        } else if is("truncate") {
+            crate::attr::once_key(&mut truncate, &meta, ident, "layout", || Ok(()))
         } else if is("internal") {
             crate::attr::once_key(&mut internal, &meta, ident, "layout", || Ok(()))
         } else if is("endian") {
@@ -211,7 +216,7 @@ fn container_attr(
         } else {
             Err(meta.error(format!(
                 "`{ident}`: expected `bits`, `bytes`, `words`, `endian`, `order`, `prefix`, \
-                 `prefix_value`, `view`, `internal`, or `crate`"
+                 `prefix_value`, `view`, `truncate`, `internal`, or `crate`"
             )))
         }
     })?;
@@ -276,7 +281,7 @@ fn container_attr(
             ));
         }
     };
-    Ok((container, root, Internal(internal)))
+    Ok((container, root, Internal(internal), truncate.is_some()))
 }
 
 /// Checks the prefix rules through codegen's validation.
@@ -326,7 +331,7 @@ fn overlays_apart<'a>(
     container: &syn::Ident,
     overlays: impl IntoIterator<Item = &'a Overlay>,
 ) -> syn::Result<()> {
-    let mut methods = vec![String::from("decode"), String::from("encode")];
+    let mut methods = ["decode", "encode", "from_bits", "to_bits"].map(String::from).to_vec();
     for ov in overlays {
         let name = crate::attr::name(&ov.name);
         for method in [format!("set_{name}"), name.clone()] {

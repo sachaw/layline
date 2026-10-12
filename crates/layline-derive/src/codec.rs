@@ -1,5 +1,5 @@
 //! `#[derive(FieldCodec)]` for fixed-width newtypes and enums.
-use layline_codegen::{Root, Scalar, Spelling};
+use layline_codegen::{BitOrder, Root, Scalar, Spelling};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
@@ -21,10 +21,28 @@ pub fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     }
 
-    let (width, root) = bits_attr(input)?;
-    refuse_misplaced(input)?;
+    let (width, root, group) = bits_attr(input)?;
+    let grouped = matches!(&input.data, Data::Struct(DataStruct { fields: Fields::Named(_), .. }));
+    refuse_misplaced(input, grouped)?;
+    if !grouped && let Some(span) = group.truncate.or(group.order.map(|(_, span)| span)) {
+        return Err(syn::Error::new(
+            span,
+            format!(
+                "`{}`: `truncate` and `order` apply to a struct of `#[bits(N)]` fields. \
+                 Remove them",
+                input.ident
+            ),
+        ));
+    }
 
     match &input.data {
+        Data::Struct(DataStruct { fields: Fields::Named(named), .. }) => {
+            let keys = crate::layout::GroupKeys {
+                truncate: group.truncate.is_some(),
+                order: group.order.map_or(BitOrder::Lsb, |(order, _)| order),
+            };
+            crate::layout::group_codec(input, named, width.bits, width.span, keys, &root)
+        }
         Data::Struct(data) => newtype(input, data, width, &root),
         Data::Enum(data) => enum_codec(input, data, width, &root),
         Data::Union(_) => Err(syn::Error::new(
@@ -37,7 +55,7 @@ pub fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
 /// Must mirror the `attributes(..)` list on `derive_field_codec` in `lib.rs`.
 const CODEC_ATTRS: &[&str] = &["bits", "value", "other"];
 
-fn refuse_misplaced(input: &DeriveInput) -> syn::Result<()> {
+fn refuse_misplaced(input: &DeriveInput, grouped: bool) -> syn::Result<()> {
     let ident = &input.ident;
     for attr in &input.attrs {
         if let Some(name) = crate::attr::registered(attr, CODEC_ATTRS)
@@ -71,6 +89,8 @@ fn refuse_misplaced(input: &DeriveInput) -> syn::Result<()> {
         Err(syn::Error::new(attr.meta.span(), msg))
     };
     match &input.data {
+        // A group's fields carry their own `#[bits(N)]`.
+        Data::Struct(_) if grouped => {}
         Data::Struct(data) => {
             for f in &data.fields {
                 on_field(f, format!("`{ident}`'s field"))?;
@@ -134,30 +154,68 @@ impl Width {
 struct BitsAttr {
     bits: LitInt,
     root: Root,
+    group: GroupKeys,
+}
+
+/// Keys that only a struct of bit fields takes.
+#[derive(Default)]
+struct GroupKeys {
+    truncate: Option<Span>,
+    order: Option<(BitOrder, Span)>,
 }
 
 impl Parse for BitsAttr {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let bits: LitInt = input.parse()?;
-        let mut root = Root::default();
-        if !input.is_empty() {
+        let mut root = None;
+        let mut group = GroupKeys::default();
+        let expected =
+            "expected `crate = <path>`, `truncate`, or `order = lsb | msb` after the width";
+        while !input.is_empty() {
             input.parse::<Token![,]>()?;
-            if !input.is_empty() {
-                input.parse::<Token![crate]>().map_err(|_| {
-                    input.error("expected `#[bits(N)]` or `#[bits(N, crate = <path>)]`")
-                })?;
+            if input.is_empty() {
+                break;
+            }
+            if input.peek(Token![crate]) {
+                let key = input.parse::<Token![crate]>()?;
                 input.parse::<Token![=]>()?;
-                root = Root::new(input.parse()?, Spelling::Hygienic);
-                if !input.is_empty() {
-                    return Err(input.error("expected `#[bits(N, crate = <path>)]` and no more"));
+                if root.is_some() {
+                    return Err(syn::Error::new(key.span, "`crate` is given twice. Keep one"));
                 }
+                root = Some(Root::new(input.parse()?, Spelling::Hygienic));
+                continue;
+            }
+            let key: syn::Ident = input.parse().map_err(|_| input.error(expected))?;
+            let twice = || syn::Error::new(key.span(), format!("`{key}` is given twice. Keep one"));
+            if key == "truncate" {
+                if group.truncate.replace(key.span()).is_some() {
+                    return Err(twice());
+                }
+            } else if key == "order" {
+                input.parse::<Token![=]>()?;
+                let value: syn::Ident = input.parse()?;
+                let order = match value.to_string().as_str() {
+                    "lsb" => BitOrder::Lsb,
+                    "msb" => BitOrder::Msb,
+                    _ => {
+                        return Err(syn::Error::new(
+                            value.span(),
+                            "expected `order = lsb` or `order = msb`",
+                        ));
+                    }
+                };
+                if group.order.replace((order, key.span())).is_some() {
+                    return Err(twice());
+                }
+            } else {
+                return Err(syn::Error::new(key.span(), expected));
             }
         }
-        Ok(Self { bits, root })
+        Ok(Self { bits, root: root.unwrap_or_default(), group })
     }
 }
 
-fn bits_attr(input: &DeriveInput) -> syn::Result<(Width, Root)> {
+fn bits_attr(input: &DeriveInput) -> syn::Result<(Width, Root, GroupKeys)> {
     let owner = format!("`{}`", input.ident);
     let attr = crate::attr::single(&input.attrs, "bits", owner)?.ok_or_else(|| {
         syn::Error::new(
@@ -168,7 +226,7 @@ fn bits_attr(input: &DeriveInput) -> syn::Result<(Width, Root)> {
             ),
         )
     })?;
-    let BitsAttr { bits: lit, root } = attr
+    let BitsAttr { bits: lit, root, group } = attr
         .parse_args()
         .map_err(|e| syn::Error::new(e.span(), format!("`{}`: {e}", input.ident)))?;
     let bits: u32 = lit.base10_parse()?;
@@ -178,7 +236,7 @@ fn bits_attr(input: &DeriveInput) -> syn::Result<(Width, Root)> {
             format!("`{}`: #[bits({bits})] is outside 1..=64", input.ident),
         ));
     }
-    Ok((Width { bits, span: attr.meta.span() }, root))
+    Ok((Width { bits, span: attr.meta.span() }, root, group))
 }
 
 fn newtype(
@@ -233,10 +291,12 @@ fn newtype(
         impl #root::FieldCodec for #ident {
             const BITS: ::core::primitive::u32 = #bits;
 
+            #[inline]
             fn from_raw(raw: ::core::primitive::u64) -> Self {
                 #build
             }
 
+            #[inline]
             fn to_raw(&self) -> ::core::primitive::u64 {
                 #unwrap
             }
@@ -251,10 +311,12 @@ fn wire_int_impl(ident: &syn::Ident, root: &Root) -> TokenStream {
     quote! {
         #[automatically_derived]
         impl #root::WireInt for #ident {
+            #[inline]
             fn to_i64(&self) -> ::core::primitive::i64 {
                 <Self as #root::FieldCodec>::to_raw(self) as ::core::primitive::i64
             }
 
+            #[inline]
             fn from_i64(n: ::core::primitive::i64) -> Self {
                 <Self as #root::FieldCodec>::from_raw(n as ::core::primitive::u64)
             }
@@ -264,8 +326,8 @@ fn wire_int_impl(ident: &syn::Ident, root: &Root) -> TokenStream {
 
 fn newtype_shape(ident: &syn::Ident) -> String {
     format!(
-        "`{ident}`: #[derive(FieldCodec)] on a struct needs one unnamed integer field. \
-         Write `#[bits(15)] struct TrackNumber(u16);`"
+        "`{ident}`: #[derive(FieldCodec)] on a struct needs one unnamed integer field, or named \
+         `#[bits(N)]` fields. Write `#[bits(15)] struct TrackNumber(u16);`"
     )
 }
 
@@ -479,6 +541,7 @@ fn expand_enum(
         impl #root::FieldCodec for #ident {
             const BITS: ::core::primitive::u32 = #bits;
 
+            #[inline]
             fn from_raw(raw: ::core::primitive::u64) -> Self {
                 match #raw {
                     #(#decode_arms)*
@@ -486,6 +549,7 @@ fn expand_enum(
                 }
             }
 
+            #[inline]
             fn to_raw(&self) -> ::core::primitive::u64 {
                 match self {
                     #(#encode_arms)*

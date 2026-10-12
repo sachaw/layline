@@ -5,6 +5,7 @@ mod asserts;
 mod declared;
 mod emit;
 mod field;
+mod group;
 mod misplaced;
 mod parse;
 mod solve;
@@ -18,19 +19,22 @@ use layline_codegen::{Endian, Root};
 use crate::claim::At;
 use asserts::Asserts;
 use declared::{Internal, Overlay, Prim};
+pub use group::{GroupKeys, group_codec};
 
 pub fn derive(input: &syn::DeriveInput) -> syn::Result<TokenStream> {
     let parsed = parse::parse(input)?;
-    expand(parsed.declared, &parsed.root, parsed.internal)
+    expand(parsed.declared, &parsed.root, parsed.internal, parsed.truncate)
 }
 
 fn expand(
     declared: declared::Declared,
     root: &Root,
     internal: Internal,
+    truncate: bool,
 ) -> syn::Result<TokenStream> {
     let mut plan = declared::plan(declared, root);
     plan.internal = internal;
+    plan.truncate = truncate;
     plan.solve()?;
     plan.resolve_assertions()?;
     Ok(plan.emit())
@@ -52,6 +56,8 @@ struct Plan<'a> {
     items: Vec<Item>,
     asserts: Asserts,
     internal: Internal,
+    /// Encode keeps the low bits of a value wider than its field, rather than panicking.
+    truncate: bool,
 }
 
 struct Item {

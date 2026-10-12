@@ -336,6 +336,9 @@ pub struct LayoutDef {
     pub fields: Vec<Field>,
     /// Whether to generate a `<Name>View` that reads fields in place: `#[layout(.., view)]`.
     pub view: bool,
+    /// Whether encode keeps the low bits of a value wider than its field instead of panicking:
+    /// `#[layout(.., truncate)]`.
+    pub truncate: bool,
     /// Documentation.
     pub doc: Option<String>,
     /// Derives for this layout, written after the module's.
@@ -351,6 +354,7 @@ impl LayoutDef {
             container,
             fields,
             view: false,
+            truncate: false,
             doc: None,
             derives: Vec::new(),
         }
@@ -372,6 +376,13 @@ impl LayoutDef {
     #[must_use]
     pub fn with_view(self) -> Self {
         Self { view: true, ..self }
+    }
+
+    /// Makes encode keep the low bits of a value wider than its field, as a hardware register
+    /// does.
+    #[must_use]
+    pub fn with_truncate(self) -> Self {
+        Self { truncate: true, ..self }
     }
 }
 

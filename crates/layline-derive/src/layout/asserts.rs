@@ -70,6 +70,10 @@ struct RangeAt {
 }
 
 impl Asserts {
+    pub(super) fn ranged(&self) -> bool {
+        !self.range.is_empty()
+    }
+
     pub(super) fn any(&self) -> bool {
         !self.magic.is_empty() || !self.check.is_empty() || !self.range.is_empty()
     }

@@ -5,7 +5,7 @@ use quote::{format_ident, quote, quote_spanned};
 
 use layline_codegen::{Root, StatedUnit};
 
-use super::access::{Access, Place, Writing, wide_mask_of, win_literal, wire_fns};
+use super::access::{Access, Place, Writing, wide_mask_of, win_literal, win_name, wire_fns};
 use super::{Body, Packed, Plan, Reading};
 
 fn row(at: u64, name: &str, width: u32, root: &Root) -> (u64, TokenStream) {
@@ -35,8 +35,6 @@ impl Plan<'_> {
         let field_defs = self.field_defs();
         let lenses = self.lens_array();
 
-        let decode = self.decode_body();
-        let encode = self.encode_body();
         let asserting = self.asserts.any() || self.internal.0 || self.prefix_value.is_some();
         let magic_const = self.magic_const();
         let (decode_ret, decode_doc) = if asserting {
@@ -59,6 +57,52 @@ impl Plan<'_> {
             )
         };
         let view = self.view.then(|| self.view_type());
+        // A word-sized layout is straight-line shifts and masks on one register, so it inlines.
+        let inline = self.register().map(|_| quote!(#[inline]));
+        let (decode, encode, words) = match self.word_ty() {
+            Some(word) => {
+                let (from, to) = super::access::byte_fns(self.endian);
+                let from_bits = self.decode_from_raw();
+                let to_bits = self.encode_bits();
+                let from_doc = format!(
+                    "Decode from the {bits}-bit container as an integer.\n\n\
+                     Bit `n` of `bits` is container bit `n`, so `from_bits({word}::{from}(wire))` \
+                     is `decode(&wire)`.",
+                    word = win_name(self.wire_bytes),
+                    from = from,
+                );
+                let to_doc = format!(
+                    "Encode to the {bits}-bit container as an integer.\n\n\
+                     `to_bits().{to}()` is `encode()`.",
+                    to = to,
+                );
+                let truncates = self.truncate_doc();
+                (
+                    quote! { Self::from_bits(#word::#from(*wire)) },
+                    quote! { self.to_bits().#to() },
+                    Some(quote! {
+                        #[doc = #from_doc]
+                        #[inline]
+                        #[must_use]
+                        pub fn from_bits(bits: #word) -> #decode_ret {
+                            let __raw = bits;
+                            #from_bits
+                        }
+
+                        #[doc = #to_doc]
+                        #truncates
+                        #[inline]
+                        #[must_use]
+                        pub fn to_bits(&self) -> #word {
+                            #to_bits
+                            __bits
+                        }
+                    }),
+                )
+            }
+            None => (self.decode_body(), self.encode_body(), None),
+        };
+        let encode_doc = self.truncate_doc();
         let covers_container = (self.bits > 0).then(|| {
             quote! {
                 const _: () = {
@@ -95,16 +139,21 @@ impl Plan<'_> {
                 #magic_const
 
                 #decode_doc
+                #inline
                 #[must_use]
                 pub fn decode(wire: &[::core::primitive::u8; #wire_bytes]) -> #decode_ret {
                     #decode
                 }
 
                 /// Encode to wire bytes.
+                #encode_doc
+                #inline
                 #[must_use]
                 pub fn encode(&self) -> [::core::primitive::u8; #wire_bytes] {
                     #encode
                 }
+
+                #words
 
                 #(#overlays)*
             }
@@ -117,7 +166,7 @@ impl Plan<'_> {
 
     fn lens_array(&self) -> Option<TokenStream> {
         let root = self.root;
-        if !self.hoisted() {
+        if !self.hoisted() || self.register().is_some() {
             return None;
         }
         let n = self.items.len();
@@ -183,13 +232,33 @@ impl Plan<'_> {
     fn decode_body(&self) -> TokenStream {
         let place = Place { buf: quote!(wire), buf_ref: quote!(wire), hoisted: true };
         let prologue = self.load_prologue(&place);
+        if self.hoisted() {
+            let rest = self.decode_from_raw();
+            return quote! {
+                #prologue
+                #rest
+            };
+        }
+        self.decode_checked(quote! {
+            let _ = wire;
+            #prologue
+        })
+    }
+
+    /// Decode a hoisted layout from `__raw`, the container already loaded.
+    fn decode_from_raw(&self) -> TokenStream {
+        self.decode_checked(quote!())
+    }
+
+    /// The fields read and the checks run, after `prologue`.
+    fn decode_checked(&self, prologue: TokenStream) -> TokenStream {
+        let place = Place { buf: quote!(wire), buf_ref: quote!(wire), hoisted: true };
         let fields = self.items.iter().enumerate().map(|(i, item)| {
             let name = &item.ident;
             let value = self.read(&item.body, item.phys_bit, i, &place);
             quote! { #name: #value, }
         });
         let built = quote! {
-            let _ = wire;
             #prologue
             Self { #(#fields)* }
         };
@@ -237,11 +306,9 @@ impl Plan<'_> {
         let mask = proc_macro2::Literal::u64_unsuffixed((1u64 << self.prefix).wrapping_sub(1));
         let expected = proc_macro2::Literal::u64_unsuffixed(expected as u64);
         let read = if self.hoisted() {
+            // `__raw` is already loaded.
             let ph = proc_macro2::Literal::u64_unsuffixed(self.prefix_physical());
-            let (from, _) = wire_fns(self.endian);
-            let (bits, wire_bytes) = (self.bits, self.wire_bytes);
             quote! {
-                let __raw = #root::__private::BitWord::<#bits, #wire_bytes>::#from(wire).raw();
                 let __got = (__raw >> #ph) as ::core::primitive::u64 & #mask;
             }
         } else {
@@ -267,15 +334,74 @@ impl Plan<'_> {
         }
     }
 
+    /// Builds the register `__bits` of a word-sized layout from the fields.
+    fn encode_bits(&self) -> TokenStream {
+        let reg = self.register().expect("a register layout");
+        let place = Place { buf: quote!(__out), buf_ref: quote!(__out), hoisted: true };
+        let fields = self.items.iter().enumerate().map(|(i, item)| {
+            let name = &item.ident;
+            let value = quote! { self.#name };
+            let writing = Writing { place: &place, idx: i, name, fits_guard: !self.truncate };
+            self.write(&item.body, item.phys_bit, &writing, &value)
+        });
+        let ty = super::access::win_ty(reg);
+        let prefix = self.prefix_value.map(|v| {
+            let v = win_literal(reg, v);
+            let ph = proc_macro2::Literal::u64_unsuffixed(self.prefix_physical());
+            quote! { __bits |= #v << #ph; }
+        });
+        let guards = self.range_guards();
+        quote! {
+            #guards
+            let mut __bits: ::core::primitive::#ty = 0;
+            #prefix
+            #(#fields)*
+        }
+    }
+
+    /// Documents what encode does with a value wider than its field.
+    fn truncate_doc(&self) -> TokenStream {
+        let narrowed = self.items.iter().any(|item| super::access::narrowed(&item.body));
+        let ranged = self.asserts.ranged();
+        match (narrowed && !self.truncate, ranged) {
+            (false, false) if narrowed => quote! {
+                ///
+                /// Each field keeps only the low bits its width holds, as a hardware register does.
+            },
+            (false, false) => quote!(),
+            (fits, ranged) => {
+                let why = match (fits, ranged) {
+                    (true, true) => "If a field's value does not fit its width or its `#[range]`.",
+                    (true, false) => "If a field's value does not fit its width.",
+                    _ => "If a field's value is outside its `#[range]`.",
+                };
+                quote! {
+                    ///
+                    /// # Panics
+                    ///
+                    #[doc = #why]
+                }
+            }
+        }
+    }
+
     fn encode_body(&self) -> TokenStream {
         let root = self.root;
         let wire_bytes = self.wire_bytes;
         let hoisted = self.hoisted();
+        if self.register().is_some() {
+            let bits = self.encode_bits();
+            let store = self.register_store();
+            return quote! {
+                #bits
+                #store
+            };
+        }
         let place = Place { buf: quote!(__out), buf_ref: quote!(__out), hoisted };
         let fields = self.items.iter().enumerate().map(|(i, item)| {
             let name = &item.ident;
             let value = quote! { self.#name };
-            let writing = Writing { place: &place, idx: i, name, fits_guard: true };
+            let writing = Writing { place: &place, idx: i, name, fits_guard: !self.truncate };
             self.write(&item.body, item.phys_bit, &writing, &value)
         });
         if hoisted {
@@ -287,8 +413,10 @@ impl Plan<'_> {
                 let ph = proc_macro2::Literal::u64_unsuffixed(ph);
                 quote! { __bits |= (#v as ::core::primitive::u128) << #ph; }
             });
+            let guards = self.range_guards();
             quote! {
                 let mut __bits: ::core::primitive::u128 = 0;
+                #guards
                 #prefix
                 #(#fields)*
                 let mut __w = #root::__private::BitWord::<#bits, #wire_bytes>::#from();
@@ -360,11 +488,13 @@ impl Plan<'_> {
                     format!("Write the `{fname}` bits from a `{}` value.", quote!(#oty));
                 accessors.push(quote! {
                     #[doc = #getter_doc]
+                    #[inline]
                     #[must_use]
                     pub fn #getter(&self) -> #oty {
                         <#oty as #root::FieldCodec>::from_raw(#primary_raw)
                     }
                     #[doc = #setter_doc]
+                    #[inline]
                     pub fn #setter(&mut self, value: #oty) {
                         self.#fname = #store;
                     }

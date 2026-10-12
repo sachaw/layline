@@ -48,6 +48,10 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 /// - `prefix_value = V`: the prefix value. Encode writes it and decode checks it. Needs `prefix`.
 /// - `view`: also generates `<Name>View`, which reads and writes the fields in place in a byte
 ///   buffer. Not allowed with `#[magic]`, `#[checksum]` or `#[range]`.
+/// - `truncate`: encode keeps the low `N` bits of a value wider than its `#[bits(N)]` field, as a
+///   hardware register does, instead of panicking. Decode is unchanged. Without it, encode panics
+///   rather than write bits that read back as a different value. A view's setters always keep the
+///   low bits.
 /// - `internal`: marks a block that `Message` generates. Makes `decode` fallible.
 /// - `crate = path`: the path to `layline`. Default `::layline`.
 ///
@@ -69,6 +73,15 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 ///   encode computes it. `bytes` only.
 /// - `#[range(lo..=hi)]`, `#[range(..=hi)]`, `#[range(lo..)]`: the allowed values. Decode rejects
 ///   others.
+///
+/// # Word-sized layouts
+///
+/// A `bits = N` layout with `N <= 64` loads into one native register (`u8`, `u16`, `u32` or `u64`,
+/// the smallest that holds `N` bits), and `decode`, `encode` and the view's accessors are inline
+/// shifts and masks on it. When `N` is 8, 16, 32 or 64 the layout also has
+/// `from_bits(uN) -> Self` and `to_bits(&self) -> uN`, which skip the byte array: bit `n` of the
+/// integer is container bit `n`, so `from_bits(u32::from_le_bytes(wire))` is `decode(&wire)` for
+/// an `endian = le` layout. `from_bits` returns what `decode` returns.
 ///
 /// `Layout` rejects the `Message` attributes `#[count]`, `#[len]`, `#[stride]`, `#[fill]`,
 /// `#[seek]`, `#[text]`, `#[until]`, `#[var]`, `#[message]`, `#[switch]` and `#[when]` with a
@@ -141,7 +154,8 @@ pub fn derive_dispatch(input: TokenStream) -> TokenStream {
     }
 }
 
-/// Derives `FieldCodec` and `WireInt` for an integer newtype or an enum of named values.
+/// Derives `FieldCodec` and `WireInt` for an integer newtype or an enum of named values, and
+/// `FieldCodec` for a group of bit fields.
 ///
 /// Every `N`-bit value decodes.
 ///
@@ -149,6 +163,30 @@ pub fn derive_dispatch(input: TokenStream) -> TokenStream {
 ///
 /// - `#[bits(N)]`: the width, 1 to 64. The newtype's integer and every variant's value must fit.
 /// - `#[bits(N, crate = path)]`: the path to `layline`. Default `::layline`.
+///
+/// # Groups
+///
+/// A struct with named fields is a group: each field states `#[bits(K)]`, as in a
+/// `#[layout(bits = N)]`, and the widths must add up to `N`. A group is a field narrower than a
+/// whole number of bytes with fields of its own, so it can be an `#[overlay]` or a `#[bits(N)]`
+/// field. Fields are an integer, `bool`, `U<K>`, `I<K>` or a `FieldCodec`. Group keys:
+///
+/// - `order = lsb | msb`: with `msb`, the first field takes the most significant bits. Default
+///   `lsb`.
+/// - `truncate`: `to_raw` keeps the low `K` bits of a value wider than its field, instead of
+///   panicking.
+///
+/// ```
+/// # use layline::FieldCodec;
+/// #[derive(FieldCodec)]
+/// #[bits(21)]
+/// pub struct Descriptor {
+///     #[bits(13)] pub words: u16,
+///     #[bits(8)] pub buffer_index: u8,
+/// }
+///
+/// assert_eq!(Descriptor { words: 1024, buffer_index: 42 }.to_raw(), 42 << 13 | 1024);
+/// ```
 ///
 /// # Variant attributes
 ///

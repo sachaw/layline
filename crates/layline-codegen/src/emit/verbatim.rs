@@ -148,6 +148,7 @@ mod tests {
                     container: Container::Bytes { bytes: 4, endian: Endian::Le },
                     fields: vec![Field::new("value", Kind::Scalar(Scalar::U(32)))],
                     view: false,
+                    truncate: false,
                     doc: None,
                     derives: Vec::new(),
                 }),
