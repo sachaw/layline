@@ -42,7 +42,10 @@ pub(super) fn resolve(seen: &Seen<'_>, field: &str, reads: Reads) -> Result<(), 
     };
     let (holds, name) = match reads {
         Reads::Number => (kind.is_integer(), "a field of this message"),
-        Reads::Flag => (matches!(kind, Kind::Scalar(Scalar::Bool)), "a `bool` in this message"),
+        Reads::Flag => (
+            matches!(kind, Kind::Scalar(Scalar::Bool | Scalar::ByteBool)),
+            "a `bool` in this message",
+        ),
     };
     match inner {
         None if holds => Ok(()),

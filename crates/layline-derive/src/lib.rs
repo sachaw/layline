@@ -29,14 +29,17 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 ///
 /// Fields are laid out in declaration order and must cover every bit.
 /// `decode` returns `Result<Self, ParseError>` if the struct uses `#[magic]`, `#[checksum]`,
-/// `#[range]`, `prefix_value` or `internal`. Otherwise it returns `Self`.
+/// `#[range]`, `prefix_value`, `internal` or a byte-mode `bool`. Otherwise it returns `Self`.
 ///
 /// # Container attributes
 ///
 /// Choose one size:
 ///
 /// - `#[layout(bits = N)]`: `N` bits of bit fields. `N` is a multiple of 8.
-/// - `#[layout(bytes = N)]`: `N` bytes of scalars, arrays and nested layouts.
+/// - `#[layout(bytes = N)]`: `N` bytes of scalars, arrays and nested layouts. A `bool` is one
+///   byte: decode reads 0 as `false` and 1 as `true` and refuses any other byte with
+///   `ParseError::Malformed`, and encode writes 0 or 1. For a flag byte the format sets with any
+///   nonzero value, declare `#[codec(8)] flag: layline::Nonzero`.
 /// - `#[layout(words = N)]`: `N` 16-bit words of bit fields.
 ///
 /// Optional keys:
@@ -226,7 +229,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// `#[switch]` selects.
 ///
 /// Consecutive plain fields become a hidden `#[derive(Layout)]` struct. Encode fills in count,
-/// length, offset, discriminant and flag fields from the fields they describe.
+/// length, offset, discriminant and flag fields from the fields they describe. In a byte-mode
+/// message a `bool` is one strict byte, as in a `bytes = N` layout.
 ///
 /// # Container attributes
 ///

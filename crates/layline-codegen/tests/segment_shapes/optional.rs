@@ -92,7 +92,7 @@ fn a_bare_flag_must_name_an_earlier_bool() {
 
 #[test]
 fn a_bool_answers_only_the_presence_question() {
-    let block = || Segment::Block(vec![field("urgent", Kind::Scalar(Scalar::Bool))]);
+    let block = || Segment::Block(vec![field("urgent", Kind::Scalar(Scalar::ByteBool))]);
 
     let asked_a_flag = msg(
         "Flagged",

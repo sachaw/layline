@@ -192,6 +192,9 @@ pub(super) fn byte_field(f: &syn::Field) -> syn::Result<ByteField> {
             assertable(&ident, &kind, magic.as_ref(), check.as_ref())?;
             return Ok(ByteField { ident, kind, span, at, magic, check, range });
         }
+        if matches!(byte_kind(&f.ty), Some(ByteKind::Scalar(Prim::Bool))) {
+            return Err(syn::Error::new(bits_span, format!("field `{ident}`: {STRICT_BOOL}")));
+        }
         if byte_kind(&f.ty).is_some() {
             return Err(syn::Error::new(
                 bits_span,
@@ -224,9 +227,23 @@ pub(super) fn byte_field(f: &syn::Field) -> syn::Result<ByteField> {
         })?
     };
 
+    if let ByteKind::Array(Prim::Bool, _) = kind {
+        return Err(syn::Error::new(
+            f.ty.span(),
+            format!(
+                "field `{ident}`: an array of `bool` has no byte layout. Use `[u8; N]`, or \
+                 `[Nonzero; N]` with #[codec(8)] for nonzero-is-true flags"
+            ),
+        ));
+    }
     assertable(&ident, &kind, magic.as_ref(), check.as_ref())?;
     Ok(ByteField { ident, kind, span, at, magic, check, range })
 }
+
+/// Refuses `#[codec(N)]` on a byte-mode `bool`.
+pub(crate) const STRICT_BOOL: &str = "a `bool` here is one byte, 0 or 1, and decode refuses any \
+     other value. Remove the #[codec(N)], or use `layline::Nonzero` for a flag that any nonzero \
+     value sets";
 
 fn assertable(
     ident: &syn::Ident,
@@ -245,7 +262,7 @@ fn assertable(
     }
     if let Some(m) = magic {
         let whole_bytes = match kind {
-            ByteKind::Scalar(s) => !matches!(s, Prim::F32 | Prim::F64),
+            ByteKind::Scalar(s) => !matches!(s, Prim::F32 | Prim::F64 | Prim::Bool),
             ByteKind::Array(Prim::U8, _) => true,
             _ => false,
         };
@@ -263,7 +280,7 @@ fn assertable(
         }
     }
     if let Some(c) = check
-        && !matches!(kind, ByteKind::Scalar(s) if !matches!(s, Prim::F32 | Prim::F64))
+        && !matches!(kind, ByteKind::Scalar(s) if !matches!(s, Prim::F32 | Prim::F64 | Prim::Bool))
     {
         return Err(syn::Error::new(
             c.span,

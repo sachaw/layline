@@ -209,7 +209,7 @@ impl Walk<'_> {
             });
             if f.kind.is_integer() {
                 self.env.bind(&f.name, quote!(#sub_var.#fname));
-            } else if matches!(f.kind, Kind::Scalar(Scalar::Bool)) {
+            } else if matches!(f.kind, Kind::Scalar(Scalar::Bool | Scalar::ByteBool)) {
                 self.env.bind_flag(&f.name, quote!(#sub_var.#fname));
             } else if matches!(f.kind, Kind::Nested { .. }) {
                 self.env.bind_nested(&f.name, quote!(#sub_var.#fname));

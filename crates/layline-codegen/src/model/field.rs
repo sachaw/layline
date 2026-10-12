@@ -95,6 +95,12 @@ pub enum Scalar {
     F64,
     /// `bool`, one bit wide.
     Bool,
+    /// `bool` as a whole byte, the form a byte-mode layout or message takes.
+    ///
+    /// Decode reads 0 as `false` and 1 as `true`, and refuses any other byte with
+    /// [`ParseError::Malformed`](layline_core::ParseError). Encode writes 0 or 1. For a flag the
+    /// format sets with any nonzero value, use a [`Kind::Codec`] of `layline::Nonzero`.
+    ByteBool,
 }
 
 impl Scalar {
@@ -106,6 +112,7 @@ impl Scalar {
             Scalar::F32 => 32,
             Scalar::F64 => 64,
             Scalar::Bool => 1,
+            Scalar::ByteBool => 8,
         }
     }
 
@@ -115,7 +122,7 @@ impl Scalar {
         match self {
             Scalar::F32 => "f32",
             Scalar::F64 => "f64",
-            Scalar::Bool => "bool",
+            Scalar::Bool | Scalar::ByteBool => "bool",
             Scalar::U(n) => match n {
                 0..=8 => "u8",
                 9..=16 => "u16",
@@ -298,7 +305,7 @@ impl Kind {
             Kind::Scalar(Scalar::U(_) | Scalar::I(_)) | Kind::Var { .. } | Kind::Codec { .. } => {
                 true
             }
-            Kind::Scalar(Scalar::F32 | Scalar::F64 | Scalar::Bool)
+            Kind::Scalar(Scalar::F32 | Scalar::F64 | Scalar::Bool | Scalar::ByteBool)
             | Kind::Array(..)
             | Kind::Nested { .. }
             | Kind::NestedArray { .. }
@@ -314,7 +321,7 @@ impl Kind {
         match self {
             Kind::Scalar(Scalar::U(_) | Scalar::I(_)) => "an integer",
             Kind::Scalar(Scalar::F32 | Scalar::F64) => "a float",
-            Kind::Scalar(Scalar::Bool) => "a bool",
+            Kind::Scalar(Scalar::Bool | Scalar::ByteBool) => "a bool",
             Kind::Array(Scalar::U(8), _) => "a run of raw bytes",
             Kind::Array(..) => "an array",
             Kind::Codec { .. } => "a `FieldCodec` value",

@@ -118,13 +118,19 @@ impl Container {
         match self {
             Container::Bytes { .. } => match kind {
                 Kind::Scalar(Scalar::Bool) => {
-                    no("byte mode has no `bool`. Declare it in word mode")
+                    no("byte mode stores a `bool` in a whole byte. Declare it `Scalar::ByteBool`, \
+                     or declare the record in word mode")
                 }
                 Kind::Text { .. } => {
                     no("byte mode has no text. Declare it in a `#[derive(Message)]`")
                 }
                 _ => Ok(()),
             },
+            Container::Words { .. } | Container::Word { .. }
+                if matches!(kind, Kind::Scalar(Scalar::ByteBool)) =>
+            {
+                no("a whole-byte `bool` is byte mode's. Declare a one-bit `Scalar::Bool`")
+            }
             Container::Words { .. } => match kind {
                 Kind::Array(s, _) if !matches!(s, Scalar::U(8 | 16)) => {
                     no("words mode allows only `[u16; K]` and `[u8; K]` arrays")

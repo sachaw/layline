@@ -102,6 +102,15 @@ fn bit_field(f: &Field, alone: bool) -> Result<(), Invalid> {
         return Ok(());
     }
     let bits = match &f.kind {
+        Kind::Scalar(Scalar::ByteBool) => {
+            return Err(Invalid::field(
+                &f.name,
+                String::from(
+                    "a whole-byte `bool` in a bit-addressed message. Declare a one-bit \
+                     `Scalar::Bool`",
+                ),
+            ));
+        }
         Kind::Scalar(s) => s.bits(),
         Kind::Codec { bits, .. } => *bits,
         Kind::Var { .. } => {

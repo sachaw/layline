@@ -55,3 +55,58 @@ impl FieldCodec for f64 {
         self.to_bits()
     }
 }
+
+/// A flag stored in `BITS` bits that is set when any of them is.
+///
+/// Decode reads any nonzero value as `true`, and encode writes `true` as 1. Use it where a format
+/// tests a flag with `!= 0`. A plain `bool` in a byte-mode layout is strict instead: 0 and 1 are
+/// the only values that decode.
+///
+/// ```
+/// use layline_core::{FieldCodec, Nonzero};
+///
+/// assert_eq!(Nonzero::<8>::from_raw(0x02), Nonzero(true));
+/// assert_eq!(Nonzero::<8>(true).to_raw(), 1);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+pub struct Nonzero<const BITS: u32 = 8>(pub bool);
+
+impl<const BITS: u32> Nonzero<BITS> {
+    /// Whether the flag is set.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> bool {
+        self.0
+    }
+}
+
+impl<const BITS: u32> From<bool> for Nonzero<BITS> {
+    #[inline]
+    fn from(set: bool) -> Self {
+        Self(set)
+    }
+}
+
+impl<const BITS: u32> From<Nonzero<BITS>> for bool {
+    #[inline]
+    fn from(flag: Nonzero<BITS>) -> Self {
+        flag.0
+    }
+}
+
+impl<const BITS: u32> FieldCodec for Nonzero<BITS> {
+    const BITS: u32 = {
+        assert!(BITS >= 1 && BITS <= 64, "a `Nonzero` is 1 to 64 bits wide");
+        BITS
+    };
+
+    #[inline]
+    fn from_raw(raw: u64) -> Self {
+        Self(raw != 0)
+    }
+
+    #[inline]
+    fn to_raw(&self) -> u64 {
+        u64::from(self.0)
+    }
+}

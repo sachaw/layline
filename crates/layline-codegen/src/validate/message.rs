@@ -9,8 +9,8 @@ use super::coverage::{Places, check_value, coverage, stampable};
 use super::names::{Known, Reads, Seen, read_only, resolve, stated_with};
 use super::{Invalid, field_names, ident, kind_paths, type_path};
 use crate::{
-    Absence, ChoiceDef, Count, Discriminant, Kind, Len, MessageDef, Param, Presence, Segment,
-    Stated,
+    Absence, ChoiceDef, Count, Discriminant, Kind, Len, MessageDef, Param, Presence, Scalar,
+    Segment, Stated,
 };
 
 /// Checks a message: every reference names an earlier field, and nothing follows a segment that
@@ -156,6 +156,15 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                              Make it a `Segment::Checksum` of its own",
                             f.name,
                         )));
+                    }
+                    if matches!(f.kind, Kind::Scalar(Scalar::Bool)) {
+                        return Err(Invalid::field(
+                            &f.name,
+                            String::from(
+                                "a byte-addressed message stores a `bool` in a whole byte. \
+                                 Declare it `Scalar::ByteBool`, or make the message bit-addressed",
+                            ),
+                        ));
                     }
                     if let Some(stated) = f.stated {
                         stated_here(at, &f.name, stated)?;

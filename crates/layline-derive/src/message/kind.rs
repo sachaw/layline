@@ -394,7 +394,14 @@ fn fixed_carrier(
         return Ok(Kind::Nested { ty: crate::attr::spelled(ty), bytes });
     }
     let bits = crate::width::declared_width(name, "codec", ty, bits)?;
+    let byte_bool = crate::ty::bare_ident(ty).is_some_and(|id| id == "bool");
     if let Some((bits, bspan)) = bits {
+        if byte_bool {
+            return Err(syn::Error::new(
+                bspan,
+                format!("field `{name}`: {}", crate::layout::STRICT_BOOL),
+            ));
+        }
         if scalar_of(ty).is_some() {
             return Err(syn::Error::new(
                 bspan,
@@ -415,6 +422,9 @@ fn fixed_carrier(
     }
     if let Some(s) = scalar_of(ty) {
         return Ok(Kind::Scalar(s));
+    }
+    if byte_bool {
+        return Ok(Kind::Scalar(Scalar::ByteBool));
     }
     if let Some((elem, dims)) = crate::ty::array_dims(ty)
         && let Some(s) = scalar_of(elem)

@@ -34,6 +34,9 @@ converts to and from that integer: `Header::from_bits(0x1A05)` is the header abo
 big-endian. Add `truncate` to `#[layout(..)]` to have encode keep the low bits of an oversized
 value, as a hardware register does, instead of panicking.
 
+In a `bytes = N` layout a `bool` is one byte that must be 0 or 1: decode refuses any other value.
+A flag byte that any nonzero value sets is `#[codec(8)] halted: layline::Nonzero`.
+
 ## Messages
 
 ```rust

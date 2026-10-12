@@ -133,6 +133,8 @@ pub fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
                 fields.iter().map(|f| {
                     let asserted = f.magic.as_ref().map(|m| ("#[magic]", m.span));
                     let asserted = asserted.or(f.check.as_ref().map(|c| ("#[checksum]", c.span)));
+                    let strict = matches!(f.kind, ByteKind::Scalar(Prim::Bool));
+                    let asserted = asserted.or(strict.then_some(("strict `bool`", f.span)));
                     (&f.ident, asserted.or(range_asserted(&f.range)))
                 }),
             )?;

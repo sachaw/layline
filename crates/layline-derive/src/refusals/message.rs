@@ -670,3 +670,17 @@ pub struct M {
         "field `name`: a string has no elements to cap",
     );
 }
+
+#[test]
+fn a_message_byte_bool_takes_no_codec_width() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Reply {
+    #[codec(8)]
+    pub on: bool,
+}"#,
+        "field `on`: a `bool` here is one byte",
+    );
+}

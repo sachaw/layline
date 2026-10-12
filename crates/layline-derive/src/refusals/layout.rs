@@ -526,3 +526,63 @@ fn prefix_value_is_word_mode_only() {
         );
     }
 }
+
+#[test]
+fn a_byte_bool_takes_no_codec_width() {
+    refused(
+        r#"use layline::Layout;
+
+#[derive(Layout)]
+#[layout(bytes = 1)]
+pub struct Flags {
+    #[codec(8)]
+    pub on: bool,
+}"#,
+        "field `on`: a `bool` here is one byte, 0 or 1, and decode refuses any other value. \
+         Remove the #[codec(N)], or use `layline::Nonzero`",
+    );
+}
+
+#[test]
+fn a_bool_array_has_no_byte_layout() {
+    refused(
+        r#"use layline::Layout;
+
+#[derive(Layout)]
+#[layout(bytes = 2)]
+pub struct Flags {
+    pub on: [bool; 2],
+}"#,
+        "field `on`: an array of `bool` has no byte layout",
+    );
+}
+
+#[test]
+fn a_view_cannot_check_a_strict_bool() {
+    refused(
+        r#"use layline::Layout;
+
+#[derive(Layout)]
+#[layout(bytes = 2, view)]
+pub struct Flags {
+    pub n: u8,
+    pub on: bool,
+}"#,
+        "`Flags`: `view` cannot check the strict `bool` on `on`",
+    );
+}
+
+#[test]
+fn a_byte_bool_is_not_a_magic() {
+    refused(
+        r#"use layline::Layout;
+
+#[derive(Layout)]
+#[layout(bytes = 1)]
+pub struct Flags {
+    #[magic(1)]
+    pub on: bool,
+}"#,
+        "field `on`:",
+    );
+}

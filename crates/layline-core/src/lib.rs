@@ -132,7 +132,7 @@ pub use bits::{BitCodec, BitReader, BitWriter};
 pub use bound::WireInt;
 pub use buffer::{Buffer, Fixed, Overflow};
 pub use checksum::Checksum;
-pub use codec::FieldCodec;
+pub use codec::{FieldCodec, Nonzero};
 pub use dispatch::Dispatch;
 pub use extent::Extent;
 pub use field::{Layout, LayoutError};

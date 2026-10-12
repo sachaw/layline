@@ -19,6 +19,7 @@ use layline_codegen::{Endian, Root};
 use crate::claim::At;
 use asserts::Asserts;
 use declared::{Internal, Overlay, Prim};
+pub(crate) use field::STRICT_BOOL;
 pub use group::{GroupKeys, group_codec};
 
 pub fn derive(input: &syn::DeriveInput) -> syn::Result<TokenStream> {

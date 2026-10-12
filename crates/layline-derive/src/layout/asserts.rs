@@ -61,6 +61,8 @@ pub(super) struct Asserts {
     magic: Vec<MagicAt>,
     check: Vec<CheckAt>,
     range: Vec<RangeAt>,
+    /// Byte-mode `bool` fields, by name and byte offset: 0 or 1, anything else malformed.
+    flags: Vec<(String, usize)>,
 }
 
 struct RangeAt {
@@ -75,7 +77,10 @@ impl Asserts {
     }
 
     pub(super) fn any(&self) -> bool {
-        !self.magic.is_empty() || !self.check.is_empty() || !self.range.is_empty()
+        !self.magic.is_empty()
+            || !self.check.is_empty()
+            || !self.range.is_empty()
+            || !self.flags.is_empty()
     }
 }
 
@@ -110,6 +115,13 @@ impl Plan<'_> {
         let order_of = |name: &str| extents.iter().position(|(n, ..)| n == name);
 
         let mut asserts = Asserts::default();
+        for item in &self.items {
+            if let Body::Packed(p) = &item.body
+                && p.reading == Reading::Native(Prim::Bool)
+            {
+                asserts.flags.push((item.ident.to_string(), (item.phys_bit / 8) as usize));
+            }
+        }
         for item in &self.items {
             let Some(r) = &item.range else { continue };
             let Some((min, max)) = value_bounds(&item.body) else {
@@ -441,6 +453,22 @@ impl Plan<'_> {
                             hi: #hi,
                         });
                     }
+                }
+            }
+        });
+        quote! { #(#checks)* }
+    }
+
+    /// Refuses a byte-mode `bool` that is neither 0 nor 1.
+    pub(super) fn flag_checks(&self, buf: &TokenStream) -> TokenStream {
+        let root = self.root;
+        let checks = self.asserts.flags.iter().map(|(name, at)| {
+            quote! {
+                if #buf[#at] > 1 {
+                    return ::core::result::Result::Err(#root::ParseError::Malformed {
+                        field: #name,
+                        at: #at,
+                    });
                 }
             }
         });

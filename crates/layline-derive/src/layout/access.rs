@@ -634,6 +634,7 @@ impl Plan<'_> {
         match s {
             Prim::U8 => quote! { #buf[#off] },
             Prim::I8 => quote! { #buf[#off] as ::core::primitive::i8 },
+            Prim::Bool => quote! { (#buf[#off] != 0) },
             _ => {
                 let ty = s.ident();
                 let (from, _) = byte_fns(self.endian);
@@ -655,7 +656,7 @@ impl Plan<'_> {
         match body {
             Body::Packed(Packed { reading: Reading::Native(s), .. }) => match s {
                 Prim::U8 => quote! { #buf[#off] = #value; },
-                Prim::I8 => quote! { #buf[#off] = #value as ::core::primitive::u8; },
+                Prim::I8 | Prim::Bool => quote! { #buf[#off] = #value as ::core::primitive::u8; },
                 _ => {
                     let (_, to) = byte_fns(self.endian);
                     let w = s.width();
@@ -783,6 +784,7 @@ fn scalar_read(s: Prim, offset: usize, buf: &TokenStream, endian: Endian) -> Tok
     match s {
         Prim::U8 => quote! { #buf[#offset] },
         Prim::I8 => quote! { #buf[#offset] as ::core::primitive::i8 },
+        Prim::Bool => quote! { (#buf[#offset] != 0) },
         _ => {
             let ty = s.ident();
             let ty = quote!(::core::primitive::#ty);
@@ -806,7 +808,7 @@ fn scalar_write(
     let (_, to) = byte_fns(endian);
     match s {
         Prim::U8 => quote! { #buf[#offset] = #value; },
-        Prim::I8 => quote! { #buf[#offset] = #value as ::core::primitive::u8; },
+        Prim::I8 | Prim::Bool => quote! { #buf[#offset] = #value as ::core::primitive::u8; },
         _ => put(buf, &quote!(#offset), s.width(), &quote!(#value.#to())),
     }
 }

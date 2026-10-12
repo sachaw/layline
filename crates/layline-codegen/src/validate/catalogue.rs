@@ -22,7 +22,7 @@ pub(crate) fn validate_dispatch(d: &DispatchDef) -> Result<(), Invalid> {
     }
     let bits = match d.id {
         Scalar::U(b) | Scalar::I(b) => b,
-        Scalar::Bool | Scalar::F32 | Scalar::F64 => {
+        Scalar::Bool | Scalar::ByteBool | Scalar::F32 | Scalar::F64 => {
             return Err(Invalid::Other(format!(
                 "dispatch `{name}`: the id must be an integer, not a bool or a float"
             )));
@@ -98,9 +98,10 @@ pub(crate) fn validate_enum(e: &EnumDef) -> Result<(), Invalid> {
         Scalar::U(b) => (b, false),
         Scalar::I(b) => (b, true),
         Scalar::Bool => (1, false),
-        Scalar::F32 | Scalar::F64 => {
+        Scalar::ByteBool | Scalar::F32 | Scalar::F64 => {
             return Err(Invalid::Other(format!(
-                "catalogue `{name}`: the representation must be an integer, not a float"
+                "catalogue `{name}`: the representation must be an integer or a one-bit bool, \
+                 not a float or a whole-byte bool"
             )));
         }
     };

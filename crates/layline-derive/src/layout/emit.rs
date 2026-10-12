@@ -279,11 +279,13 @@ impl Plan<'_> {
         let magic = self.magic_checks();
         let prefix = self.prefix_check();
         let ranges = self.range_checks(&field);
+        let flags = self.flag_checks(&quote!(wire));
         let verify = self.check_verify(&field);
         quote! {
             #magic
             #prefix
             #prologue
+            #flags
             #ranges
             #verify
             ::core::result::Result::Ok(#built)

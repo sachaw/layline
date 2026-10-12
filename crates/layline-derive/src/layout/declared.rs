@@ -107,6 +107,8 @@ pub enum Prim {
     I64,
     F32,
     F64,
+    /// `bool` as one byte: 0 or 1, and decode refuses any other byte.
+    Bool,
 }
 
 impl Prim {
@@ -122,13 +124,14 @@ impl Prim {
             "i64" => Self::I64,
             "f32" => Self::F32,
             "f64" => Self::F64,
+            "bool" => Self::Bool,
             _ => return None,
         })
     }
 
     pub fn width(self) -> usize {
         match self {
-            Self::U8 | Self::I8 => 1,
+            Self::U8 | Self::I8 | Self::Bool => 1,
             Self::U16 | Self::I16 => 2,
             Self::U32 | Self::I32 | Self::F32 => 4,
             Self::U64 | Self::I64 | Self::F64 => 8,
@@ -147,6 +150,7 @@ impl Prim {
             Self::I64 => "i64",
             Self::F32 => "f32",
             Self::F64 => "f64",
+            Self::Bool => "bool",
         };
         syn::Ident::new(name, Span::call_site())
     }
