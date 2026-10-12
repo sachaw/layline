@@ -348,18 +348,20 @@ impl Plan<'_> {
                     return quote! { #buf[#offset] = #new; };
                 }
                 let (_, to) = byte_fns(self.endian);
-                let end = offset + len;
-                let take = if reg == len {
-                    quote!()
+                let bytes = if reg == len {
+                    quote!(__new.#to())
                 } else {
-                    match self.endian {
-                        Endian::Le => quote!([..#len]),
-                        Endian::Be => {
-                            let pad = reg - len;
-                            quote!([#pad..])
-                        }
-                    }
+                    let first = match self.endian {
+                        Endian::Le => 0,
+                        Endian::Be => reg - len,
+                    };
+                    let picks = (first..first + len).map(|i| quote!(__b[#i]));
+                    quote! {{
+                        let __b = __new.#to();
+                        [ #(#picks),* ]
+                    }}
                 };
+                let put = put(buf, &quote!(#offset), len, &bytes);
                 let odd = tail.map(|(byte, bits)| {
                     let down = 128 - shift;
                     let keep = Literal::u8_suffixed(!(((1u16 << bits) - 1) as u8));
@@ -372,7 +374,7 @@ impl Plan<'_> {
                 quote! {{
                     #bind
                     let __new = #new;
-                    #buf[#offset..#end].copy_from_slice(&__new.#to() #take);
+                    #put
                     #odd
                 }}
             }
@@ -380,11 +382,11 @@ impl Plan<'_> {
                 let (_, to) = byte_fns(self.endian);
                 let load = scalar_read(*ty, *byte, &place.buf, self.endian);
                 let mask = uint_literal(*ty, *mask);
-                let (buf, a, b) = (&place.buf, *byte, byte + ty.width());
+                let put = put(&place.buf, &quote!(#byte), ty.width(), &quote!(__new.#to()));
                 quote! {{
                     let __cur = #load;
                     let __new = (__cur & !(#mask << #off)) | (((#raw) & #mask) << #off);
-                    #buf[#a..#b].copy_from_slice(&__new.#to());
+                    #put
                 }}
             }
             Access::Whole { ty, offset } => {
@@ -518,11 +520,14 @@ impl Plan<'_> {
                             .map_err(|__err| __err.rebased(#a))?
                     }
                 } else {
-                    quote! {{
-                        let mut __sub = [0u8; #bytes];
-                        __sub.copy_from_slice(&#buf[#a..#b]);
-                        <#ty>::decode(&__sub)
-                    }}
+                    quote! {
+                        <#ty>::decode(
+                            match <&[::core::primitive::u8; #bytes]>::try_from(&#buf[#a..#b]) {
+                                ::core::result::Result::Ok(__sub) => __sub,
+                                ::core::result::Result::Err(_) => &[0u8; #bytes],
+                            },
+                        )
+                    }
                 }
             }
             Body::Repeat { .. } if native_leaf(body) => {
@@ -554,8 +559,8 @@ impl Plan<'_> {
                 quote! { #guard #store }
             }
             Body::Nested { bytes, .. } => {
-                let (buf, a, b) = (&w.place.buf, (at / 8) as usize, (at / 8) as usize + bytes);
-                quote! { #buf[#a..#b].copy_from_slice(&#value.encode()); }
+                let (buf, a) = (&w.place.buf, (at / 8) as usize);
+                put(buf, &quote!(#a), *bytes, &quote!(#value.encode()))
             }
             Body::Repeat { .. } if native_leaf(body) => {
                 let off = Literal::usize_unsuffixed((at / 8) as usize);
@@ -601,11 +606,14 @@ impl Plan<'_> {
                     Body::Packed(Packed { reading: Reading::Native(Prim::U8), .. })
                 ) =>
             {
-                quote! {{
-                    let mut __run = [0u8; #len];
-                    __run.copy_from_slice(&#buf[#off..#off + #len]);
-                    __run
-                }}
+                // A fixed-size subarray of a fixed-size array: the length always matches, so the
+                // fallback is dead code and no panic path or temporary remains.
+                quote! {
+                    match <&[::core::primitive::u8; #len]>::try_from(&#buf[#off..#off + #len]) {
+                        ::core::result::Result::Ok(__run) => *__run,
+                        ::core::result::Result::Err(_) => [0u8; #len],
+                    }
+                }
             }
             Body::Repeat { body: inner, .. } => {
                 let i = quote::format_ident!("__i{}", depth);
@@ -651,7 +659,7 @@ impl Plan<'_> {
                 _ => {
                     let (_, to) = byte_fns(self.endian);
                     let w = s.width();
-                    quote! { #buf[#off..#off + #w].copy_from_slice(&#value.#to()); }
+                    put(buf, &off, w, &quote!(#value.#to()))
                 }
             },
             Body::Repeat { body: inner, len }
@@ -660,7 +668,13 @@ impl Plan<'_> {
                     Body::Packed(Packed { reading: Reading::Native(Prim::U8), .. })
                 ) =>
             {
-                quote! { #buf[#off..#off + #len].copy_from_slice(&#value); }
+                quote! {
+                    if let ::core::result::Result::Ok(__run) =
+                        <&mut [::core::primitive::u8; #len]>::try_from(&mut #buf[#off..#off + #len])
+                    {
+                        *__run = #value;
+                    }
+                }
             }
             Body::Repeat { body: inner, len } => {
                 let i = quote::format_ident!("__i{}", depth);
@@ -674,6 +688,25 @@ impl Plan<'_> {
                 }
             }
             _ => unreachable!("native_leaf admits only scalar arrays"),
+        }
+    }
+}
+
+/// Stores the `[u8; n]` array `bytes` at byte `at` of `buf`.
+///
+/// A fixed-size subarray of a fixed-size array always matches, so unlike `copy_from_slice`, which
+/// a size-optimized build leaves out of line, no length check or panic path remains.
+pub(super) fn put(
+    buf: &TokenStream,
+    at: &TokenStream,
+    n: usize,
+    bytes: &TokenStream,
+) -> TokenStream {
+    quote! {
+        if let ::core::result::Result::Ok(__dst) =
+            <&mut [::core::primitive::u8; #n]>::try_from(&mut #buf[#at..#at + #n])
+        {
+            *__dst = #bytes;
         }
     }
 }
@@ -774,9 +807,6 @@ fn scalar_write(
     match s {
         Prim::U8 => quote! { #buf[#offset] = #value; },
         Prim::I8 => quote! { #buf[#offset] = #value as ::core::primitive::u8; },
-        _ => {
-            let end = offset + s.width();
-            quote! { #buf[#offset..#end].copy_from_slice(&#value.#to()); }
-        }
+        _ => put(buf, &quote!(#offset), s.width(), &quote!(#value.#to())),
     }
 }

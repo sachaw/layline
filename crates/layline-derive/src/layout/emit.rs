@@ -258,28 +258,35 @@ impl Plan<'_> {
             let value = self.read(&item.body, item.phys_bit, i, &place);
             quote! { #name: #value, }
         });
-        let built = quote! {
-            #prologue
-            Self { #(#fields)* }
-        };
+        let built = quote! { Self { #(#fields)* } };
         if !self.asserts.any() && self.prefix_value.is_none() {
             return if self.internal.0 {
-                quote! { ::core::result::Result::Ok({ #built }) }
+                quote! { #prologue ::core::result::Result::Ok(#built) }
             } else {
-                built
+                quote! { #prologue #built }
             };
         }
+        // Every check reads the wire, so the value is built once, in the return slot.
+        let field = |name: &syn::Ident| {
+            let (i, item) = self
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, item)| &item.ident == name)
+                .expect("a check names a field of this layout");
+            self.read(&item.body, item.phys_bit, i, &place)
+        };
         let magic = self.magic_checks();
         let prefix = self.prefix_check();
-        let ranges = self.range_checks();
-        let verify = self.check_verify();
+        let ranges = self.range_checks(&field);
+        let verify = self.check_verify(&field);
         quote! {
             #magic
             #prefix
-            let __value = { #built };
+            #prologue
             #ranges
             #verify
-            ::core::result::Result::Ok(__value)
+            ::core::result::Result::Ok(#built)
         }
     }
 

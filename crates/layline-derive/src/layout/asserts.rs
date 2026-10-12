@@ -420,15 +420,19 @@ impl Plan<'_> {
         quote! { #(#checks)* }
     }
 
-    pub(super) fn range_checks(&self) -> TokenStream {
+    pub(super) fn range_checks(
+        &self,
+        field_of: &dyn Fn(&syn::Ident) -> TokenStream,
+    ) -> TokenStream {
         let root = self.root;
         let checks = self.asserts.range.iter().map(|r| {
-            let (field, name) = (&r.field, r.field.to_string());
+            let name = r.field.to_string();
+            let read = field_of(&r.field);
             let (lo, hi) = (Literal::i64_suffixed(r.lo as i64), Literal::i64_suffixed(r.hi as i64));
             quote! {
                 {
                     // `contains` avoids `clippy::manual_range_contains` in user code.
-                    let __got = #root::WireInt::to_i64(&__value.#field);
+                    let __got = #root::WireInt::to_i64(&(#read));
                     if !(#lo..=#hi).contains(&__got) {
                         return ::core::result::Result::Err(#root::ParseError::OutOfRange {
                             field: #name,
@@ -460,15 +464,19 @@ impl Plan<'_> {
         quote! { #(#guards)* }
     }
 
-    pub(super) fn check_verify(&self) -> TokenStream {
+    pub(super) fn check_verify(
+        &self,
+        field_of: &dyn Fn(&syn::Ident) -> TokenStream,
+    ) -> TokenStream {
         let root = self.root;
         let checks = self.asserts.check.iter().map(|c| {
-            let (field, name) = (&c.field, c.field.to_string());
+            let name = c.field.to_string();
+            let read = field_of(&c.field);
             let want = fold_over(&c.algorithm, &c.runs, quote!(wire), root);
             quote! {
                 {
                     let __want = #root::WireInt::to_i64(&#want);
-                    let __got = #root::WireInt::to_i64(&__value.#field);
+                    let __got = #root::WireInt::to_i64(&(#read));
                     if __want != __got {
                         return ::core::result::Result::Err(#root::ParseError::Checksum {
                             field: #name,
@@ -483,9 +491,9 @@ impl Plan<'_> {
     }
 
     pub(super) fn magic_writes(&self) -> TokenStream {
-        let writes = self.asserts.magic.iter().enumerate().map(|(i, m)| {
-            let (at, end) = (m.at, m.at + m.bytes.len());
-            quote! { __out[#at..#end].copy_from_slice(Self::__LAYLINE_MAGIC[#i]); }
+        let writes = self.asserts.magic.iter().map(|m| {
+            let (at, bytes) = (m.at, &m.bytes);
+            super::access::put(&quote!(__out), &quote!(#at), bytes.len(), &quote!([ #(#bytes),* ]))
         });
         quote! { #(#writes)* }
     }
@@ -497,14 +505,20 @@ impl Plan<'_> {
             quote! { __out[#at..#end].fill(0); }
         });
         let writes = self.asserts.check.iter().map(|c| {
-            let (at, end) = (c.at, c.at + c.width);
             let value = fold_over(&c.algorithm, &c.runs, quote!(__out), root);
             let ty = self.field_ty(&c.field);
             let to_bytes = byte_fns(self.endian).1;
+            let at = c.at;
+            let put = super::access::put(
+                &quote!(__out),
+                &quote!(#at),
+                c.width,
+                &quote!(__ck.#to_bytes()),
+            );
             quote! {
                 {
                     let __ck: #ty = #value;
-                    __out[#at..#end].copy_from_slice(&__ck.#to_bytes());
+                    #put
                 }
             }
         });
