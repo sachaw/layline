@@ -76,6 +76,11 @@ impl Asserts {
         !self.range.is_empty()
     }
 
+    /// Whether encode writes bytes a caller does not hold: a magic or a checksum.
+    pub(super) fn stamped(&self) -> bool {
+        !self.magic.is_empty() || !self.check.is_empty()
+    }
+
     pub(super) fn any(&self) -> bool {
         !self.magic.is_empty()
             || !self.check.is_empty()
@@ -414,16 +419,17 @@ impl Plan<'_> {
             .map_or_else(|| quote!(::core::primitive::u8), |i| body_ty(&i.body))
     }
 
-    pub(super) fn magic_checks(&self) -> TokenStream {
+    /// Refuses `wire` unless it holds each magic. `owned` is the layout type.
+    pub(super) fn magic_checks(&self, owned: &TokenStream) -> TokenStream {
         let root = self.root;
         let checks = self.asserts.magic.iter().enumerate().map(|(i, m)| {
             let (at, field) = (m.at, &m.field);
             let end = m.at + m.bytes.len();
             quote! {
-                if wire[#at..#end] != *Self::__LAYLINE_MAGIC[#i] {
+                if wire[#at..#end] != *#owned::__LAYLINE_MAGIC[#i] {
                     return ::core::result::Result::Err(#root::ParseError::Magic {
                         field: #field,
-                        expected: Self::__LAYLINE_MAGIC[#i],
+                        expected: #owned::__LAYLINE_MAGIC[#i],
                         at: #at,
                     });
                 }

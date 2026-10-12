@@ -50,7 +50,10 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 /// - `prefix = K`: the low `K` bits hold a `Dispatch` id. Sets `Layout::PREFIX_BITS`. `bits` only.
 /// - `prefix_value = V`: the prefix value. Encode writes it and decode checks it. Needs `prefix`.
 /// - `view`: also generates `<Name>View`, which reads and writes the fields in place in a byte
-///   buffer. Not allowed with `#[magic]`, `#[checksum]` or `#[range]`.
+///   buffer. A view is unchecked, so a reader can inspect a corrupt record: `verify()` runs the
+///   checks `decode` runs on magic bytes, `prefix_value` and checksums, `checked(&wire)` views
+///   only bytes that pass them, and `seal()` rewrites the prefix, magic and checksums after the
+///   setters. Not allowed with `#[range]` or a byte-mode `bool`.
 /// - `truncate`: encode keeps the low `N` bits of a value wider than its `#[bits(N)]` field, as a
 ///   hardware register does, instead of panicking. Decode is unchanged. Without it, encode panics
 ///   rather than write bits that read back as a different value. A view's setters always keep the

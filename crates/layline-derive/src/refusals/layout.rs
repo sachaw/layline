@@ -217,22 +217,6 @@ pub struct Tag {
 }
 
 #[test]
-fn layout_magic_with_view() {
-    refused(
-        r#"use layline::Layout;
-
-#[derive(Layout)]
-#[layout(bytes = 4, endian = le, view)]
-pub struct Header {
-    #[magic(b"AB")]
-    pub sync: [u8; 2],
-    pub rest: u16,
-}"#,
-        "`Header`: `view` cannot check the #[magic] on `sync`. Remove `view` or the #[magic]",
-    );
-}
-
-#[test]
 fn narrow_bits_disagree() {
     refused(
         r#"use layline::{Layout, U};

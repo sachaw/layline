@@ -276,8 +276,8 @@ impl Plan<'_> {
                 .expect("a check names a field of this layout");
             self.read(&item.body, item.phys_bit, i, &place)
         };
-        let magic = self.magic_checks();
-        let prefix = self.prefix_check();
+        let magic = self.magic_checks(&quote!(Self));
+        let prefix = self.prefix_check(self.hoisted());
         let ranges = self.range_checks(&field);
         let flags = self.flag_checks(&quote!(wire));
         let verify = self.check_verify(&field);
@@ -292,7 +292,7 @@ impl Plan<'_> {
         }
     }
 
-    fn prefix_window(&self) -> Access {
+    pub(super) fn prefix_window(&self) -> Access {
         let at = self.prefix_physical();
         let (c0, span) = self.container_window(at, u64::from(self.prefix));
         Access::Window {
@@ -306,15 +306,16 @@ impl Plan<'_> {
         }
     }
 
-    /// Refuses prefix bits other than `prefix_value`.
-    fn prefix_check(&self) -> TokenStream {
+    /// Refuses prefix bits other than `prefix_value`, read from `__raw` when `loaded`, and from
+    /// `wire` otherwise.
+    pub(super) fn prefix_check(&self, loaded: bool) -> TokenStream {
         let Some(expected) = self.prefix_value else {
             return quote!();
         };
         let root = self.root;
         let mask = proc_macro2::Literal::u64_unsuffixed((1u64 << self.prefix).wrapping_sub(1));
         let expected = proc_macro2::Literal::u64_unsuffixed(expected as u64);
-        let read = if self.hoisted() {
+        let read = if loaded {
             // `__raw` is already loaded.
             let ph = proc_macro2::Literal::u64_unsuffixed(self.prefix_physical());
             quote! {

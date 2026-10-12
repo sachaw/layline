@@ -131,10 +131,8 @@ pub fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
                 &input.ident,
                 view,
                 fields.iter().map(|f| {
-                    let asserted = f.magic.as_ref().map(|m| ("#[magic]", m.span));
-                    let asserted = asserted.or(f.check.as_ref().map(|c| ("#[checksum]", c.span)));
                     let strict = matches!(f.kind, ByteKind::Scalar(Prim::Bool));
-                    let asserted = asserted.or(strict.then_some(("strict `bool`", f.span)));
+                    let asserted = strict.then_some(("strict `bool`", f.span));
                     (&f.ident, asserted.or(range_asserted(&f.range)))
                 }),
             )?;
@@ -309,7 +307,9 @@ fn range_asserted(range: &Option<Range>) -> Option<(&'static str, Span)> {
     range.as_ref().map(|r| ("#[range]", r.span))
 }
 
-/// A view skips decode, so it cannot check `#[magic]`, `#[checksum]` or `#[range]`.
+/// A view reads and writes values without decode's checks. It verifies a magic, a prefix or a
+/// checksum on request, and `seal` rewrites them, but a getter cannot keep a `#[range]` or a
+/// strict `bool` to the values decode allows.
 fn viewless<'a>(
     container: &syn::Ident,
     view: bool,

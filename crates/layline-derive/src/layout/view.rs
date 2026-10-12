@@ -39,15 +39,128 @@ impl Plan<'_> {
         });
 
         let names: Vec<&syn::Ident> = self.items.iter().map(|item| &item.ident).collect();
+        let checks = self.view_checks(&place);
         view_shell(
             &self.vis,
             owned,
             &view,
             self.wire_bytes,
             &names,
-            quote! { #(#accessors)* },
+            quote! { #(#accessors)* #checks },
             self.root,
         )
+    }
+
+    /// `decode`, `verify`, `checked`, `checked_mut` and, for a record with a magic or a checksum,
+    /// `seal`.
+    fn view_checks(&self, place: &Place) -> TokenStream {
+        let root = self.root;
+        let owned = &self.ident;
+        let wire_bytes = self.wire_bytes;
+        let wire = quote!(wire);
+        let read_wire = Place { buf: wire.clone(), buf_ref: wire.clone(), hoisted: false };
+        let field_of = |name: &syn::Ident| {
+            let (i, item) = self
+                .items
+                .iter()
+                .enumerate()
+                .find(|(_, item)| &item.ident == name)
+                .expect("a check names a field of this layout");
+            self.read(&item.body, item.phys_bit, i, &read_wire)
+        };
+        let magic = self.magic_checks(&quote!(#owned));
+        let prefix = self.prefix_check(false);
+        let sums = self.check_verify(&field_of);
+        let checked_decode = self.asserts.any() || self.internal.0 || self.prefix_value.is_some();
+        let decoded = if checked_decode {
+            let fields = self.items.iter().enumerate().map(|(i, item)| {
+                let name = &item.ident;
+                let value = self.read(&item.body, item.phys_bit, i, place);
+                quote! { #name: #value, }
+            });
+            quote! { #owned { #(#fields)* } }
+        } else {
+            quote! { #owned::decode(&self.0) }
+        };
+        let seal = (self.asserts.stamped() || self.prefix_value.is_some()).then(|| {
+            let out = Place { buf: quote!(__out), buf_ref: quote!(__out), hoisted: false };
+            let prefix = self.prefix_value.map(|v| {
+                let access = self.prefix_window();
+                let super::access::Access::Window { reg, .. } = &access else {
+                    unreachable!("prefix_window builds a window")
+                };
+                let v = super::access::win_literal(*reg, v);
+                self.store(&access, &out, quote!(#v))
+            });
+            let magic = self.magic_writes();
+            let sums = self.checksum_writes();
+            quote! {
+                /// Write what `encode` writes that no field holds, over the bytes as they are now:
+                /// the prefix, each magic, then each checksum in declaration order. Call it after
+                /// the setters.
+                #[inline]
+                pub fn seal(&mut self) {
+                    let __out = &mut self.0;
+                    #prefix
+                    #magic
+                    #sums
+                }
+            }
+        });
+        quote! {
+            /// Decode every field into the owned type, without the record's checks.
+            ///
+            /// [`verify`](Self::verify) runs them.
+            #[must_use]
+            pub fn decode(&self) -> #owned {
+                #decoded
+            }
+
+            /// Run the checks `decode` on the owned type runs, over the bytes as they are now.
+            ///
+            /// # Errors
+            ///
+            /// The first check the bytes fail.
+            #[inline]
+            pub fn verify(&self) -> ::core::result::Result<(), #root::ParseError> {
+                let wire = &self.0;
+                let _ = wire;
+                #magic
+                #prefix
+                #sums
+                ::core::result::Result::Ok(())
+            }
+
+            /// View borrowed wire bytes that pass [`verify`](Self::verify).
+            ///
+            /// # Errors
+            ///
+            /// The first check the bytes fail.
+            #[inline]
+            pub fn checked(
+                wire: &[::core::primitive::u8; #wire_bytes],
+            ) -> ::core::result::Result<&Self, #root::ParseError> {
+                let view = Self::from_wire(wire);
+                view.verify()?;
+                ::core::result::Result::Ok(view)
+            }
+
+            /// A mutable [`checked`](Self::checked).
+            ///
+            /// # Errors
+            ///
+            /// The first check the bytes fail.
+            #[inline]
+            pub fn checked_mut(
+                wire: &mut [::core::primitive::u8; #wire_bytes],
+            ) -> ::core::result::Result<&mut Self, #root::ParseError> {
+                let view = Self::from_wire_mut(wire);
+                view.verify()?;
+                ::core::result::Result::Ok(view)
+            }
+
+            #seal
+        }
     }
 }
 
@@ -69,7 +182,6 @@ fn view_shell(
         "[`{owned}`] viewed in place over its wire bytes.\n\n\
          Accessors read or write one field without decoding the rest.",
     );
-    let decode_doc = "Decode every field into the owned type.";
     quote! {
         #[doc = #doc]
         #[repr(transparent)]
@@ -110,12 +222,6 @@ fn view_shell(
                 &self.0
             }
 
-            #[doc = #decode_doc]
-            #[must_use]
-            pub fn decode(&self) -> #owned {
-                #owned::decode(&self.0)
-            }
-
             #accessors
         }
 
@@ -150,6 +256,10 @@ fn view_shell(
 
             fn decode(&self) -> Self::Owned {
                 #view::decode(self)
+            }
+
+            fn verify(&self) -> ::core::result::Result<(), #root::ParseError> {
+                #view::verify(self)
             }
         }
 
