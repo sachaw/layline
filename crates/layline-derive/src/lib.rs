@@ -191,7 +191,11 @@ pub fn derive_dispatch(input: TokenStream) -> TokenStream {
 /// # Variant attributes
 ///
 /// - `#[value(N)]`: the raw value of a unit variant. An integer discriminant, `Variant = N`,
-///   states it too. A variant with neither is refused: its position is not a value.
+///   states it too. A variant with neither is refused: its position is not a value, unless the
+///   enum is `#[repr(u8)]`, `#[repr(u16)]`, `#[repr(u32)]` or `#[repr(u64)]`. Rust then defines
+///   it, as zero for the first variant and one past the variant before otherwise, so the raw value
+///   is what `as` gives. An implicit variant after a `#[value(N)]` or `#[other]` one is refused,
+///   since that variant's raw value is not its Rust discriminant.
 /// - `#[other]`: a one-field variant, over an unsigned integer, for every unlisted value. Without
 ///   it, the variants must list every `N`-bit value.
 ///

@@ -270,3 +270,37 @@ pub enum Kind {
         "variant `B`: needs #[value(N)]",
     );
 }
+
+#[test]
+fn codec_implicit_after_a_stated_value_in_a_repr_enum() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(1)]
+#[repr(u8)]
+pub enum Kind {
+    #[value(1)]
+    A,
+    B,
+}"#,
+        "variant `B`: Rust numbers it one past the variant before, whose wire value is not its \
+         Rust discriminant",
+    );
+}
+
+#[test]
+fn codec_signed_repr_does_not_state_positions() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(1)]
+#[repr(i8)]
+pub enum Kind {
+    A,
+    B,
+}"#,
+        "variant `A`: needs #[value(N)]",
+    );
+}

@@ -367,9 +367,20 @@ fn enum_codec(
 ) -> syn::Result<TokenStream> {
     let mut listed: Vec<Listed<'_>> = Vec::new();
     let mut open: Option<(Open<'_>, Span)> = None;
+    // With `#[repr(uN)]`, Rust numbers an implicit variant one past the variant before it, so
+    // that number is stated. `None` once the previous variant's wire value is not its Rust one.
+    let repr = unsigned_repr(input);
+    let mut implicit: Option<u64> = None;
 
-    for v in &data.variants {
-        match codec_key(v)? {
+    for (i, v) in data.variants.iter().enumerate() {
+        let key = codec_key(v, repr.is_some(), i == 0, implicit)?;
+        implicit = match &key {
+            Key::Value(lit) if v.attrs.iter().all(|a| !a.path().is_ident("value")) => {
+                lit.base10_parse::<u64>().ok().and_then(|n| n.checked_add(1))
+            }
+            _ => None,
+        };
+        match key {
             Key::Other(attr) => {
                 if let Some((_, first)) = &open {
                     return Err(noted(
@@ -433,11 +444,34 @@ fn enum_codec(
     Ok(expand_enum(&input.ident, &listed, open.map(|(o, _)| o), width, root))
 }
 
-/// The variant's `#[value(N)]`, `#[other]`, or its explicit `= N` discriminant.
+/// The `uN` of a `#[repr(uN)]` on the enum.
+fn unsigned_repr(input: &DeriveInput) -> Option<syn::Ident> {
+    let mut found = None;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("repr")) {
+        let _ = attr.parse_nested_meta(|m| {
+            if let Some(id) = m.path.get_ident()
+                && matches!(id.to_string().as_str(), "u8" | "u16" | "u32" | "u64")
+            {
+                found = Some(id.clone());
+            }
+            Ok(())
+        });
+    }
+    found
+}
+
+/// The variant's `#[value(N)]`, `#[other]`, or its `= N` discriminant.
 ///
-/// A discriminant states the value as plainly as `#[value(N)]` does. A variant with neither has
-/// no value: its position in the enum is not a wire value.
-fn codec_key(v: &syn::Variant) -> syn::Result<Key<'_>> {
+/// A discriminant states the value as plainly as `#[value(N)]` does. Under `#[repr(uN)]`, Rust
+/// defines an implicit discriminant too: zero for the first variant, else one past the variant
+/// before, whose discriminant `implicit` carries. Without a `repr`, a variant with neither has no
+/// value: its position in the enum is not a wire value.
+fn codec_key(
+    v: &syn::Variant,
+    repr: bool,
+    first: bool,
+    implicit: Option<u64>,
+) -> syn::Result<Key<'_>> {
     let stated = v.attrs.iter().any(|a| a.path().is_ident("value") || a.path().is_ident("other"));
     match (&v.discriminant, stated) {
         (Some((_, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(n), .. }))), false) => {
@@ -458,6 +492,18 @@ fn codec_key(v: &syn::Variant) -> syn::Result<Key<'_>> {
                 v.ident
             ),
         )),
+        (None, false) if repr && first => Ok(Key::Value(LitInt::new("0", v.ident.span()))),
+        (None, false) if repr => match implicit {
+            Some(n) => Ok(Key::Value(LitInt::new(&n.to_string(), v.ident.span()))),
+            None => Err(syn::Error::new(
+                v.ident.span(),
+                format!(
+                    "variant `{}`: Rust numbers it one past the variant before, whose wire value \
+                     is not its Rust discriminant. Write `= N`, or #[value(N)]",
+                    v.ident
+                ),
+            )),
+        },
         (None, _) => variant_key(v, "raw value", "every unlisted raw value"),
     }
 }

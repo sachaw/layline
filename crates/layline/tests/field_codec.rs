@@ -362,3 +362,27 @@ fn an_arm_can_carry_nothing() {
     assert_eq!(got.tail, 0x99);
     assert_eq!(got.encode(), without);
 }
+
+/// Rust numbers these 0, 1, 5, 6: the first variant is zero and each implicit one follows the
+/// variant before it.
+#[derive(FieldCodec, Debug, Clone, Copy, PartialEq, Eq)]
+#[bits(3)]
+#[repr(u8)]
+pub enum Gear {
+    Park,
+    Reverse,
+    Drive = 5,
+    Sport,
+    #[other]
+    Unlisted(u8),
+}
+
+#[test]
+fn a_repr_enum_takes_its_rust_discriminants_as_raw_values() {
+    for (gear, raw) in [(Gear::Park, 0), (Gear::Reverse, 1), (Gear::Drive, 5), (Gear::Sport, 6)] {
+        assert_eq!(gear.to_raw(), raw);
+        assert_eq!(Gear::from_raw(raw), gear);
+    }
+    assert_eq!(Gear::from_raw(2), Gear::Unlisted(2));
+    assert_eq!(Gear::from_raw(7), Gear::Unlisted(7));
+}
