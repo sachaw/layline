@@ -3,7 +3,6 @@ name = "layline-derive"
 description = "Derive macros for layline."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -24,7 +23,7 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full"] }
 
-layline-codegen = { path = "../layline-codegen", version = "=0.3.3", default-features = false, features = [
+layline-codegen = { path = "../layline-codegen", version = "=0.4.0", default-features = false, features = [
     "walk",
 ] }
 
