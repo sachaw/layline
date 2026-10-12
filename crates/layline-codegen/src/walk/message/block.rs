@@ -6,8 +6,8 @@ use quote::{format_ident, quote};
 use super::body::{Bind, Item, Own, Walk, needs_clone};
 use super::cursor::read_layout;
 use super::patch::{
-    Slot, SlotWrite, Target, derived_flag, derived_value, fits, nested_accessors, slot_ident,
-    too_narrow,
+    Slot, SlotWrite, Target, derived_flag, derived_value, fits, nested_accessors, placeholder,
+    slot_ident, too_narrow,
 };
 use super::table::Row;
 use crate::model::split_ref;
@@ -112,8 +112,14 @@ impl Walk<'_> {
                         }
                     })
                     .collect::<Vec<_>>();
+                // A later stamp writes into the child in place.
+                let binding = if inside.iter().any(|(_, d)| d.reserves().is_some()) {
+                    quote!(let mut #local)
+                } else {
+                    quote!(let #local)
+                };
                 rebuild.extend(quote! {
-                    let #local = {
+                    #binding = {
                         let mut __h = #held.clone();
                         #(#stamps)*
                         __h
@@ -159,7 +165,7 @@ impl Walk<'_> {
                     of: which,
                     mark: slot,
                     width_bytes: (width / 8) as usize,
-                    write: SlotWrite::Scalar { ty: kind_ty(&f.kind, root) },
+                    write: SlotWrite::Scalar { ty: kind_ty(&f.kind, root), range: f.range },
                 });
             }
             let edges = [
@@ -221,6 +227,11 @@ impl Walk<'_> {
                     Some(present) => quote! {
                         #fname: <#ty as #root::__private::WireFlag>::from_flag(#present),
                     },
+                    // Stamped later, and range-checked then.
+                    None if d.reserves().is_some() => {
+                        let held = placeholder(f.range);
+                        quote! { #fname: <#ty as #root::WireInt>::from_i64(#held), }
+                    }
                     None => {
                         let n = derived_value(d, own, &f.name, root);
                         let narrow = too_narrow(&f.name, d.what());

@@ -264,7 +264,7 @@ impl Walk<'_> {
             ctx.as_ref(),
             self.root,
         )?);
-        self.byte_steps.extend(match self.derived.iter().find(|(df, _)| df == field) {
+        let write = match self.derived.iter().find(|(df, _)| df == field) {
             Some((_, d)) => value_write_derived(field, kind, d, own, self.root)?,
             None => value_write(
                 field,
@@ -274,7 +274,30 @@ impl Walk<'_> {
                 ctx.as_ref(),
                 self.root,
             )?,
-        });
+        };
+        // A parameter the holder writes sizes the text: encode checks the text against it.
+        let write = match kind {
+            Kind::Text { len: Len::Field { by, .. }, .. } => match self.param_number(by) {
+                Some(stated) => {
+                    let msg = format!(
+                        "field `{field}`: the text's byte length is not what parameter `{}` \
+                         states. Decode would read a different string",
+                        by.field
+                    );
+                    quote! {
+                        let __text_start = out.len();
+                        #write
+                        ::core::assert!(
+                            (out.len() - __text_start) as ::core::primitive::i64 == #stated,
+                            #msg
+                        );
+                    }
+                }
+                None => write,
+            },
+            _ => write,
+        };
+        self.byte_steps.extend(write);
         self.held_message(item, field, kind, last)?;
         if kind.is_integer() {
             self.env.bind(field, quote!(#ident));

@@ -355,6 +355,20 @@ impl Walk<'_> {
         own.get(name)
     }
 
+    /// The number `by` states when its field is a parameter, as an `i64`. The holder writes the
+    /// parameter, so encode can only check a value against it, never set it.
+    pub(super) fn param_number(&self, by: &crate::By) -> Option<TokenStream> {
+        if !self.is_param(&by.field) {
+            return None;
+        }
+        let root = self.root;
+        let id = ident(&by.field);
+        let (scale, offset) = (i64::from(by.scale), i64::from(by.offset));
+        Some(quote! {
+            (#root::WireInt::to_i64(&__ctx.#id) * #scale + #offset)
+        })
+    }
+
     /// `let __n = …;`: a window's byte length, from a fixed number or an earlier field.
     pub(super) fn window_len(
         &self,

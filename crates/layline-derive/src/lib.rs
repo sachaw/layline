@@ -230,7 +230,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[message(bits)]`, `#[message(bits, order = lsb | msb)]`: all fields are bit fields, padded
 ///   with zero bits to a whole byte. Default order `lsb`.
 /// - `#[message(needs(a: u8, b: u16))]`: parameters the parent message supplies. They become
-///   `Message::Ctx`, a generated `<Name>Ctx` struct.
+///   `Message::Ctx`, a generated `<Name>Ctx` struct. The holder writes a parameter, so encode
+///   cannot derive it: encode panics when a `#[count]`, `#[len]` or `#[switch]` it drives
+///   disagrees with the value.
 /// - `#[message(closed)]`: on an enum, an unknown discriminant fails with
 ///   `ParseError::Malformed`.
 /// - `#[message(crate = path)]`: the path to `layline`. Default `::layline`.
@@ -269,13 +271,17 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   length.
 /// - `#[when(flags & MASK)]`, `#[when(flag)]`: an `Option<T>` present when the bits are set.
 ///   Encode sets them for `Some` and clears them for `None`.
-/// - `#[when(n > 0)]`: an `Option<T>` present when `n` is non-zero. Use with `#[seek]`.
+/// - `#[when(n > 0)]`: an `Option<T>` present when `n` is non-zero. Use with `#[seek]`. `n` is the
+///   record's exact byte length: decode refuses a record of any other length, and encode writes
+///   the length. For a number that only marks presence, such as a size rounded up past the
+///   record, use `#[seek]` alone: an offset of zero is `None`.
 /// - `#[fill]` on an `Option<T>`: present when bytes remain.
 /// - `#[magic(0xFE)]`, `#[magic(b"SEAL")]`: fixed bytes. Decode checks them and encode writes
 ///   them.
 /// - `#[checksum(Alg, over = a..=b)]`: a checksum over fields `a` to `b`. Decode verifies it and
 ///   encode computes it.
-/// - `#[range(lo..=hi)]`: the allowed values. Decode rejects others.
+/// - `#[range(lo..=hi)]`: the allowed values. Decode rejects others, and encode panics on them,
+///   checking a derived length or offset once it is known.
 ///
 /// # Bit message attributes
 ///

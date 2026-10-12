@@ -410,9 +410,47 @@ impl Walk<'_> {
             each.extend(quote! { ::core::assert!(out.len() > __elem, #msg); });
         }
         let (before, after) = match count {
-            // The holder writes a parameter. Encode writes only the elements.
+            // The holder writes a parameter, so encode checks the elements against it.
             Count::Window(Len::Field { by, .. }) if self.is_param(&by.field) => {
-                (quote!(), quote!())
+                let stated = self.param_number(by).expect("a parameter");
+                let msg = format!(
+                    "collection `{coll}`: its byte length is not what parameter `{}` states. \
+                     Decode would read a different run",
+                    by.field
+                );
+                (
+                    quote! { let __span_start = out.len(); },
+                    quote! {
+                        ::core::assert!((out.len() - __span_start) as ::core::primitive::i64 == #stated, #msg);
+                    },
+                )
+            }
+            Count::Field { by, .. } | Count::Strided { by, .. } if self.is_param(&by.field) => {
+                let stated = self.param_number(by).expect("a parameter");
+                let msg = format!(
+                    "collection `{coll}`: its length is not what parameter `{}` states. \
+                     Decode would read a different number of elements",
+                    by.field
+                );
+                (
+                    quote! { ::core::assert!((#held).len() as ::core::primitive::i64 == #stated, #msg); },
+                    quote!(),
+                )
+            }
+            Count::Squared { by, .. } if self.is_param(&by.field) => {
+                let stated = self.param_number(by).expect("a parameter");
+                let msg = format!(
+                    "collection `{coll}`: its length is not the square parameter `{}` states. \
+                     Decode would read a different number of elements",
+                    by.field
+                );
+                (
+                    quote! {
+                        let __side = #stated;
+                        ::core::assert!((#held).len() as ::core::primitive::i64 == __side * __side, #msg);
+                    },
+                    quote!(),
+                )
             }
             Count::Window(Len::Field { by, cap }) => (
                 quote! { let __span_start = out.len(); },

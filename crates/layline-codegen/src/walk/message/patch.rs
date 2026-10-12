@@ -204,6 +204,36 @@ pub(super) fn stamp_slot(
     Ok(fill_reserved(owner, slot, field, of.claim(record), value, endian, root))
 }
 
+/// The number a reserved field holds until it is stamped: zero, or the nearest end of its
+/// `#[range]`, so the block's own range check passes the placeholder.
+pub(super) fn placeholder(range: Option<crate::Range>) -> TokenStream {
+    let held = match range {
+        Some(crate::Range { lo: Some(lo), .. }) if lo > 0 => lo,
+        Some(crate::Range { hi: Some(hi), .. }) if hi < 0 => hi,
+        _ => 0,
+    };
+    let held = Literal::i64_unsuffixed(held);
+    quote!(#held)
+}
+
+/// Asserts the stamped number `value` is inside the field's `#[range]`, as the block's encode
+/// asserts every other field's.
+fn in_range(field: &str, r: crate::Range, value: &TokenStream) -> TokenStream {
+    let lo = r.lo.map_or_else(String::new, |lo| lo.to_string());
+    let hi = r.hi.map_or_else(String::new, |hi| format!("={hi}"));
+    let msg = format!("field `{field}`: value is outside `#[range({lo}..{hi})]`");
+    let lo = r.lo.map(Literal::i64_suffixed);
+    let hi = r.hi.map(Literal::i64_suffixed);
+    // `contains` avoids `clippy::manual_range_contains` in user code.
+    let test = match (lo, hi) {
+        (Some(lo), Some(hi)) => quote!((#lo..=#hi).contains(&#value)),
+        (Some(lo), None) => quote!((#lo..).contains(&#value)),
+        (None, Some(hi)) => quote!((..=#hi).contains(&#value)),
+        (None, None) => return quote!(),
+    };
+    quote! { ::core::assert!(#test, #msg); }
+}
+
 /// Overwrite a slot's placeholder with `value`, panicking if the field is too narrow.
 pub(super) fn fill_reserved(
     owner: &str,
@@ -218,27 +248,30 @@ pub(super) fn fill_reserved(
     let width = Literal::usize_unsuffixed(*width_bytes);
     let narrow = too_narrow(field, claim);
     let fill = match write {
-        SlotWrite::Scalar { ty } => {
+        SlotWrite::Scalar { ty, range } => {
             let to = match endian {
                 Endian::Be => quote!(to_be_bytes),
                 Endian::Le => quote!(to_le_bytes),
             };
             let fits = fits(Target::Field(ty, 0), &quote!(__len), &narrow, root);
+            let ranged = range.map(|r| in_range(field, r, &quote!(__len)));
             quote! {
                 #fits
+                #ranged
                 let __pos = <#ty as #root::WireInt>::from_i64(__len);
                 out.written_mut()[#mark..#mark + #width].copy_from_slice(&__pos.#to());
             }
         }
         SlotWrite::Nested { value: held, ty, outer, name } => {
             let (get, get_mut) = nested_accessors(owner, outer, name);
-            let into = Target::Nested { get: quote!(#get(&__nested)), child: ty, name };
+            let into = Target::Nested { get: quote!(#get(&#held)), child: ty, name };
             let fits = fits(into, &quote!(__len), &narrow, root);
+            // Stamp the child the block wrote, not a copy of it: a second stamp into the same
+            // child re-encodes it with the first one's number still in place.
             quote! {
-                let mut __nested = #held.clone();
                 #fits
-                *#get_mut(&mut __nested) = #root::WireInt::from_i64(__len);
-                out.written_mut()[#mark..#mark + #width].copy_from_slice(&__nested.encode());
+                *#get_mut(&mut #held) = #root::WireInt::from_i64(__len);
+                out.written_mut()[#mark..#mark + #width].copy_from_slice(&#held.encode());
             }
         }
         SlotWrite::Check { sub, field: inner, ty } => {
@@ -260,13 +293,14 @@ pub(super) fn fill_reserved(
 
 /// How a slot's bytes are rewritten once its number is known.
 pub(super) enum SlotWrite {
-    /// A whole scalar field of a block.
-    Scalar { ty: TokenStream },
+    /// A whole scalar field of a block, and the `#[range]` its number must fall in.
+    Scalar { ty: TokenStream, range: Option<crate::Range> },
     /// A checksum field: its one-field layout, rebuilt with the checksum and re-encoded.
     Check { sub: Ident, field: Ident, ty: TokenStream },
     /// A field inside a nested layout: the child, rebuilt with the number and re-encoded.
     Nested {
         /// The local holding the child the block wrote, with its other derived fields already set.
+        /// Each stamp updates it in place, so stamps into one child accumulate.
         value: Ident,
         ty: TokenStream,
         /// The block field holding the child, as named in the [`nested_probe`] accessors.

@@ -109,20 +109,16 @@ fn the_holder_states_the_width_each_element_reads() {
     assert_eq!(back, m);
 }
 
+/// A parameter is not derived: encode cannot set it from the elements, so it refuses elements the
+/// parameter does not describe, rather than write a wire that decodes differently.
 #[test]
-fn a_parameter_is_written_as_the_writer_set_it() {
+#[should_panic(
+    expected = "collection `data`: its byte length is not what parameter `stride` states"
+)]
+fn a_parameter_that_disagrees_with_the_elements_is_refused() {
     let mut m = epoch();
     m.stride = 9;
-    let wire = m.encode();
-    assert_eq!(
-        wire[1], 9,
-        "a parameter is not derived: encode writes the number the writer put in the field"
-    );
-    assert_eq!(
-        Epoch::decode(&wire),
-        Err(ParseError::Short { need_bytes: 11, got_bytes: 10, at: 4 }),
-        "and the wire the writer asked for is the wire that comes back"
-    );
+    let _ = m.encode();
 }
 
 #[test]

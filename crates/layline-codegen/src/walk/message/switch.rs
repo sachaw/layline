@@ -130,10 +130,39 @@ impl Walk<'_> {
                 ),
             ),
         };
+        // A parameter the holder writes: the arm and its window must agree with it.
+        let mut agree = TokenStream::new();
+        if let Discriminant::Field(f) = on
+            && self.is_param(f)
+        {
+            let n = self.held(f, own);
+            let msg = format!(
+                "field `{field}`: the arm's discriminant is not parameter `{f}`, which the holder \
+                 writes. Decode would read the arm `{f}` selects"
+            );
+            agree.extend(quote! {
+                if let ::core::option::Option::Some(__d) = #root::Choice::discriminant(&#held) {
+                    ::core::assert!(__d == #root::WireInt::to_i64(&#n), #msg);
+                }
+            });
+        }
+        if let Some(Len::Field { by, .. }) = window
+            && let Some(stated) = self.param_number(by)
+        {
+            let msg = format!(
+                "field `{field}`: the arm's byte length is not what parameter `{}` states. \
+                 Decode would read a different window",
+                by.field
+            );
+            agree.extend(quote! {
+                ::core::assert!((out.len() - __chosen) as #i64 == #stated, #msg);
+            });
+        }
         self.byte_steps.extend(quote! {
             let __chosen = out.len();
             #root::Choice::encode_into(&#held, out)?;
             #filled
+            #agree
             ::core::assert!(
                 #root::Choice::discriminant(&#held).is_some()
                     || !<#cty as #root::Choice>::defines(#stated),
