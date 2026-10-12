@@ -38,6 +38,13 @@ pub trait CrcWord: crate::sealed::CrcWord + WireInt + Copy {
 
     /// This word as a register.
     fn register(self) -> u64;
+
+    /// Folds `bytes` into the CRC `self`, bit by bit, in a register of the word's own width.
+    ///
+    /// A 32-bit core then does no 64-bit shifts for a CRC of up to 32 bits, and a table the
+    /// compiler derives from the loop has entries of the word's width.
+    #[doc(hidden)]
+    fn crc_fold<const POLY: u64, const REFLECT: bool>(self, bytes: &[u8]) -> Self;
 }
 
 macro_rules! crc_word {
@@ -47,18 +54,49 @@ macro_rules! crc_word {
         impl CrcWord for $t {
             const BITS: u32 = <$t>::BITS;
 
+            #[inline]
             fn from_register(register: u64) -> Self {
                 register as $t
             }
 
+            #[inline]
             fn register(self) -> u64 {
                 self as u64
+            }
+
+            fn crc_fold<const POLY: u64, const REFLECT: bool>(self, bytes: &[u8]) -> Self {
+                const BITS: u32 = <$t>::BITS;
+                let poly = POLY as $t;
+                let top: $t = 1 << (BITS - 1);
+                let mut crc = self;
+                for &byte in bytes {
+                    if REFLECT {
+                        crc ^= <$t>::from(byte);
+                        for _ in 0..8 {
+                            crc = if crc & 1 != 0 { (crc >> 1) ^ poly } else { crc >> 1 };
+                        }
+                    } else {
+                        crc ^= <$t>::from(byte) << (BITS - 8);
+                        for _ in 0..8 {
+                            crc = if crc & top != 0 { (crc << 1) ^ poly } else { crc << 1 };
+                        }
+                    }
+                }
+                crc
             }
         }
     )*};
 }
 
 crc_word!(u8, u16, u32, u64);
+
+/// The CRC loop, which depends only on the register and how it shifts.
+///
+/// [`Crc`]s that differ only in `INIT` or `XOROUT`, such as CRC-16/MODBUS and CRC-16/ARC, share
+/// one instance of it.
+fn crc_update<W: CrcWord, const POLY: u64, const REFLECT: bool>(state: W, bytes: &[u8]) -> W {
+    state.crc_fold::<POLY, REFLECT>(bytes)
+}
 
 /// A CRC defined by its catalogue parameters: width, polynomial, initial value, final XOR and reflection.
 ///
@@ -109,6 +147,7 @@ impl<W: CrcWord, const POLY: u64, const INIT: u64, const XOROUT: u64, const REFL
     type Output = W;
     type State = W;
 
+    #[inline]
     fn init() -> W {
         const {
             let mask = crate::mask::mask64(W::BITS);
@@ -119,26 +158,12 @@ impl<W: CrcWord, const POLY: u64, const INIT: u64, const XOROUT: u64, const REFL
         W::from_register(INIT)
     }
 
+    #[inline]
     fn update(state: W, bytes: &[u8]) -> W {
-        let top = 1u64 << (W::BITS - 1);
-        let mask = crate::mask::mask64(W::BITS);
-        let mut crc = state.register();
-        for &byte in bytes {
-            if REFLECT {
-                crc ^= u64::from(byte);
-                for _ in 0..8 {
-                    crc = if crc & 1 != 0 { (crc >> 1) ^ POLY } else { crc >> 1 };
-                }
-            } else {
-                crc ^= u64::from(byte) << (W::BITS - 8);
-                for _ in 0..8 {
-                    crc = if crc & top != 0 { (crc << 1) ^ POLY } else { crc << 1 } & mask;
-                }
-            }
-        }
-        W::from_register(crc)
+        crc_update::<W, POLY, REFLECT>(state, bytes)
     }
 
+    #[inline]
     fn finish(state: W) -> W {
         W::from_register(state.register() ^ XOROUT)
     }
@@ -298,6 +323,20 @@ mod tests {
         let middle: u32 = <Crc32 as Checksum>::init();
         let wide: u64 = <Crc<u64, 0x42F0_E1EB_A9EA_3693, 0, 0, false> as Checksum>::init();
         assert_eq!((narrow, middle, wide), (0, 0xFFFF_FFFF, 0));
+    }
+
+    /// Catalogue check values for the parameters the table above leaves out: a reflected 8-bit
+    /// register, a seedless sibling of MODBUS, and a 16-bit register with its top bit in the poly.
+    #[test]
+    fn registers_narrower_than_a_word_match_the_catalogue() {
+        // CRC-8/MAXIM-DOW: poly 0x31 reflected is 0x8C.
+        assert_eq!(<Crc<u8, 0x8C, 0x00, 0x00, true> as Checksum>::compute(CHECK), 0xA1);
+        // CRC-16/ARC: MODBUS's register, seeded with zero.
+        assert_eq!(<Crc<u16, 0xA001, 0x0000, 0x0000, true> as Checksum>::compute(CHECK), 0xBB3D);
+        // CRC-16/DECT-R: poly 0x0589, XOROUT 0x0001.
+        assert_eq!(<Crc<u16, 0x0589, 0x0000, 0x0001, false> as Checksum>::compute(CHECK), 0x007E);
+        // CRC-8/DVB-S2: poly 0xD5, top bit set.
+        assert_eq!(<Crc<u8, 0xD5, 0x00, 0x00, false> as Checksum>::compute(CHECK), 0xBC);
     }
 
     #[test]
