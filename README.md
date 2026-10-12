@@ -8,7 +8,7 @@ and checksums; decode checks them.
 
 ```toml
 [dependencies]
-layline = "0.1"
+layline = "0.5"
 ```
 
 ## Layouts

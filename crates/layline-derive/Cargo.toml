@@ -23,7 +23,7 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full"] }
 
-layline-codegen = { path = "../layline-codegen", version = "=0.4.0", default-features = false, features = [
+layline-codegen = { path = "../layline-codegen", version = "=0.5.0", default-features = false, features = [
     "walk",
 ] }
 
