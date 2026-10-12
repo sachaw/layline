@@ -280,6 +280,24 @@ pub trait Layout: Sized {
     /// long. Otherwise a failed `#[magic]`, `#[checksum]` or `#[range]`.
     fn decode_slice(bytes: &[u8]) -> Result<Self, crate::ParseError>;
 
+    /// Decode from the first [`WIRE_BYTES`](Self::WIRE_BYTES) bytes of `bytes`, ignoring the rest.
+    /// Returns the value and the bytes used, always `WIRE_BYTES`.
+    ///
+    /// # Errors
+    ///
+    /// [`Short`](crate::ParseError::Short) if `bytes` is shorter than the layout. Otherwise as
+    /// [`decode_slice`](Self::decode_slice).
+    fn decode_prefix(bytes: &[u8]) -> Result<(Self, usize), crate::ParseError> {
+        match bytes.get(..Self::WIRE_BYTES) {
+            Some(head) => Self::decode_slice(head).map(|value| (value, Self::WIRE_BYTES)),
+            None => Err(crate::ParseError::Short {
+                need_bytes: Self::WIRE_BYTES,
+                got_bytes: bytes.len(),
+                at: 0,
+            }),
+        }
+    }
+
     /// Append the [`WIRE_BYTES`](Self::WIRE_BYTES) bytes to `out`.
     ///
     /// # Errors

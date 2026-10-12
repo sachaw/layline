@@ -342,6 +342,15 @@ impl<S: FrameSpec, const N: usize> Decoder<S, N> {
         self.stats
     }
 
+    /// Bytes held that are not part of a returned frame.
+    ///
+    /// After [`pop`](Self::pop) returns `None`, a non-zero count is the start of a frame still
+    /// arriving.
+    #[must_use]
+    pub const fn buffered(&self) -> usize {
+        self.len - self.spent
+    }
+
     /// Append as many bytes as fit, and return how many were taken.
     pub fn push(&mut self, bytes: &[u8]) -> usize {
         self.release();
@@ -464,6 +473,23 @@ mod tests {
     }
 
     const BAD_HEADER: Parsed = Parsed::Desync { discard: 1, cause: DesyncCause::BadHeader };
+
+    #[test]
+    fn buffered_counts_the_bytes_no_returned_frame_holds() {
+        let mut d = Decoder::<Stated, 16>::new();
+        assert_eq!(d.buffered(), 0);
+        // A whole 3-byte frame, then the first two bytes of a 4-byte one.
+        d.push(&[0xAA, 3, 7, 0xAA, 4]);
+        assert_eq!(d.buffered(), 5);
+        assert_eq!(d.pop().expect("a whole frame").body, [7]);
+        assert_eq!(d.buffered(), 2, "the returned frame no longer counts");
+        assert!(d.pop().is_none());
+        assert_eq!(d.buffered(), 2, "a frame start is pending");
+        d.push(&[9, 9]);
+        assert!(d.pop().is_some());
+        assert!(d.pop().is_none());
+        assert_eq!(d.buffered(), 0);
+    }
 
     #[test]
     fn a_frame_shorter_than_its_candidate_is_a_bad_header() {

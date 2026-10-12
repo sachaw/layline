@@ -47,3 +47,25 @@ fn a_layout_encodes_and_decodes_through_the_trait_alone() {
     round_trip(Status { version: 1, kind: 2, seq: 3 });
     round_trip(Record { id: 7, value: 9 });
 }
+
+mod prefix_decode {
+    use layline::{Layout, ParseError};
+
+    #[derive(Layout, Debug, Clone, PartialEq, Eq)]
+    #[layout(bytes = 3)]
+    struct Head {
+        kind: u8,
+        len: u16,
+    }
+
+    #[test]
+    fn decode_prefix_reads_the_leading_bytes_and_says_how_many() {
+        let bytes = [7, 0x34, 0x12, 0xEE, 0xFF];
+        assert_eq!(Head::decode_prefix(&bytes), Ok((Head { kind: 7, len: 0x1234 }, 3)));
+        assert_eq!(Head::decode_prefix(&bytes[..3]), Ok((Head { kind: 7, len: 0x1234 }, 3)));
+        assert_eq!(
+            Head::decode_prefix(&bytes[..2]),
+            Err(ParseError::Short { need_bytes: 3, got_bytes: 2, at: 0 })
+        );
+    }
+}

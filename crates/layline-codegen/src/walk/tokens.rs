@@ -332,6 +332,8 @@ pub(crate) fn hidden_block(
         #[derive(Debug, Clone, PartialEq, #root::Layout)]
         #[layout(bytes = #len #endian, internal #crate_arg)]
         #[doc(hidden)]
+        // Whether the block can be `Eq` depends on its field types, which the walk cannot see.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         pub struct #name {
             #fields
         }
