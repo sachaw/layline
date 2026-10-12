@@ -142,7 +142,58 @@ pub fn group_codec(
         }
     }
 
+    let reg = match bits {
+        0..=8 => "u8",
+        9..=16 => "u16",
+        17..=32 => "u32",
+        _ => "u64",
+    };
+    let word = syn::Ident::new(reg, Span::call_site());
+    let (widen, narrow) = if reg == "u64" {
+        (quote!(bits), quote!(<Self as #root::FieldCodec>::to_raw(self)))
+    } else {
+        (
+            quote!(::core::primitive::u64::from(bits)),
+            quote!(<Self as #root::FieldCodec>::to_raw(self) as ::core::primitive::#word),
+        )
+    };
+    let from_doc = format!(
+        "Decode from the low {bits} bits of `bits`. Higher bits are not part of the group, and \
+         are ignored."
+    );
+    let to_doc = format!("The group's {bits} bits, as `FieldCodec::to_raw` gives them.");
+    let truncates = if keys.truncate {
+        quote!()
+    } else {
+        quote! {
+            ///
+            /// # Panics
+            ///
+            /// If a field's value does not fit its width.
+        }
+    };
+    let words = quote! {
+        #[automatically_derived]
+        impl #ident {
+            #[doc = #from_doc]
+            #[inline]
+            #[must_use]
+            pub fn from_bits(bits: ::core::primitive::#word) -> Self {
+                <Self as #root::FieldCodec>::from_raw(#widen)
+            }
+
+            #[doc = #to_doc]
+            #truncates
+            #[inline]
+            #[must_use]
+            pub fn to_bits(&self) -> ::core::primitive::#word {
+                #narrow
+            }
+        }
+    };
+
     Ok(quote! {
+        #words
         #(#checks)*
 
         #[automatically_derived]

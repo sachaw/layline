@@ -239,3 +239,34 @@ pub struct Pair {
         "`truncate` is given twice",
     );
 }
+
+#[test]
+fn codec_discriminant_and_value() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(1)]
+pub enum Kind {
+    #[value(0)]
+    A = 0,
+    B = 1,
+}"#,
+        "variant `A`: both a discriminant and #[value] or #[other]. State the value once",
+    );
+}
+
+#[test]
+fn codec_variant_without_a_value_is_not_its_position() {
+    refused(
+        r#"use layline::FieldCodec;
+
+#[derive(FieldCodec)]
+#[bits(1)]
+pub enum Kind {
+    A = 0,
+    B,
+}"#,
+        "variant `B`: needs #[value(N)]",
+    );
+}

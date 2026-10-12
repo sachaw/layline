@@ -369,3 +369,36 @@ fn a_bit_group_is_a_field() {
     assert_eq!(c.to_bits(), word);
     assert_eq!(Carrier::from_bits(word), c);
 }
+
+#[test]
+fn a_bit_group_converts_to_and_from_its_narrowest_integer() {
+    // 21 bits fit a u32: 0x5D << 13 | 0x1ABC
+    let d = LongDescriptor { words: 0x1ABC, buffer_index: 0x5D };
+    let bits: u32 = d.to_bits();
+    assert_eq!(bits, 0x000B_BABC);
+    assert_eq!(LongDescriptor::from_bits(0x000B_BABC), d);
+    // Bits past the group's 21 are not part of it.
+    assert_eq!(LongDescriptor::from_bits(0xFFE0_0000 | 0x000B_BABC), d);
+    let g: u16 = Msb12 { flag: false, level: 1, kind: Two::A, n: 3 }.to_bits();
+    // level 1 at 10..7, n 3 at 4..0
+    assert_eq!(g, (1 << 7) | 3);
+}
+
+/// Discriminants state the raw values.
+#[derive(FieldCodec, Debug, Clone, Copy, PartialEq, Eq)]
+#[bits(2)]
+pub enum Lane {
+    East = 0,
+    West = 1,
+    North = 2,
+    #[value(3)]
+    South,
+}
+
+#[test]
+fn an_integer_discriminant_is_the_raw_value() {
+    assert_eq!(Lane::from_raw(2), Lane::North);
+    assert_eq!(Lane::from_raw(0), Lane::East);
+    assert_eq!(Lane::from_raw(3), Lane::South);
+    assert_eq!(Lane::West.to_raw(), 1);
+}

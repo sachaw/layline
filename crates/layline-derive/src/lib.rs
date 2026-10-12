@@ -190,7 +190,8 @@ pub fn derive_dispatch(input: TokenStream) -> TokenStream {
 ///
 /// # Variant attributes
 ///
-/// - `#[value(N)]`: the raw value of a unit variant.
+/// - `#[value(N)]`: the raw value of a unit variant. An integer discriminant, `Variant = N`,
+///   states it too. A variant with neither is refused: its position is not a value.
 /// - `#[other]`: a one-field variant, over an unsigned integer, for every unlisted value. Without
 ///   it, the variants must list every `N`-bit value.
 ///

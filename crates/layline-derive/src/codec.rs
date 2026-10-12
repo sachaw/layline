@@ -369,7 +369,7 @@ fn enum_codec(
     let mut open: Option<(Open<'_>, Span)> = None;
 
     for v in &data.variants {
-        match variant_key(v, "raw value", "every unlisted raw value")? {
+        match codec_key(v)? {
             Key::Other(attr) => {
                 if let Some((_, first)) = &open {
                     return Err(noted(
@@ -431,6 +431,35 @@ fn enum_codec(
     }
 
     Ok(expand_enum(&input.ident, &listed, open.map(|(o, _)| o), width, root))
+}
+
+/// The variant's `#[value(N)]`, `#[other]`, or its explicit `= N` discriminant.
+///
+/// A discriminant states the value as plainly as `#[value(N)]` does. A variant with neither has
+/// no value: its position in the enum is not a wire value.
+fn codec_key(v: &syn::Variant) -> syn::Result<Key<'_>> {
+    let stated = v.attrs.iter().any(|a| a.path().is_ident("value") || a.path().is_ident("other"));
+    match (&v.discriminant, stated) {
+        (Some((_, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(n), .. }))), false) => {
+            Ok(Key::Value(n.clone()))
+        }
+        (Some((_, expr)), true) => Err(syn::Error::new(
+            expr.span(),
+            format!(
+                "variant `{}`: both a discriminant and #[value] or #[other]. State the value once",
+                v.ident
+            ),
+        )),
+        (Some((_, expr)), false) => Err(syn::Error::new(
+            expr.span(),
+            format!(
+                "variant `{}`: a discriminant must be an integer literal to be a raw value. \
+                 Write `= 3`, or #[value(N)]",
+                v.ident
+            ),
+        )),
+        (None, _) => variant_key(v, "raw value", "every unlisted raw value"),
+    }
 }
 
 fn other_variant<'a>(v: &'a syn::Variant, width: Width) -> syn::Result<Open<'a>> {
