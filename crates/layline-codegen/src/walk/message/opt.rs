@@ -30,12 +30,20 @@ impl Walk<'_> {
         self.binds.push(Bind { name: ident.clone(), ty: opt_ty, value: quote!(#ident) });
 
         let present = match when {
-            Presence::Mask { field: flag, mask } => {
+            Presence::Mask { field: flag, mask } | Presence::MaskClear { field: flag, mask } => {
                 let read = self.env.get(owner, "#[when]", flag)?;
                 let bit = Literal::i64_unsuffixed(*mask as i64);
-                quote!(((#read) & #bit) != 0)
+                if matches!(when, Presence::Mask { .. }) {
+                    quote!(((#read) & #bit) != 0)
+                } else {
+                    quote!(((#read) & #bit) == 0)
+                }
             }
             Presence::Flag { field: flag } => self.env.get_flag(owner, "#[when]", flag)?,
+            Presence::FlagClear { field: flag } => {
+                let read = self.env.get_flag(owner, "#[when]", flag)?;
+                quote!(!(#read))
+            }
             Presence::Remaining => {
                 let need = Literal::usize_unsuffixed(f.kind.width() as usize / 8);
                 quote!(__body.len().saturating_sub(__at) >= #need)
@@ -50,15 +58,11 @@ impl Walk<'_> {
         };
         let mut row = Row::new(&f.name, span_of_kind(&f.kind))
             .decoded_by(deferred_type(&f.kind))
-            .when(match when {
-                Presence::Remaining => row::Presence::Remaining,
-                Presence::Mask { field: flag, mask } => {
-                    row::Presence::Flag { field: flag.clone(), mask: *mask }
-                }
-                Presence::Flag { field: flag } => {
-                    row::Presence::Flag { field: flag.clone(), mask: 1 }
-                }
-                Presence::Bit => row::Presence::Bit,
+            .when(match when.tests() {
+                Some((flag, mask, true)) => row::Presence::Flag { field: flag.into(), mask },
+                Some((flag, mask, false)) => row::Presence::Clear { field: flag.into(), mask },
+                None if matches!(when, Presence::Remaining) => row::Presence::Remaining,
+                None => row::Presence::Bit,
             });
 
         let fixed = !matches!(f.kind, Kind::Var { .. } | Kind::Msg { .. } | Kind::Text { .. });

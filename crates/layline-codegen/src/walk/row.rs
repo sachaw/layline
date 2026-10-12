@@ -68,6 +68,7 @@ pub(crate) enum Span {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Presence {
     Flag { field: String, mask: u64 },
+    Clear { field: String, mask: u64 },
     Offset,
     Bit,
     Remaining,

@@ -285,7 +285,7 @@ fn clashes(owner: &str, derived: &[(String, Derived)]) -> Result<(), Error> {
     }
 
     if let Some((flag, of)) = derived.iter().enumerate().find_map(|(i, (f, d))| {
-        let Derived::Presence { of } = d else { return None };
+        let Derived::Presence { of, .. } = d else { return None };
         derived[i + 1..]
             .iter()
             .find(|(g, e)| g == f && matches!(e, Derived::Presence { .. }))

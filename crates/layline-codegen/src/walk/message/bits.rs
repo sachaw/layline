@@ -139,8 +139,11 @@ pub(super) fn bits_parts(
         let when = match presence {
             BitPresence::Always => None,
             BitPresence::Present => Some(row::Presence::Bit),
-            BitPresence::Mask { field, mask } => {
+            BitPresence::Mask { field, mask, set: true } => {
                 Some(row::Presence::Flag { field: field.clone(), mask: *mask })
+            }
+            BitPresence::Mask { field, mask, set: false } => {
+                Some(row::Presence::Clear { field: field.clone(), mask: *mask })
             }
         };
 
@@ -167,8 +170,8 @@ pub(super) fn bits_parts(
                     }
                 });
             }
-            BitPresence::Mask { field, mask } => {
-                let test = bit_flag_test(&declared, field, *mask, root);
+            BitPresence::Mask { field, mask, set } => {
+                let test = bit_flag_test(&declared, field, *mask, *set, root);
                 parse.extend(quote! {
                     let #ident = if #test { #some(#read) } else { #none };
                 });
@@ -211,11 +214,12 @@ pub(super) fn bits_parts(
         let pos = bit_pos_ident(flag);
         let w = Literal::u64_unsuffixed(f.kind.width());
         let held = bit_encode(&f.kind, (&Own::Struct.by_ref(flag), &Own::Struct.get(flag)), root);
-        let all = Literal::u64_unsuffixed(governed.iter().fold(0u64, |all, (mask, _)| all | mask));
-        let set = governed.iter().map(|(mask, of)| {
+        let all = Literal::u64_unsuffixed(governed.iter().fold(0u64, |all, (mask, ..)| all | mask));
+        let set = governed.iter().map(|(mask, of, set)| {
             let opt = Own::Struct.get(of);
             let mask = Literal::u64_unsuffixed(*mask);
-            quote!(| (if #opt.is_some() { #mask } else { 0 }))
+            let marked = if *set { quote!(#opt.is_some()) } else { quote!(#opt.is_none()) };
+            quote!(| (if #marked { #mask } else { 0 }))
         });
         writes.extend(quote! {
             __bits.patch(#pos, #w, (#held & !#all) #(#set)*);
@@ -267,11 +271,14 @@ enum BitPresence {
     Always,
     /// When the bit just before the field is set.
     Present,
-    /// When bits of an earlier field are set. A bare `bool` flag is its single bit.
+    /// When bits of an earlier field are set, or with `set` false, clear. A bare `bool` flag is
+    /// its single bit.
     Mask {
         field: String,
         /// The bits that make this field present.
         mask: u64,
+        /// Whether set bits mean present.
+        set: bool,
     },
 }
 
@@ -284,15 +291,10 @@ fn bit_declared(m: &MessageDef) -> Result<Vec<(Field, BitPresence)>, Error> {
                 declared.extend(block.iter().map(|f| (f.clone(), BitPresence::Always)));
             }
             Segment::Opt { when, field } => {
-                let presence = match when {
-                    Presence::Bit => BitPresence::Present,
-                    Presence::Mask { field: flag, mask } => {
-                        BitPresence::Mask { field: flag.clone(), mask: *mask }
-                    }
-                    Presence::Flag { field: flag } => {
-                        BitPresence::Mask { field: flag.clone(), mask: 1 }
-                    }
-                    Presence::Remaining => {
+                let presence = match when.tests() {
+                    _ if matches!(when, Presence::Bit) => BitPresence::Present,
+                    Some((flag, mask, set)) => BitPresence::Mask { field: flag.into(), mask, set },
+                    None => {
                         return Err(Error::Refused(format!(
                             "{}: `{}` is present when bytes remain, which a bit-addressed message cannot test. \
                              Use `#[present]`, or a flag in an earlier field",
@@ -320,12 +322,16 @@ fn bit_declared(m: &MessageDef) -> Result<Vec<(Field, BitPresence)>, Error> {
     Ok(declared)
 }
 
-/// Each flag field, with the `(mask, field)` pairs it gates, in declaration order.
-fn bit_flags(declared: &[(Field, BitPresence)]) -> Vec<(String, Vec<(u64, String)>)> {
-    let mut flags: Vec<(String, Vec<(u64, String)>)> = Vec::new();
+/// The bits of a flag that one optional field reads: `(mask, field, set)`, where `set` is whether
+/// set bits mean present.
+type Governed = (u64, String, bool);
+
+/// Each flag field, with the bits it gates, in declaration order.
+fn bit_flags(declared: &[(Field, BitPresence)]) -> Vec<(String, Vec<Governed>)> {
+    let mut flags: Vec<(String, Vec<Governed>)> = Vec::new();
     for (f, presence) in declared {
-        let BitPresence::Mask { field, mask } = presence else { continue };
-        let bit = (*mask, f.name.clone());
+        let BitPresence::Mask { field, mask, set } = presence else { continue };
+        let bit = (*mask, f.name.clone(), *set);
         match flags.iter_mut().find(|(flag, _)| flag == field) {
             Some((_, bits)) => bits.push(bit),
             None => flags.push((field.clone(), vec![bit])),
@@ -344,6 +350,7 @@ fn bit_flag_test(
     declared: &[(Field, BitPresence)],
     flag: &str,
     mask: u64,
+    set: bool,
     root: &Root,
 ) -> TokenStream {
     let ident = ident(flag);
@@ -353,11 +360,11 @@ fn bit_flag_test(
         .map(|(f, _)| &f.kind)
         .expect("`validate` resolves every flag to an earlier field");
     if matches!(kind, Kind::Scalar(Scalar::Bool)) && mask == 1 {
-        return quote!(#ident);
+        return if set { quote!(#ident) } else { quote!(!#ident) };
     }
     let raw = bit_encode(kind, (&quote!(&#ident), &quote!(#ident)), root);
     let mask = Literal::u64_unsuffixed(mask);
-    quote!((#raw & #mask) != 0)
+    if set { quote!((#raw & #mask) != 0) } else { quote!((#raw & #mask) == 0) }
 }
 
 /// Read one field from the cursor, as an expression.

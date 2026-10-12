@@ -165,6 +165,8 @@ enum PlacedAbsence {
 struct WhenSpec {
     by: Ref,
     test: WhenTest,
+    /// `!flag` or `field & MASK == 0`: present when the bits are clear.
+    clear: bool,
     /// The whole attribute's span.
     span: Span,
 }
@@ -179,10 +181,26 @@ enum WhenTest {
 }
 
 impl WhenSpec {
+    /// The test as `#[when(..)]` spells it.
+    fn spelled(&self) -> String {
+        let by = &self.by.name;
+        match (&self.test, self.clear) {
+            (WhenTest::Mask(mask), false) => format!("{by} & {mask:#x}"),
+            (WhenTest::Mask(mask), true) => format!("{by} & {mask:#x} == 0"),
+            (WhenTest::Flag, false) => by.clone(),
+            (WhenTest::Flag, true) => format!("!{by}"),
+            (WhenTest::Positive, _) => format!("{by} > 0"),
+        }
+    }
+
     fn presence(&self) -> layline_codegen::Presence {
         let field = self.by.name.clone();
         match self.test {
+            WhenTest::Mask(mask) if self.clear => {
+                layline_codegen::Presence::MaskClear { field, mask }
+            }
             WhenTest::Mask(mask) => layline_codegen::Presence::Mask { field, mask },
+            WhenTest::Flag if self.clear => layline_codegen::Presence::FlagClear { field },
             WhenTest::Flag => layline_codegen::Presence::Flag { field },
             WhenTest::Positive => {
                 unreachable!("`> 0` outside a placed record is refused at the field")

@@ -37,21 +37,19 @@ pub(super) fn validate_bits(msg: &MessageDef) -> Result<(), Invalid> {
             }
             Segment::Opt { when, field } => {
                 bit_field(field, true)?;
-                match when {
-                    Presence::Bit => {}
-                    Presence::Mask { field: flag, mask } => {
+                match when.tests() {
+                    _ if matches!(when, Presence::Bit) => {}
+                    Some((flag, mask, _)) => {
                         bit_flag(&seen, &field.name, flag)?;
-                        bit_mask(&seen, &field.name, flag, *mask)?;
-                        bit_alone(&governed, &field.name, flag, *mask)?;
-                        governed.push((flag, *mask, &field.name));
+                        if when.reads_flag() {
+                            bit_bool(&seen, &field.name, flag)?;
+                        } else {
+                            bit_mask(&seen, &field.name, flag, mask)?;
+                        }
+                        bit_alone(&governed, &field.name, flag, mask)?;
+                        governed.push((flag, mask, &field.name));
                     }
-                    Presence::Flag { field: flag } => {
-                        bit_flag(&seen, &field.name, flag)?;
-                        bit_bool(&seen, &field.name, flag)?;
-                        bit_alone(&governed, &field.name, flag, 1)?;
-                        governed.push((flag, 1, &field.name));
-                    }
-                    Presence::Remaining => {
+                    None => {
                         return Err(Invalid::field(
                             &field.name,
                             String::from(

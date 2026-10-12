@@ -163,10 +163,7 @@ fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
                 });
             }
             WhenTest::Mask(_) | WhenTest::Flag => {
-                let test = match when.test {
-                    WhenTest::Mask(mask) => format!("{} & {mask:#x}", when.by.name),
-                    _ => when.by.name.clone(),
-                };
+                let test = when.spelled();
                 return Err(syn::Error::new(
                     when.span,
                     format!(

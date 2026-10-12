@@ -279,6 +279,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   length.
 /// - `#[when(flags & MASK)]`, `#[when(flag)]`: an `Option<T>` present when the bits are set.
 ///   Encode sets them for `Some` and clears them for `None`.
+/// - `#[when(flags & MASK == 0)]`, `#[when(!flag)]`: an `Option<T>` present when the bits are
+///   clear, as with a flag that says a default applies. Encode clears them for `Some` and sets
+///   them for `None`. `!(flags & MASK)` is refused: on an integer, `!` flips the bits.
 /// - `#[when(n > 0)]`: an `Option<T>` present when `n` is non-zero. Use with `#[seek]`. `n` is the
 ///   record's exact byte length: decode refuses a record of any other length, and encode writes
 ///   the length. For a number that only marks presence, such as a size rounded up past the

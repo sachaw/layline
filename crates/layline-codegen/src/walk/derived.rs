@@ -81,17 +81,20 @@ pub(crate) enum Derived {
         /// The field the discriminant is written to.
         field: String,
     },
-    /// `field = field, with each mask bit set when its optional field is Some`
+    /// `field = field, with each mask bit set when its optional field is Some`, or for a mask that
+    /// marks absence, when it is None
     Flags {
         /// The flags field. Encode keeps the bits that no optional field uses.
         field: String,
-        /// `(mask, optional field name)`, in declaration order.
-        bits: Vec<(u64, String)>,
+        /// `(mask, optional field name, whether set bits mean present)`, in declaration order.
+        bits: Vec<(u64, String, bool)>,
     },
-    /// `field = whether its optional field is Some`
+    /// `field = whether its optional field is Some`, or with `set` false, None
     Presence {
         /// The optional field the flag controls.
         of: String,
+        /// Whether `true` means present.
+        set: bool,
     },
     /// `field = the algorithm's check value over the bytes it covers`
     ///
@@ -249,8 +252,13 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                     ));
                 }
             }
-            Segment::Opt { when: Presence::Mask { field: flag, mask }, field } => {
-                let bit = (*mask, field.name.clone());
+            Segment::Opt {
+                when:
+                    Presence::Mask { field: flag, mask } | Presence::MaskClear { field: flag, mask },
+                field,
+            } => {
+                let set = matches!(seg, Segment::Opt { when: Presence::Mask { .. }, .. });
+                let bit = (*mask, field.name.clone(), set);
                 match out
                     .iter_mut()
                     .find(|(df, d)| df == flag && matches!(d, Derived::Flags { .. }))
@@ -262,8 +270,12 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                     )),
                 }
             }
-            Segment::Opt { when: Presence::Flag { field: flag }, field } => {
-                out.push((flag.clone(), Derived::Presence { of: field.name.clone() }));
+            Segment::Opt {
+                when: Presence::Flag { field: flag } | Presence::FlagClear { field: flag },
+                field,
+            } => {
+                let set = matches!(seg, Segment::Opt { when: Presence::Flag { .. }, .. });
+                out.push((flag.clone(), Derived::Presence { of: field.name.clone(), set }));
             }
             Segment::Checksum { name, algorithm, over, .. } => {
                 out.push((

@@ -15,9 +15,9 @@ use crate::{Endian, Error, Kind, Root, Segment};
 /// The `bool` a derived flag holds. Presence is the only derivation that is not a number.
 pub(super) fn derived_flag(d: &Derived, own: Own) -> Option<TokenStream> {
     match d {
-        Derived::Presence { of } => {
+        Derived::Presence { of, set } => {
             let opt = own.get(of);
-            Some(quote!(#opt.is_some()))
+            Some(if *set { quote!(#opt.is_some()) } else { quote!(#opt.is_none()) })
         }
         _ => None,
     }
@@ -87,17 +87,18 @@ pub(super) fn derived_value(d: &Derived, own: Own, field: &str, root: &Root) -> 
         Derived::Flags { field, bits } => {
             let held = own.get(field);
             let governed =
-                Literal::i64_unsuffixed(bits.iter().fold(0u64, |all, (m, _)| all | m) as i64);
-            let set = bits.iter().map(|(mask, of)| {
+                Literal::i64_unsuffixed(bits.iter().fold(0u64, |all, (m, ..)| all | m) as i64);
+            let set = bits.iter().map(|(mask, of, set)| {
                 let opt = own.get(of);
                 let mask = Literal::i64_unsuffixed(*mask as i64);
-                quote!(| (if #opt.is_some() { #mask } else { 0 }))
+                let marked = if *set { quote!(#opt.is_some()) } else { quote!(#opt.is_none()) };
+                quote!(| (if #marked { #mask } else { 0 }))
             });
             quote! {
                 (#root::WireInt::to_i64(&#held) & !#governed) #(#set)*
             }
         }
-        Derived::Presence { of } => {
+        Derived::Presence { of, .. } => {
             unreachable!("presence of `{of}` is a flag: ask `derived_flag` first")
         }
         Derived::Checksum { algorithm, over } => {

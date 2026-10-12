@@ -361,7 +361,8 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 stated_with(seen, &field.name, &field.kind)?;
                 match when {
                     Presence::Remaining => {}
-                    Presence::Mask { field: flag, mask } => {
+                    Presence::Mask { field: flag, mask }
+                    | Presence::MaskClear { field: flag, mask } => {
                         resolve(seen, flag, Reads::Number)?;
                         read_only(seen, flag, "presence bits")?;
                         if *mask == 0 {
@@ -374,7 +375,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                             ));
                         }
                     }
-                    Presence::Flag { field: flag } => {
+                    Presence::Flag { field: flag } | Presence::FlagClear { field: flag } => {
                         resolve(seen, flag, Reads::Flag)?;
                         read_only(seen, flag, "presence bits")?;
                     }

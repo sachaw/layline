@@ -182,3 +182,22 @@ fn an_optional_fill_is_open_ended() {
     );
     assert!(matches!(validate_message(&m), Err(Invalid::AfterOpenEnd(_))));
 }
+
+#[test]
+fn a_cleared_test_reads_what_its_set_twin_reads() {
+    let number = || Segment::Block(vec![field("flag", Kind::Scalar(Scalar::U(16)))]);
+    let cleared = |when: Presence| {
+        msg("Node", vec![number(), Segment::opt(when, field("x", Kind::Scalar(Scalar::U(8))))])
+    };
+    assert_eq!(
+        validate_message(&cleared(Presence::MaskClear { field: "flag".into(), mask: 0x4 })),
+        Ok(())
+    );
+    assert!(
+        validate_message(&cleared(Presence::MaskClear { field: "flag".into(), mask: 0 })).is_err()
+    );
+    assert_eq!(
+        validate_message(&cleared(Presence::FlagClear { field: "flag".into() })),
+        Err(Invalid::NotAFlagReference("flag".into()))
+    );
+}

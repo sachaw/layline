@@ -154,6 +154,7 @@ fn when_token<W: fmt::Write>(w: &mut W, when: Option<Presence<'_>>) -> fmt::Resu
     match when {
         None => w.write_str("-"),
         Some(Presence::Flag { field, mask }) => write!(w, "flag,{field},{mask:#x}"),
+        Some(Presence::Clear { field, mask }) => write!(w, "clear,{field},{mask:#x}"),
         Some(Presence::Offset) => w.write_str("offset"),
         Some(Presence::Bit) => w.write_str("bit"),
         Some(Presence::Remaining) => w.write_str("remaining"),
@@ -514,6 +515,27 @@ G Odd table seek,offset counted,n,4,-1,- - Entry
 G Odd blob after,table,32 fill,64 - -
 G Odd body after,blob,0 chosen,bodylength - Body
 E Odd 0
+"
+        );
+    }
+
+    #[test]
+    fn a_row_present_while_its_bits_are_clear_says_so() {
+        const T: &[SegmentDef<'_>] = &[SegmentDef::new(
+            "scale",
+            Start::At(16),
+            Span::Fixed(16),
+            Some(Presence::Clear { field: "flag", mask: 0x04 }),
+            None,
+            &[],
+        )];
+        let b = Buf::of(message("Node", T));
+        assert_eq!(
+            b.text(),
+            "\
+M Node
+G Node scale at,16 fixed,16 clear,flag,0x4 -
+E Node 16
 "
         );
     }

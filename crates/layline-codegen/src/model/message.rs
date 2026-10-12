@@ -77,10 +77,43 @@ pub enum Presence {
         /// The `bool` field.
         field: String,
     },
+    /// When `field & mask == 0`: the bits mark the field absent, as a "use the default" flag does.
+    ///
+    /// Encode clears the bits for `Some` and sets them for `None`.
+    MaskClear {
+        /// The flags field.
+        field: String,
+        /// The bits that mark the field absent.
+        mask: u64,
+    },
+    /// When the `bool` `field` is `false`. Encode writes `false` for `Some` and `true` for `None`.
+    FlagClear {
+        /// The `bool` field.
+        field: String,
+    },
     /// When an unnamed bit just before the field is set. Bit-addressed messages only.
     Bit,
     /// When the body has bytes left. Must be the last field.
     Remaining,
+}
+
+impl Presence {
+    /// For a test of an earlier field: its name, the bits tested, and whether set bits mean
+    /// present. A `bool` is its single bit.
+    pub(crate) fn tests(&self) -> Option<(&str, u64, bool)> {
+        match self {
+            Presence::Mask { field, mask } => Some((field, *mask, true)),
+            Presence::MaskClear { field, mask } => Some((field, *mask, false)),
+            Presence::Flag { field } => Some((field, 1, true)),
+            Presence::FlagClear { field } => Some((field, 1, false)),
+            Presence::Bit | Presence::Remaining => None,
+        }
+    }
+
+    /// Whether the test reads a `bool`, rather than bits of an integer.
+    pub(crate) fn reads_flag(&self) -> bool {
+        matches!(self, Presence::Flag { .. } | Presence::FlagClear { .. })
+    }
 }
 
 /// What makes an optional [`Placed`](Segment::Placed) record absent.

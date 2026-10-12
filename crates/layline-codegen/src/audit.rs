@@ -155,6 +155,7 @@ fn segment_views<'a>(
 fn presence_view(when: &row::Presence) -> table::Presence<'_> {
     match when {
         row::Presence::Flag { field, mask } => table::Presence::Flag { field, mask: *mask },
+        row::Presence::Clear { field, mask } => table::Presence::Clear { field, mask: *mask },
         row::Presence::Offset => table::Presence::Offset,
         row::Presence::Bit => table::Presence::Bit,
         row::Presence::Remaining => table::Presence::Remaining,

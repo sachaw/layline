@@ -166,6 +166,10 @@ fn when_tokens(when: &row::Presence, root: &Root) -> TokenStream {
             let mask = Literal::u64_unsuffixed(*mask);
             quote!(#root::table::Presence::Flag { field: #field, mask: #mask })
         }
+        row::Presence::Clear { field, mask } => {
+            let mask = proc_macro2::Literal::u64_suffixed(*mask);
+            quote!(#root::table::Presence::Clear { field: #field, mask: #mask })
+        }
         row::Presence::Offset => quote!(#root::table::Presence::Offset),
         row::Presence::Bit => quote!(#root::table::Presence::Bit),
         row::Presence::Remaining => quote!(#root::table::Presence::Remaining),

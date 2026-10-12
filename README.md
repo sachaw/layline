@@ -61,6 +61,9 @@ let (back, used) = Frame::decode(&wire).unwrap();
 assert_eq!((back.payload, used), (vec![1, 2, 3], wire.len()));
 ```
 
+A field can be present when a flag is clear: `#[when(flags & 0x4 == 0)]` or `#[when(!flag)]`.
+Encode writes the flag from the field, setting the bits for `None`.
+
 ## Switches
 
 ```rust

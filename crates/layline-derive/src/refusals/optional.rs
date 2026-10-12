@@ -417,3 +417,51 @@ pub struct M {
          Name a field of this message",
     );
 }
+
+#[test]
+fn a_negated_mask_is_not_a_test() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Node {
+    pub flag: u16,
+    #[when(!(flag & 0x1))]
+    pub translation: Option<u32>,
+}"#,
+        "field `translation`: `!` on an integer flips its bits, so it does not test them. \
+         Write `#[when(flag & 0x1 == 0)]`",
+    );
+}
+
+#[test]
+fn a_cleared_mask_tests_some_bits() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Node {
+    pub flag: u16,
+    #[when(flag & 0 == 0)]
+    pub translation: Option<u32>,
+}"#,
+        "`#[when(flag & 0)]` masks no bits",
+    );
+}
+
+#[test]
+fn one_bool_cannot_mark_two_fields_either_way() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Node {
+    pub short: bool,
+    #[when(short)]
+    pub a: Option<u8>,
+    #[when(!short)]
+    pub b: Option<u16>,
+}"#,
+        "`short` is a `bool`, and `b` also uses it",
+    );
+}

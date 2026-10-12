@@ -500,23 +500,32 @@ pub(super) fn parse_when(attr: &syn::Attribute, name: &str) -> syn::Result<WhenS
     let span = attr.meta.span();
     let expr: syn::Expr = attr.parse_args().map_err(|_| when_shape(span, name))?;
 
-    match &expr {
-        syn::Expr::Path(p) => {
-            if let Some(i) = p.path.get_ident() {
-                let by = Ref { name: crate::attr::name(i), span: i.span() };
-                return Ok(WhenSpec { by, test: WhenTest::Flag, span });
+    if let syn::Expr::Unary(u) = &expr
+        && matches!(u.op, syn::UnOp::Not(_))
+    {
+        if let Some(by) = flag_ref(&u.expr)? {
+            return Ok(WhenSpec { by, test: WhenTest::Flag, clear: true, span });
+        }
+        let mut inner = &*u.expr;
+        while let syn::Expr::Paren(p) = inner {
+            inner = &p.expr;
+        }
+        let hint = match inner {
+            syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::BitAnd(_)) => {
+                let (by, mask) = mask_test(b, span, name)?;
+                format!("Write `#[when({} & {mask:#x} == 0)]`", by.name)
             }
-        }
-        syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Field(_)) => {
-            let base = &f.base;
-            return Err(too_deep(f.member.span(), &crate::attr::spelled(base)));
-        }
-        syn::Expr::Field(f) => {
-            if let Some(by) = field_expr_ref(f) {
-                return Ok(WhenSpec { by, test: WhenTest::Flag, span });
-            }
-        }
-        _ => {}
+            _ => String::from("Write `#[when(!flag)]` with an earlier `bool`"),
+        };
+        return Err(syn::Error::new(
+            span,
+            format!(
+                "field `{name}`: `!` on an integer flips its bits, so it does not test them. {hint}"
+            ),
+        ));
+    }
+    if let Some(by) = flag_ref(&expr)? {
+        return Ok(WhenSpec { by, test: WhenTest::Flag, clear: false, span });
     }
 
     let syn::Expr::Binary(b) = &expr else {
@@ -526,7 +535,15 @@ pub(super) fn parse_when(attr: &syn::Attribute, name: &str) -> syn::Result<WhenS
         let Some(by) = binary_ref(b)? else {
             return Err(when_shape(span, name));
         };
-        return Ok(WhenSpec { by, test: WhenTest::Positive, span });
+        return Ok(WhenSpec { by, test: WhenTest::Positive, clear: false, span });
+    }
+    if let (syn::BinOp::Eq(_) | syn::BinOp::Ne(_), syn::Expr::Binary(masked)) = (&b.op, &*b.left)
+        && matches!(masked.op, syn::BinOp::BitAnd(_))
+        && is_zero(&b.right)
+    {
+        let (by, mask) = mask_test(masked, span, name)?;
+        let clear = matches!(b.op, syn::BinOp::Eq(_));
+        return Ok(WhenSpec { by, test: WhenTest::Mask(mask), clear, span });
     }
     if matches!(
         b.op,
@@ -541,7 +558,10 @@ pub(super) fn parse_when(attr: &syn::Attribute, name: &str) -> syn::Result<WhenS
         let left = &b.left;
         let left = crate::attr::spelled(left);
         let why = if is_zero(&b.right) {
-            format!("is not supported. Write `#[when({left} > 0)]`")
+            format!(
+                "is not supported. Write `#[when({left} > 0)]`, or `#[when({left} & 0x01 == 0)]` \
+                 for bits that mean absent"
+            )
         } else {
             format!(
                 "is not supported. \
@@ -553,7 +573,27 @@ pub(super) fn parse_when(attr: &syn::Attribute, name: &str) -> syn::Result<WhenS
     if !matches!(b.op, syn::BinOp::BitAnd(_)) {
         return Err(when_shape(span, name));
     }
+    let (by, mask) = mask_test(b, span, name)?;
+    Ok(WhenSpec { by, test: WhenTest::Mask(mask), clear: false, span })
+}
 
+/// `flag` or `head.flag`, a `bool` the field's presence reads.
+fn flag_ref(expr: &syn::Expr) -> syn::Result<Option<Ref>> {
+    match expr {
+        syn::Expr::Path(p) => {
+            Ok(p.path.get_ident().map(|i| Ref { name: crate::attr::name(i), span: i.span() }))
+        }
+        syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Field(_)) => {
+            let base = &f.base;
+            Err(too_deep(f.member.span(), &crate::attr::spelled(base)))
+        }
+        syn::Expr::Field(f) => Ok(field_expr_ref(f)),
+        _ => Ok(None),
+    }
+}
+
+/// `field & MASK`, with a nonzero integer mask.
+fn mask_test(b: &syn::ExprBinary, span: Span, name: &str) -> syn::Result<(Ref, u64)> {
     let Some(by) = binary_ref(b)? else {
         return Err(when_shape(span, name));
     };
@@ -574,7 +614,7 @@ pub(super) fn parse_when(attr: &syn::Attribute, name: &str) -> syn::Result<WhenS
             ),
         ));
     }
-    Ok(WhenSpec { by, test: WhenTest::Mask(mask), span })
+    Ok((by, mask))
 }
 
 fn binary_ref(b: &syn::ExprBinary) -> syn::Result<Option<Ref>> {
@@ -603,8 +643,8 @@ fn when_shape(span: Span, name: &str) -> syn::Error {
     syn::Error::new(
         span,
         format!(
-            "field `{name}`: expected `#[when(field & MASK)]`, \
-             or `#[when(field)]` where `field` is an earlier `bool`"
+            "field `{name}`: expected `#[when(field & MASK)]` or `#[when(field & MASK == 0)]`, \
+             or `#[when(field)]` or `#[when(!field)]` where `field` is an earlier `bool`"
         ),
     )
 }

@@ -164,6 +164,13 @@ pub enum Presence<'a> {
         /// The bits that mark presence.
         mask: u64,
     },
+    /// Present when `field & mask == 0`: the bits mark absence.
+    Clear {
+        /// The flag field.
+        field: &'a str,
+        /// The bits that mark absence.
+        mask: u64,
+    },
     /// Present when this row's [offset](Start::Seek) is non-zero.
     Offset,
     /// Present when the bit just before it is set.
