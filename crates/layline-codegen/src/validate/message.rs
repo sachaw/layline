@@ -138,6 +138,14 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
         if let Some(stated) = seg.stated() {
             stated_here(pos, seg.name().unwrap_or("?"), stated)?;
         }
+        if let Some(align) = seg.align()
+            && align < 2
+        {
+            return Err(Invalid::field(
+                seg.name().unwrap_or("?"),
+                format!("an alignment of {align} pads nothing. Use 2 or more, or no alignment"),
+            ));
+        }
         match seg {
             Segment::Block(fields) => {
                 let mut at = pos;
@@ -275,7 +283,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 resolve(seen, at, Reads::Number)?;
                 read_only(seen, at, "a record offset")?;
                 stated_with(seen, name, kind)?;
-                if let Some(Absence::ZeroLength { by }) = absent {
+                if let Some(Absence::ZeroLength { by, .. }) = absent {
                     resolve(seen, by, Reads::Number)?;
                     read_only(seen, by, "a record length")?;
                     if by == at {

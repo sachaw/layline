@@ -23,6 +23,7 @@ const DERIVE_ONLY: &[(&str, &str)] = &[
     ("message", WALK_ONLY),
     ("switch", WALK_ONLY),
     ("when", WALK_ONLY),
+    ("align", WALK_ONLY),
 ];
 
 const WALK_ONLY: &str = "`Layout` accepts it only to reject it with a clear error. \

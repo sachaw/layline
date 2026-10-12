@@ -137,6 +137,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         CountSpec::Window { by, scale, offset, cap } => Count::Window(Len::Field {
                             by: model_by(by, *scale, *offset),
                             cap: *cap,
+                            align: None,
                         }),
                         CountSpec::Strided { by, scale, offset, cap, stride } => Count::Strided {
                             by: model_by(by, *scale, *offset),
@@ -165,9 +166,10 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     at: at.name.clone(),
                     absent: absent.as_ref().map(|g| match g {
                         PlacedAbsence::ZeroOffset => layline_codegen::Absence::ZeroOffset,
-                        PlacedAbsence::ZeroLength(by) => {
-                            layline_codegen::Absence::ZeroLength { by: by.name.clone() }
-                        }
+                        PlacedAbsence::ZeroLength(by) => layline_codegen::Absence::ZeroLength {
+                            by: by.name.clone(),
+                            align: None,
+                        },
                     }),
                     doc: None,
                 });
@@ -196,9 +198,11 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     window: match window {
                         SwitchWindow::Open => None,
                         SwitchWindow::Fixed(n) => Some(Len::Bytes(*n)),
-                        SwitchWindow::Field { by, scale, offset, cap } => {
-                            Some(Len::Field { by: model_by(by, *scale, *offset), cap: *cap })
-                        }
+                        SwitchWindow::Field { by, scale, offset, cap } => Some(Len::Field {
+                            by: model_by(by, *scale, *offset),
+                            cap: *cap,
+                            align: None,
+                        }),
                     },
                     doc: None,
                 });
@@ -239,6 +243,21 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                 });
             }
         }
+        if let Some((align, span)) = f.align {
+            let padded = !matches!(f.body, Body::Fixed { .. } | Body::Opt { .. })
+                && segments.last_mut().is_some_and(|seg| pad(seg, align));
+            if !padded {
+                return Err(syn::Error::new(
+                    span,
+                    format!(
+                        "field `{}`: #[align({align})] pads a field whose byte length an earlier \
+                         field states. Add `#[len(n)]`, or on a `#[seek]` record, \
+                         `#[when(n > 0)]`",
+                        f.name
+                    ),
+                ));
+            }
+        }
     }
     flush(&mut segments, &mut block);
 
@@ -246,6 +265,21 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
         .with_endian(p.endian)
         .with_needs(p.needs.clone());
     Ok((msg, checks))
+}
+
+/// Sets `#[align(N)]` on the length that sizes `seg`, if a field states one.
+fn pad(seg: &mut Segment, n: u64) -> bool {
+    use layline_codegen::Absence;
+    match seg {
+        Segment::Repeat { count: Count::Window(Len::Field { align, .. }), .. }
+        | Segment::Value { kind: Kind::Text { len: Len::Field { align, .. }, .. }, .. }
+        | Segment::Switch { window: Some(Len::Field { align, .. }), .. }
+        | Segment::Placed { absent: Some(Absence::ZeroLength { align, .. }), .. } => {
+            *align = Some(n);
+            true
+        }
+        _ => false,
+    }
 }
 
 fn nestable_ty(kind: &Kind) -> Option<&str> {

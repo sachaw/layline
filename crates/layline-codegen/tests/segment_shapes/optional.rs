@@ -158,7 +158,10 @@ fn an_optional_string_delimits_itself() {
                 1,
                 field(
                     "s",
-                    Kind::Text { len: Len::Field { by: By::field("n"), cap: None }, codec: None },
+                    Kind::Text {
+                        len: Len::Field { by: By::field("n"), cap: None, align: None },
+                        codec: None,
+                    },
                 ),
             ),
         ],

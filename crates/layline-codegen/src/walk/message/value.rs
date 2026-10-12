@@ -103,7 +103,7 @@ pub(super) fn value_read(
 ) -> Result<TokenStream, Error> {
     let ident = ident(field);
     match kind {
-        Kind::Text { len: Len::Field { by, cap }, codec } => {
+        Kind::Text { len: Len::Field { by, cap, .. }, codec } => {
             let decode = text_decode(codec, field, root);
             let n = env.stated_n(owner, "#[count]", by, *cap)?;
             let by = by.field.as_str();

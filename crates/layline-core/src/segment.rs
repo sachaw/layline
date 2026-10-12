@@ -129,6 +129,15 @@ pub enum Span<'a> {
         /// The size, in bits.
         bits: u64,
     },
+    /// Zero bytes after the row before, up to the next multiple of `align` bytes counted from
+    /// that row's start: padding that its length does not count.
+    ///
+    /// The row is named after the padded row, with `.pad` appended. Decode skips the bytes
+    /// without reading them, and encode writes zeros.
+    Pad {
+        /// The multiple, in bytes.
+        align: u64,
+    },
     /// Tag-length-value: the arm sets the content, and an earlier field sets the size.
     ///
     /// The arm must fill the size. Decode advances by the size whichever arm is chosen.

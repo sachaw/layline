@@ -34,7 +34,7 @@ fn sequence(field: &str, ty: &str, len: &str) -> Segment {
     Segment::repeat(
         field,
         Kind::Msg { ty: ty.into(), boxed: false, with: Vec::new() },
-        Count::Window(Len::Field { by: By::field(len), cap: None }),
+        Count::Window(Len::Field { by: By::field(len), cap: None, align: None }),
         None,
         Collection::Vec,
     )

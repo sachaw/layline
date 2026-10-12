@@ -142,3 +142,26 @@ fn a_byte_message_refuses_a_one_bit_bool() {
     assert!(why.contains("Scalar::ByteBool"), "{why}");
     assert_eq!(validate(&m(Scalar::ByteBool)), Ok(()));
 }
+
+#[test]
+fn an_alignment_pads_by_two_or_more() {
+    use layline_codegen::{By, Collection, Count, MessageDef, Segment};
+    let m = |align| {
+        Item::Message(MessageDef::new(
+            "Frame",
+            vec![
+                Segment::block(vec![f("n", Kind::Scalar(Scalar::U(8)))]),
+                Segment::repeat(
+                    "data",
+                    Kind::Scalar(Scalar::U(8)),
+                    Count::Window(Len::Field { by: By::field("n"), cap: None, align }),
+                    None,
+                    Collection::Vec,
+                ),
+            ],
+        ))
+    };
+    assert_eq!(validate(&m(Some(2))), Ok(()));
+    let why = validate(&m(Some(1))).expect_err("pads nothing").to_string();
+    assert!(why.contains("pads nothing"), "{why}");
+}

@@ -115,7 +115,7 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
 
     let (len, len_ref) = match (count, until, bytes) {
         (Some((CountSpec::Window { by, scale, offset, cap }, _)), _, _) => {
-            (Len::Field { by: model_by(&by, scale, offset), cap }, Some(by))
+            (Len::Field { by: model_by(&by, scale, offset), cap, align: None }, Some(by))
         }
         (Some((CountSpec::Field { by, .. }, cspan)), _, _) => {
             return Err(syn::Error::new(

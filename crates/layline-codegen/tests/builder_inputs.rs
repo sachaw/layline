@@ -167,6 +167,7 @@ fn a_parameter_joins_the_name_environment_beside_the_fields() {
             Count::Window(layline_codegen::Len::Field {
                 by: layline_codegen::By::field("stride"),
                 cap: None,
+                align: None,
             }),
             None,
             Collection::Vec,

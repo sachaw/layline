@@ -23,7 +23,7 @@ pub(super) struct MessageAttr {
 pub(super) const MESSAGE_ATTRS: &[&str] = &[
     "message", "count", "len", "stride", "fill", "seek", "at", "codec", "bits", "bytes", "text",
     "until", "var", "switch", "when", "with", "present", "checksum", "magic", "value", "other",
-    "range",
+    "range", "align",
 ];
 
 fn refuse_misplaced_on_container(input: &DeriveInput) -> syn::Result<()> {

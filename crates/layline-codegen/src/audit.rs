@@ -195,6 +195,7 @@ fn span_view(span: &row::Span) -> table::Span<'_> {
         }
         row::Span::Window { by } => table::Span::Window { by: by_view(by) },
         row::Span::SelfDelimiting => table::Span::SelfDelimiting,
+        row::Span::Pad { align } => table::Span::Pad { align: *align },
         row::Span::Until { terminator } => table::Span::Until { terminator: *terminator },
         row::Span::Fill { cap } => table::Span::Fill { cap: *cap },
         row::Span::Chosen { on } => table::Span::Chosen { on: discriminant_view(on) },

@@ -93,6 +93,7 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         when: None,
         with: None,
         range: None,
+        align: None,
     };
 
     let owner = format!("field `{name}`");
@@ -157,6 +158,8 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
             crate::attr::once_attr(&mut a.range, attr, &owner, || {
                 crate::claim::range_attr(attr, f.ident.as_ref().expect("named"))
             })?;
+        } else if path.is_ident("align") {
+            crate::attr::once_attr(&mut a.align, attr, &owner, || parse_align(attr, name))?;
         } else if path.is_ident("magic") {
             crate::attr::once_attr(&mut a.magic, attr, &owner, || {
                 let lit = crate::claim::magic_lit(attr, f.ident.as_ref().expect("named"))?;
@@ -191,6 +194,20 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
     }
 
     Ok(a)
+}
+
+fn parse_align(attr: &syn::Attribute, name: &str) -> syn::Result<(u64, Span)> {
+    let (n, span) = crate::attr::int_arg::<u64>(attr)?;
+    if n < 2 {
+        return Err(syn::Error::new(
+            span,
+            format!(
+                "field `{name}`: #[align({n})] pads nothing. \
+                 Write the multiple the padding reaches, such as #[align(4)]"
+            ),
+        ));
+    }
+    Ok((n, span))
 }
 
 fn parse_text(attr: &syn::Attribute, name: &str) -> syn::Result<Option<String>> {

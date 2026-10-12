@@ -188,6 +188,7 @@ fn span_token<W: fmt::Write>(w: &mut W, span: &Span<'_>) -> fmt::Result {
             by_token(w, *by)
         }
         Span::SelfDelimiting => w.write_str("selfdelimiting"),
+        Span::Pad { align } => write!(w, "pad,{align}"),
         Span::Until { terminator } => write!(w, "until,{terminator:#04x}"),
         Span::Terminated { mask } => write!(w, "terminated,{mask:#04x}"),
         Span::Fill { cap: None } => w.write_str("fill"),

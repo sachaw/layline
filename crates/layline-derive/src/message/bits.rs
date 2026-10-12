@@ -19,7 +19,7 @@ use crate::width::{nonzero, one_bit_bool};
 /// The error for a byte-message attribute on a bit-addressed field.
 fn not_in_a_bits_message(name: &str, word: &str) -> String {
     let why = match word {
-        "count" | "len" | "fill" | "until" | "stride" => {
+        "count" | "len" | "fill" | "until" | "stride" | "align" => {
             "Declare the collection in the enclosing message"
         }
         "seek" => "Declare the record in the enclosing message",
@@ -138,6 +138,7 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         body: Body::Bits { kind, absent },
         stated: None,
         with: Vec::new(),
+        align: None,
     })
 }
 

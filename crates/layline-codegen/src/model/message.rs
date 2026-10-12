@@ -126,6 +126,13 @@ pub enum Absence {
     ZeroLength {
         /// The earlier field holding the length in bytes.
         by: String,
+        /// Padding that is not part of the length: `#[align(N)]`.
+        ///
+        /// The record lies in the stated length rounded up to a multiple of `N` bytes. It may end
+        /// anywhere from the stated length to that bound, since a record that states its own size
+        /// can count the padding, as an SDAT block does. Encode writes the record's length and
+        /// then zeros up to the bound.
+        align: Option<u64>,
     },
 }
 
@@ -368,6 +375,18 @@ impl Segment {
             Segment::Placed { name, absent: None, .. } => vec![name.as_str()],
             Segment::Placed { absent: Some(_), .. } => Vec::new(),
             Segment::Opt { .. } => Vec::new(),
+        }
+    }
+
+    /// The `#[align(N)]` of the length that sizes this segment, if any.
+    #[must_use]
+    pub fn align(&self) -> Option<u64> {
+        match self {
+            Segment::Repeat { count: Count::Window(Len::Field { align, .. }), .. }
+            | Segment::Value { kind: Kind::Text { len: Len::Field { align, .. }, .. }, .. }
+            | Segment::Switch { window: Some(Len::Field { align, .. }), .. }
+            | Segment::Placed { absent: Some(Absence::ZeroLength { align, .. }), .. } => *align,
+            _ => None,
         }
     }
 

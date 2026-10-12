@@ -66,6 +66,9 @@ let (back, used) = Frame::decode(&wire).unwrap();
 assert_eq!((back.payload, used), (vec![1, 2, 3], wire.len()));
 ```
 
+`#[align(N)]` after a `#[len(n)]` field adds zero padding up to a multiple of `N` bytes that `n`
+does not count, as a RIFF chunk's odd body has.
+
 A field can be present when a flag is clear: `#[when(flags & 0x4 == 0)]` or `#[when(!flag)]`.
 Encode writes the flag from the field, setting the bits for `None`.
 

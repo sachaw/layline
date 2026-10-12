@@ -114,3 +114,89 @@ pub(super) fn windowed(field: &str, stated: bool, inner: TokenStream, root: &Roo
         __at = __end;
     }
 }
+
+/// As [`windowed`] with a stated length, over `__n` rounded up to a multiple of `align`.
+///
+/// `inner` may end anywhere from `__n` to that bound, since a record that states its own size can
+/// count the padding. The cursor moves to the bound.
+pub(super) fn windowed_padded(
+    field: &str,
+    align: u64,
+    inner: TokenStream,
+    root: &Root,
+) -> TokenStream {
+    let Prelude { ok, err, result, u8, .. } = root.prelude();
+    let malformed =
+        |at: TokenStream| quote!(#root::ParseError::Malformed { field: #field, at: #at });
+    let (overrun, short) = (malformed(quote!(__at)), malformed(quote!(0)));
+    let align = Literal::usize_unsuffixed(align as usize);
+    quote! {
+        let __least = __n;
+        let __padded = __n.checked_add((#align - __n % #align) % #align).ok_or(#overrun)?;
+        let __end = __at.checked_add(__padded).ok_or(#overrun)?;
+        let __window = __body.get(__at..__end).ok_or(#root::ParseError::Short {
+            need_bytes: __end,
+            got_bytes: __body.len(),
+            at: __at,
+        })?;
+        let __walk = |__body: &[#u8]| -> #result<_, #root::ParseError> {
+            let mut __at = 0usize;
+            #inner
+            if __at < __least {
+                return #err(#short);
+            }
+            #ok(__e)
+        };
+        let __e = __walk(__window).map_err(|__err| match __err {
+            #root::ParseError::Short { .. } => #overrun,
+            __err => __err.rebased(__at),
+        })?;
+        __at = __end;
+    }
+}
+
+/// Skip the padding after a value that began at `__pad_from`, up to the next multiple of `align`
+/// bytes from there.
+pub(super) fn skip_padding(align: u64, root: &Root) -> TokenStream {
+    let Prelude { err, .. } = root.prelude();
+    let align = Literal::usize_unsuffixed(align as usize);
+    quote! {
+        {
+            let __to = __at + (#align - (__at - __pad_from) % #align) % #align;
+            if __to > __body.len() {
+                return #err(#root::ParseError::Short {
+                    need_bytes: __to,
+                    got_bytes: __body.len(),
+                    at: __at,
+                });
+            }
+            __at = __to;
+        }
+    }
+}
+
+/// Write zeros after a value that began at `out` position `__pad_from`, up to the next multiple of
+/// `align` bytes from there.
+///
+/// Up to 64, the zeros are one push from a constant; past that, one push per byte.
+pub(super) fn write_padding(align: u64) -> TokenStream {
+    let n = Literal::usize_unsuffixed(align as usize);
+    let pad = quote! { (#n - (out.len() - __pad_from) % #n) % #n };
+    if align <= 64 {
+        let most = Literal::usize_unsuffixed(align as usize - 1);
+        quote! {
+            {
+                const __ZEROS: [::core::primitive::u8; #most] = [0; #most];
+                if let ::core::option::Option::Some(__z) = __ZEROS.get(..#pad) {
+                    out.push(__z)?;
+                }
+            }
+        }
+    } else {
+        quote! {
+            for _ in 0..#pad {
+                out.push(&[0u8])?;
+            }
+        }
+    }
+}

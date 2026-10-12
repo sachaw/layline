@@ -7,7 +7,7 @@ fn the_string_shapes_are_extents_not_features() {
     for len in [
         Len::Until { terminator: 0 },
         Len::Bytes(16),
-        Len::Field { by: By::field("n"), cap: Some(4096) },
+        Len::Field { by: By::field("n"), cap: Some(4096), align: None },
         Len::Fill,
     ] {
         let open_ended = matches!(len, Len::Fill);
@@ -40,7 +40,7 @@ fn a_length_prefix_must_name_an_earlier_field() {
             stated: None,
             name: "name".into(),
             kind: Kind::Text {
-                len: Len::Field { by: By::field("nowhere"), cap: None },
+                len: Len::Field { by: By::field("nowhere"), cap: None, align: None },
                 codec: None,
             },
             doc: None,
@@ -71,7 +71,7 @@ fn a_discovered_extent_cannot_live_in_a_block() {
 
 #[test]
 fn a_repeated_string_must_delimit_itself() {
-    for len in [Len::Field { by: By::field("n"), cap: None }, Len::Fill] {
+    for len in [Len::Field { by: By::field("n"), cap: None, align: None }, Len::Fill] {
         let m = msg(
             "Bad",
             vec![

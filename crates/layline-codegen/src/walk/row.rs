@@ -56,6 +56,7 @@ pub(crate) enum Span {
     Strided { by: By, stride: By },
     Window { by: By },
     SelfDelimiting,
+    Pad { align: u64 },
     Until { terminator: u8 },
     Terminated { mask: u8 },
     Fill { cap: Option<u64> },

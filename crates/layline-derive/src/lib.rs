@@ -90,8 +90,8 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 /// an `endian = le` layout. `from_bits` returns what `decode` returns.
 ///
 /// `Layout` rejects the `Message` attributes `#[count]`, `#[len]`, `#[stride]`, `#[fill]`,
-/// `#[seek]`, `#[text]`, `#[until]`, `#[var]`, `#[message]`, `#[switch]` and `#[when]` with a
-/// clear error.
+/// `#[seek]`, `#[text]`, `#[until]`, `#[var]`, `#[message]`, `#[switch]`, `#[when]` and
+/// `#[align]` with a clear error.
 ///
 /// ```
 /// # use layline::{FieldCodec, Layout};
@@ -111,7 +111,7 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
     Layout,
     attributes(
         layout, bits, codec, bytes, at, overlay, magic, checksum, range, count, len, stride, fill,
-        seek, text, until, var, message, switch, when
+        seek, text, until, var, message, switch, when, align
     )
 )]
 pub fn derive_layout(input: TokenStream) -> TokenStream {
@@ -287,8 +287,15 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   them for `None`. `!(flags & MASK)` is refused: on an integer, `!` flips the bits.
 /// - `#[when(n > 0)]`: an `Option<T>` present when `n` is non-zero. Use with `#[seek]`. `n` is the
 ///   record's exact byte length: decode refuses a record of any other length, and encode writes
-///   the length. For a number that only marks presence, such as a size rounded up past the
-///   record, use `#[seek]` alone: an offset of zero is `None`.
+///   the length. With `#[align(N)]`, `n` does not count the padding up to a multiple of `N`
+///   bytes, and the record may end anywhere from `n` to that bound, as a block that states its
+///   own size, padding included, does. For a number that only marks presence, use `#[seek]`
+///   alone: an offset of zero is `None`.
+/// - `#[align(N)]`: zero bytes after a field, up to the next multiple of `N` bytes counted from
+///   the field's first byte, that its length does not count. Use with a `#[len(n)]` collection,
+///   string or switch, or a `#[seek]` record with `#[when(n > 0)]`. `n` holds the field's own
+///   length. Decode skips the padding without reading it, and encode writes zeros. A RIFF chunk
+///   is `#[len(size)] #[align(2)] body: Vec<u8>`.
 /// - `#[fill]` on an `Option<T>`: present when bytes remain.
 /// - `#[magic(0xFE)]`, `#[magic(b"SEAL")]`: fixed bytes. Decode checks them and encode writes
 ///   them.
@@ -341,7 +348,7 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
     Message,
     attributes(
         message, count, len, stride, fill, seek, at, codec, bits, bytes, text, until, var, switch,
-        when, with, present, checksum, magic, value, other, range
+        when, with, present, checksum, magic, value, other, range, align
     )
 )]
 pub fn derive_message(input: TokenStream) -> TokenStream {

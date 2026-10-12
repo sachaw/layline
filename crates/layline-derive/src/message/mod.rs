@@ -76,6 +76,8 @@ struct MsgField {
     stated: Option<crate::claim::At>,
     /// `#[with(..)]` names, kept for error spans.
     with: Vec<Ref>,
+    /// `#[align(N)]`.
+    align: Option<(u64, Span)>,
 }
 
 enum Body {
@@ -445,6 +447,8 @@ struct FieldAttrs {
     with: Option<(Vec<Ref>, Span)>,
     range: Option<crate::claim::Range>,
     magic: Option<crate::claim::Magic>,
+    /// `#[align(N)]`: padding after the field that its length does not count.
+    align: Option<(u64, Span)>,
 }
 
 enum KindWord {

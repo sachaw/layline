@@ -213,13 +213,13 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
             }
             Segment::Placed { name, at, absent, .. } => {
                 out.push((at.clone(), Derived::Offset { of: name.clone(), record: true }));
-                if let Some(Absence::ZeroLength { by }) = absent {
+                if let Some(Absence::ZeroLength { by, .. }) = absent {
                     out.push((by.clone(), Derived::ByteLen { of: name.clone(), record: true }));
                 }
             }
             Segment::Value {
                 name: text,
-                kind: Kind::Text { len: Len::Field { by, cap }, codec },
+                kind: Kind::Text { len: Len::Field { by, cap, .. }, codec },
                 ..
             } => {
                 out.push((
@@ -240,7 +240,7 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                         Derived::Discriminant { of: body.clone(), field: field.clone() },
                     ));
                 }
-                if let Some(Len::Field { by, cap }) = window {
+                if let Some(Len::Field { by, cap, .. }) = window {
                     out.push((
                         by.field.clone(),
                         Derived::ArmLen {

@@ -452,7 +452,7 @@ impl Walk<'_> {
                     quote!(),
                 )
             }
-            Count::Window(Len::Field { by, cap }) => (
+            Count::Window(Len::Field { by, cap, .. }) => (
                 quote! { let __span_start = out.len(); },
                 stamp_slot(
                     &self.slots,

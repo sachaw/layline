@@ -684,3 +684,65 @@ pub struct Reply {
         "field `on`: a `bool` here is one byte",
     );
 }
+
+#[test]
+fn align_pads_a_stated_length() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Frame {
+    pub n: u8,
+    #[count(n)]
+    #[align(2)]
+    pub data: Vec<u16>,
+}"#,
+        "field `data`: #[align(2)] pads a field whose byte length an earlier field states. \
+         Add `#[len(n)]`",
+    );
+}
+
+#[test]
+fn align_of_one_pads_nothing() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Frame {
+    pub n: u8,
+    #[len(n)]
+    #[align(1)]
+    pub data: Vec<u8>,
+}"#,
+        "field `data`: #[align(1)] pads nothing",
+    );
+}
+
+#[test]
+fn align_is_not_a_layout_attribute() {
+    refused(
+        r#"use layline::Layout;
+
+#[derive(Layout)]
+#[layout(bytes = 2)]
+pub struct Pair {
+    #[align(2)]
+    pub a: u16,
+}"#,
+        "field `a`: #[align] is not supported in a `bytes = N` layout",
+    );
+}
+
+#[test]
+fn align_does_not_pad_a_fixed_field() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Frame {
+    #[align(4)]
+    pub a: u8,
+}"#,
+        "field `a`: #[align(4)] pads a field whose byte length an earlier field states",
+    );
+}

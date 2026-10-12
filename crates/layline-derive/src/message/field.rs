@@ -22,6 +22,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
     let with: Vec<Ref> = a.with.iter().flat_map(|(refs, _)| refs).map(Ref::same).collect();
 
     let stated = a.at;
+    let align = a.align;
     let walk_span = walked_by(&a)
         .map(|(_, s)| s)
         .or_else(|| when.as_ref().map(|w| w.span))
@@ -72,7 +73,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
             }
             if let Body::Fixed { kind, claims } = field_body(inner, &name, span, a)? {
                 let body = Body::Opt { when: None, kind, claims };
-                return Ok(MsgField { name, span, walk_span, body, stated, with });
+                return Ok(MsgField { name, span, walk_span, body, stated, with, align });
             }
             return Err(syn::Error::new(
                 span,
@@ -93,7 +94,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
         (None, None) => field_body(&f.ty, &name, span, a)?,
     };
-    Ok(MsgField { name, span, walk_span, body, stated, with })
+    Ok(MsgField { name, span, walk_span, body, stated, with, align })
 }
 
 fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
@@ -211,6 +212,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
         with,
         kind,
         at: _,
+        align: _,
     } = a;
     let at = seek;
 

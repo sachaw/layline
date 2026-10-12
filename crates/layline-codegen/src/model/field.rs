@@ -183,6 +183,13 @@ pub enum Len {
         by: By,
         /// The largest length allowed.
         cap: Option<usize>,
+        /// Padding that is not part of the length: `#[align(N)]`.
+        ///
+        /// The value takes exactly the stated length, and zero bytes follow it up to the next
+        /// multiple of `N` bytes, counted from the value's first byte. Decode skips them without
+        /// reading them, and encode writes them. The message's `SEGMENTS` give them a row of
+        /// their own, of [`Span::Pad`](layline_core::table::Span::Pad).
+        align: Option<u64>,
     },
     /// Up to and including the first `terminator` byte.
     Until {

@@ -5,14 +5,14 @@ use quote::quote;
 
 use super::Check;
 use super::checksum::Marked;
-use super::cursor::seek_to;
+use super::cursor::{seek_to, skip_padding, write_padding};
 use super::env::Env;
 use super::patch::{Slot, arm_ident, nested_in_blocks, nested_probe};
-use super::table::Rows;
+use super::table::{Row, Rows};
 use crate::model::split_ref;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, derivations, endian_arg, row};
-use crate::{Endian, Error, Kind, Len, Param, Root, Segment};
+use crate::{Absence, Endian, Error, Kind, Len, Param, Root, Segment};
 
 /// Where encode reads a body's values from.
 #[derive(Clone, Copy)]
@@ -225,6 +225,12 @@ pub(super) fn walk_segments(
                 w.marked.start(name, &mut w.parse_steps, &mut w.byte_steps);
             }
         }
+        // A placed record pads inside its own window.
+        let padded = seg.align().filter(|_| !matches!(seg, Segment::Placed { .. }));
+        if padded.is_some() {
+            w.parse_steps.extend(quote! { let __pad_from = __at; });
+            w.byte_steps.extend(quote! { let __pad_from = out.len(); });
+        }
         match seg {
             Segment::Block(_) => w.block(item, own, seg)?,
             Segment::Value { .. } => w.value(item, own, seg, last)?,
@@ -238,6 +244,19 @@ pub(super) fn walk_segments(
             for name in seg.places() {
                 w.marked.end(name, &mut w.parse_steps, &mut w.byte_steps);
             }
+        }
+        if let Some(align) = padded {
+            w.parse_steps.extend(skip_padding(align, root));
+            w.byte_steps.extend(write_padding(align));
+        }
+        if let (Some(align), Some(name)) = (seg.align(), seg.name()) {
+            w.rows.advance(None);
+            let pad = format!("{name}.pad");
+            let mut row = Row::new(&pad, row::Span::Pad { align });
+            if let Segment::Placed { absent: Some(Absence::ZeroLength { by, .. }), .. } = seg {
+                row = row.when(row::Presence::Length { by: by.clone() });
+            }
+            w.rows.push(row);
         }
         w.rows.advance(seg.fixed_bits());
         w.parse_steps.extend(quote! {
@@ -382,7 +401,7 @@ impl Walk<'_> {
                 let lit = Literal::usize_unsuffixed(*n);
                 Ok(quote! { let __n = #lit; })
             }
-            Len::Field { by, cap } => self.env.stated_n(owner, "#[len]", by, *cap),
+            Len::Field { by, cap, .. } => self.env.stated_n(owner, "#[len]", by, *cap),
             other => Err(Error::Refused(format!(
                 "{owner}: {what} `{name}` has length {other:?}. \
                  Use a fixed byte count or an earlier field"

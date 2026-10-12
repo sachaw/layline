@@ -119,7 +119,7 @@ fn switch_in_a_window_the_wire_states() {
         name: "value".into(),
         on: Discriminant::Field("tag".into()),
         choice: "Value".into(),
-        window: Some(Len::Field { by: By::field(field), cap: None }),
+        window: Some(Len::Field { by: By::field(field), cap: None, align: None }),
         doc: None,
         stated: None,
     };
@@ -162,7 +162,7 @@ fn switch_in_a_window_the_wire_states() {
                 name: "value".into(),
                 on: Discriminant::BodyLength,
                 choice: "Value".into(),
-                window: Some(Len::Field { by: By::field("len"), cap: None }),
+                window: Some(Len::Field { by: By::field("len"), cap: None, align: None }),
                 doc: None,
                 stated: None,
             },

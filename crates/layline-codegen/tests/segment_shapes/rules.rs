@@ -258,18 +258,18 @@ fn a_placed_record_may_be_gated_on_the_length_that_measures_it() {
             ],
         )
     };
-    let m = msg_with(Some(Absence::ZeroLength { by: "table_size".into() }));
+    let m = msg_with(Some(Absence::ZeroLength { by: "table_size".into(), align: None }));
     assert_eq!(validate_message(&m), Ok(()));
 
     assert!(m.segments[1].places().is_empty());
     assert_eq!(m.segments[1].placed_optionally(), Some("table"));
 
-    let unknown = msg_with(Some(Absence::ZeroLength { by: "nowhere".into() }));
+    let unknown = msg_with(Some(Absence::ZeroLength { by: "nowhere".into(), align: None }));
     assert!(
         matches!(validate_message(&unknown), Err(Invalid::UnknownReference(f)) if f == "nowhere")
     );
 
-    let same = msg_with(Some(Absence::ZeroLength { by: "table_at".into() }));
+    let same = msg_with(Some(Absence::ZeroLength { by: "table_at".into(), align: None }));
     assert!(validate_message(&same).is_err());
 }
 

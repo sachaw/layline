@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::body::{Bind, Item, Own, Walk};
-use super::cursor::{seek_to, windowed};
+use super::cursor::{seek_to, windowed, windowed_padded, write_padding};
 use super::patch::{StampAt, stamp_slot};
 use super::repeat::element_step;
 use super::table::{Row, deferred_type, span_of_kind};
@@ -39,7 +39,7 @@ impl Walk<'_> {
         if let Some(absent) = absent {
             row = row.when(match absent {
                 Absence::ZeroOffset => row::Presence::Offset,
-                Absence::ZeroLength { by } => row::Presence::Length { by: by.clone() },
+                Absence::ZeroLength { by, .. } => row::Presence::Length { by: by.clone() },
             });
         }
         self.rows.push(row);
@@ -57,9 +57,12 @@ impl Walk<'_> {
                 let seek = seek_to(&start, at, root);
                 let (test, read) = match absent {
                     Absence::ZeroOffset => (start, read),
-                    Absence::ZeroLength { by } => {
+                    Absence::ZeroLength { by, align } => {
                         let n = self.env.stated_n(owner, "#[when]", &By::field(by), None)?;
-                        let window = windowed(by, true, read, root);
+                        let window = match align {
+                            Some(align) => windowed_padded(by, *align, read, root),
+                            None => windowed(by, true, read, root),
+                        };
                         (self.env.get(owner, "#[when]", by)?, quote!(#n #window))
                     }
                 };
@@ -108,7 +111,14 @@ impl Walk<'_> {
                     }
                 });
             }
-            Some(Absence::ZeroLength { by }) => {
+            Some(Absence::ZeroLength { by, align }) => {
+                let pad = align.map(|align| {
+                    let pad = write_padding(align);
+                    quote! {
+                        let __pad_from = __span_start;
+                        #pad
+                    }
+                });
                 let at_present = stamp(SlotOf::Position, at, &here)?;
                 let at_absent = stamp(SlotOf::Position, at, &quote!(0i64))?;
                 let len_present =
@@ -126,6 +136,7 @@ impl Walk<'_> {
                             #write_one
                             ::core::assert!(out.len() != __span_start, #msg);
                             #len_present
+                            #pad
                         }
                         #none => {
                             #at_absent

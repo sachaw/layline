@@ -217,6 +217,10 @@ fn span_tokens(span: &row::Span, root: &Root) -> TokenStream {
             quote!(#root::table::Span::Window { by: #by })
         }
         row::Span::SelfDelimiting => quote!(#root::table::Span::SelfDelimiting),
+        row::Span::Pad { align } => {
+            let align = Literal::u64_suffixed(*align);
+            quote!(#root::table::Span::Pad { align: #align })
+        }
         row::Span::Terminated { mask } => {
             let mask = Literal::u8_unsuffixed(*mask);
             quote!(#root::table::Span::Terminated { mask: #mask })

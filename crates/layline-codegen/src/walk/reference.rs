@@ -90,7 +90,7 @@ mod tests {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Window(Len::Field { by: By::field("len"), cap: None }),
+                Count::Window(Len::Field { by: By::field("len"), cap: None, align: None }),
                 None,
                 crate::Collection::Vec,
             ),
