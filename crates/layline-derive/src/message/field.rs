@@ -228,6 +228,91 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
         ));
     }
 
+    if let Some((_, array)) = crate::ty::borrowed_bytes(ty) {
+        let others = [
+            kind.as_ref().map(|(k, s)| (k.spelling(), *s)),
+            bits.map(|(_, s)| ("#[codec]", s)),
+            until.map(|(_, s)| ("#[until]", s)),
+            stride.as_ref().map(|s| ("#[stride]", s.span)),
+            range.as_ref().map(|r| ("#[range]", r.span)),
+            magic.as_ref().map(|m| ("#[magic]", m.span)),
+        ];
+        if let Some((other, ospan)) = others.into_iter().flatten().next() {
+            return Err(syn::Error::new(
+                ospan,
+                format!("field `{name}`: {other} does not apply to borrowed bytes. Remove it"),
+            ));
+        }
+        let (count, collection) = match (array, count, bytes) {
+            (Some(n), None, None) => (CountSpec::Bytes(n), Collection::BorrowedArray),
+            (Some(n), None, Some((m, _))) if m == n => {
+                (CountSpec::Bytes(n), Collection::BorrowedArray)
+            }
+            (Some(n), None, Some((m, bspan))) => {
+                return Err(syn::Error::new(
+                    bspan,
+                    format!(
+                        "field `{name}`: #[bytes({m})] disagrees with `[u8; {n}]`. \
+                         Remove the #[bytes]"
+                    ),
+                ));
+            }
+            (Some(n), Some((c, cspan)), _) => {
+                return Err(syn::Error::new(
+                    cspan,
+                    format!(
+                        "field `{name}`: `[u8; {n}]` is {n} bytes, so {} does not apply. \
+                         Remove it, or declare `&'a [u8]`",
+                        c.spelling(),
+                    ),
+                ));
+            }
+            (None, Some((_, cspan)), Some((_, _))) => {
+                return Err(syn::Error::new(
+                    cspan,
+                    format!("field `{name}`: #[bytes] and a count both size it. Use one"),
+                ));
+            }
+            (None, None, Some((n, _))) => (CountSpec::Bytes(n), Collection::Borrowed),
+            (
+                None,
+                Some((
+                    c @ (CountSpec::Field { .. }
+                    | CountSpec::Window { .. }
+                    | CountSpec::Fill { .. }),
+                    _,
+                )),
+                None,
+            ) => (c, Collection::Borrowed),
+            (None, Some((c, cspan)), None) => {
+                return Err(syn::Error::new(
+                    cspan,
+                    format!(
+                        "field `{name}`: borrowed bytes are sized before they are read, and \
+                         {} is not. Write `#[len(n)]`, `#[count(n)]`, `#[bytes(N)]` or `#[fill]`",
+                        c.spelling(),
+                    ),
+                ));
+            }
+            (None, None, None) => {
+                return Err(syn::Error::new(
+                    ty.span(),
+                    format!(
+                        "field `{name}`: borrowed bytes need a size. \
+                         Add `#[len(n)]`, `#[count(n)]`, `#[bytes(N)]` or `#[fill]`"
+                    ),
+                ));
+            }
+        };
+        return Ok(Body::Repeat {
+            element: Kind::Scalar(Scalar::U(8)),
+            count,
+            at,
+            assert: None,
+            collection,
+        });
+    }
+
     let claimed = range
         .as_ref()
         .map(|r| ("#[range]", r.span))

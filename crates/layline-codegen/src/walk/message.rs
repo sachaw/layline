@@ -84,11 +84,15 @@ pub(crate) fn emit_message(
     let (MessageParts { fields, checks, blocks, codec }, rows) =
         lower_message(m, derives, root, cyclic)?;
     let checks = checks.into_iter().map(|c| c.tokens);
+    let generics = m.lifetime.as_ref().map(|lifetime| {
+        let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
+        quote!(<#lifetime>)
+    });
     Ok((
         quote! {
             #doc
             #der
-            pub struct #name {
+            pub struct #name #generics {
                 #fields
             }
 
@@ -131,6 +135,7 @@ fn lower_message(
     let name = ident(&m.name);
     let skip = super::tokens::serde_skip(derives, &m.derives);
     let mut item = Item::new(&m.name, m.endian, root, &m.needs, skip);
+    item.lifetime = m.lifetime.as_deref();
     if let Some(r) = references(&m.segments)
         .into_iter()
         .find(|r| !r.avoidable && names_self(r.to.name(), &m.name))
@@ -147,6 +152,7 @@ fn lower_message(
         }
     });
 
+    let literals = table.clone();
     let table = quote! {
         /// Each segment in wire order, with its start and length.
         const SEGMENTS: &'static [#root::table::SegmentDef<'static>] = &[#table];
@@ -188,6 +194,34 @@ fn lower_message(
         )
     };
     let (owner, str_ty) = (m.name.as_str(), root.prelude().primitive("str"));
+    if let Some(lifetime) = &m.lifetime {
+        let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
+        let codec = quote! {
+            impl<#lifetime> #root::MessageRef<#lifetime> for #name<#lifetime> {
+                const NAME: &'static #str_ty = #owner;
+
+                /// Each segment in wire order, with its start and length.
+                const SEGMENTS: &'static [#root::table::SegmentDef<'static>] = &[#literals];
+
+                #covered
+
+                fn decode(body: &#lifetime [#u8]) -> #result<(Self, #usize), #root::ParseError> {
+                    let __depth: #u32 = 0;
+                    let __ctx = ();
+                    #decode
+                }
+
+                fn encode_into<__B: #root::Buffer>(
+                    &self,
+                    out: &mut __B,
+                ) -> #result<(), #root::Overflow> {
+                    let __ctx = ();
+                    #encode
+                }
+            }
+        };
+        return Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows));
+    }
     let codec = quote! {
         #ctx_decl
 

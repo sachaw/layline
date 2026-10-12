@@ -336,3 +336,36 @@ fn a_range_on_a_field_wider_than_its_bounds_is_refused() {
     };
     assert!(format!("{why:?}").contains("stated in 64 bits"), "{why:?}");
 }
+
+#[test]
+fn a_borrowing_message_declares_its_lifetime() {
+    use layline_codegen::{Collection, Count, MessageDef, Segment};
+    let chunk = |lifetime: Option<&str>, element: Kind| {
+        let m = MessageDef::new(
+            "Chunk",
+            vec![
+                Segment::block(vec![Field::new("offset", Kind::Scalar(Scalar::U(32)))]),
+                Segment::repeat(
+                    "data",
+                    element,
+                    Count::Fill { cap: None },
+                    None,
+                    Collection::Borrowed,
+                ),
+            ],
+        );
+        Module::new(vec![Item::Message(match lifetime {
+            Some(l) => m.with_lifetime(l),
+            None => m,
+        })])
+    };
+    let source = generate(&chunk(Some("a"), Kind::Scalar(Scalar::U(8)))).expect("emits").source;
+    assert!(source.contains("pub struct Chunk<'a>"), "{source}");
+    assert!(source.contains("pub data: &'a [u8]"), "{source}");
+    assert!(source.contains("MessageRef<'a> for Chunk<'a>"), "{source}");
+
+    let why = generate(&chunk(None, Kind::Scalar(Scalar::U(8)))).expect_err("no lifetime");
+    assert!(why.to_string().contains("needs a message with a lifetime"), "{why}");
+    let why = generate(&chunk(Some("a"), Kind::Scalar(Scalar::U(16)))).expect_err("not bytes");
+    assert!(why.to_string().contains("a borrowed collection is bytes"), "{why}");
+}

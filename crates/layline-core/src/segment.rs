@@ -461,6 +461,54 @@ pub trait Message: Sized {
     }
 }
 
+/// A variable-length type whose fields borrow the bytes it decodes from.
+///
+/// `#[derive(Message)]` implements it, instead of [`Message`], on a struct with a lifetime:
+/// `&'a [u8]` and `&'a [u8; N]` fields are views of the input, so decode needs no allocator. It
+/// has no parameters, and no other message can hold it, since [`Message`] decodes from bytes it
+/// does not keep.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a borrowing message",
+    label = "not a `#[derive(Message)]` struct with a lifetime"
+)]
+pub trait MessageRef<'a>: Sized {
+    /// The type's name, as printed in the audit.
+    const NAME: &'static str;
+
+    /// The segment table, in wire order.
+    const SEGMENTS: &'static [crate::table::SegmentDef<'static>];
+
+    /// The bytes each `#[checksum]` field covers, in wire order.
+    const COVERED: &'static [crate::table::CoverDef<'static>] = &[];
+
+    /// Decode from the start of `bytes`, borrowing from them. Returns the value and the bytes
+    /// consumed.
+    ///
+    /// # Errors
+    ///
+    /// As [`Message::decode_with`].
+    fn decode(bytes: &'a [u8]) -> Result<(Self, usize), crate::ParseError>;
+
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// [`Overflow`](crate::Overflow), leaving the bytes already written in place.
+    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::Overflow>;
+
+    /// [`encode_into`](Self::encode_into) into a new vector.
+    #[cfg(feature = "alloc")]
+    #[must_use]
+    fn encode(&self) -> crate::__private::Vec<u8> {
+        crate::buffer::to_vec(|out| self.encode_into(out))
+    }
+
+    /// The audit records for this message.
+    fn audit() -> crate::audit::MessageRecords<'static> {
+        crate::audit::message(Self::NAME, Self::SEGMENTS).covering(Self::COVERED)
+    }
+}
+
 /// The arms of a `#[switch]` field. `#[derive(Message)]` on an enum implements it.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a catalogue",

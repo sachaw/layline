@@ -170,6 +170,9 @@ impl Walk<'_> {
         let Segment::Repeat { name: coll, element, count, at, collection, doc, .. } = seg else {
             unreachable!("just matched")
         };
+        if collection.borrows() {
+            return self.borrowed(item, own, seg);
+        }
         let coll_ident = ident(coll);
         let elem_ty = kind_ty(element, root);
         let (coll_ty, coll_val) = match collection {
@@ -540,5 +543,162 @@ impl Walk<'_> {
             #after
         });
         Ok(())
+    }
+}
+
+impl Walk<'_> {
+    /// A `&'a [u8]` or `&'a [u8; N]` run: a view of the input, written back in one piece.
+    fn borrowed(&mut self, item: &mut Item<'_>, own: Own, seg: &Segment) -> Result<(), Error> {
+        let Prelude { err, ok, u8, .. } = self.root.prelude();
+        let (root, owner) = (self.root, self.owner);
+        let Segment::Repeat { name: coll, count, at, collection, doc, .. } = seg else {
+            unreachable!("just matched")
+        };
+        let Some(lifetime) = item.lifetime else {
+            return Err(Error::Refused(format!(
+                "{owner}: `{coll}` borrows the input, and only a message with a lifetime can"
+            )));
+        };
+        let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
+        let coll_ident = ident(coll);
+        let coll_ty = match (collection, count) {
+            (Collection::BorrowedArray, Count::Window(Len::Bytes(n))) => {
+                let n = Literal::usize_unsuffixed(*n);
+                quote!(&#lifetime [#u8; #n])
+            }
+            _ => quote!(&#lifetime [#u8]),
+        };
+        let d = doc_attr(doc);
+        self.public_fields.extend(quote! { #d pub #coll_ident: #coll_ty, });
+        self.binds.push(Bind {
+            name: coll_ident.clone(),
+            ty: coll_ty.clone(),
+            value: quote!(#coll_ident),
+        });
+
+        let mut row = Row::new(coll, span_of_count(count, Some(8)));
+        if let Some(field) = at {
+            row = row.seek(field);
+        }
+        self.rows.push(row);
+
+        let n = match count {
+            Count::Field { by, cap } => self.env.stated_n(owner, "#[count]", by, *cap)?,
+            Count::Window(len @ (Len::Field { .. } | Len::Bytes(_))) => {
+                self.window_len(len, "collection", coll)?
+            }
+            Count::Fill { cap } => {
+                let bound = cap.map(|c| {
+                    let c = Literal::usize_unsuffixed(c);
+                    quote! {
+                        if __n > #c {
+                            return #err(#root::ParseError::Malformed { field: #coll, at: __at });
+                        }
+                    }
+                });
+                quote! {
+                    let __n = __body.len() - __at;
+                    #bound
+                }
+            }
+            other => {
+                return Err(Error::Refused(format!(
+                    "{owner}: `{coll}` borrows {other:?} bytes. \
+                     Size it by a count, a length, a fixed number of bytes, or the rest of the body"
+                )));
+            }
+        };
+        let short = quote! {
+            #root::ParseError::Short { need_bytes: __end, got_bytes: __body.len(), at: __at }
+        };
+        let view = match coll_ty_array(collection, count) {
+            Some(len) => quote! {
+                match <&[#u8; #len]>::try_from(__run) {
+                    #ok(__array) => __array,
+                    ::core::result::Result::Err(_) => return #err(#short),
+                }
+            },
+            None => quote!(__run),
+        };
+        self.parse_steps.extend(quote! {
+            #n
+            let __end = __at
+                .checked_add(__n)
+                .ok_or(#root::ParseError::Malformed { field: #coll, at: __at })?;
+            let __run = __body.get(__at..__end).ok_or(#short)?;
+            let #coll_ident = #view;
+            __at = __end;
+        });
+
+        let mut stamp = TokenStream::new();
+        if let Some(field) = at {
+            let here = self.here();
+            stamp = stamp_slot(
+                &self.slots,
+                StampAt {
+                    owner,
+                    coll,
+                    of: SlotOf::Position,
+                    field,
+                    endian: item.endian,
+                    record: false,
+                },
+                &here,
+                root,
+            )?;
+        }
+        let held = own.get(coll);
+        let (before, after) = match count {
+            Count::Window(Len::Field { by, cap, .. }) => (
+                quote! { let __span_start = out.len(); },
+                stamp_slot(
+                    &self.slots,
+                    StampAt {
+                        owner,
+                        coll,
+                        of: SlotOf::Length,
+                        field: &by.field,
+                        endian: item.endian,
+                        record: false,
+                    },
+                    &affine_inverse(
+                        quote!(out.len() - __span_start),
+                        (by.scale, by.offset),
+                        *cap,
+                        (&by.field, "byte length of a collection"),
+                        root,
+                    ),
+                    root,
+                )?,
+            ),
+            Count::Window(Len::Bytes(n)) if *collection == Collection::Borrowed => {
+                let lit = Literal::usize_unsuffixed(*n);
+                let msg = format!("collection `{coll}` is {n} bytes and holds a different number");
+                (quote!(), quote! { ::core::assert!(#held.len() == #lit, #msg); })
+            }
+            Count::Fill { cap: Some(cap) } => {
+                let lit = Literal::usize_unsuffixed(*cap);
+                let msg = format!("collection `{coll}` passes its cap of {cap} elements");
+                (quote! { ::core::assert!(#held.len() <= #lit, #msg); }, quote!())
+            }
+            _ => (quote!(), quote!()),
+        };
+        self.byte_steps.extend(quote! {
+            #stamp
+            #before
+            out.push(#held)?;
+            #after
+        });
+        Ok(())
+    }
+}
+
+/// The `N` of a `&'a [u8; N]` run.
+fn coll_ty_array(collection: &Collection, count: &Count) -> Option<Literal> {
+    match (collection, count) {
+        (Collection::BorrowedArray, Count::Window(Len::Bytes(n))) => {
+            Some(Literal::usize_unsuffixed(*n))
+        }
+        _ => None,
     }
 }

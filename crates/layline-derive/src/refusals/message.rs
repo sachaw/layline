@@ -746,3 +746,103 @@ pub struct Frame {
         "field `a`: #[align(4)] pads a field whose byte length an earlier field states",
     );
 }
+
+#[test]
+fn borrowed_bytes_need_a_size() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Chunk<'a> {
+    pub offset: u32,
+    pub data: &'a [u8],
+}"#,
+        "field `data`: borrowed bytes need a size",
+    );
+}
+
+#[test]
+fn borrowed_bytes_are_sized_before_they_are_read() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Name<'a> {
+    #[until(0)]
+    pub data: &'a [u8],
+}"#,
+        "field `data`: #[until] does not apply to borrowed bytes",
+    );
+}
+
+#[test]
+fn borrowed_bytes_live_as_long_as_the_input() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Chunk<'a> {
+    #[fill]
+    pub data: &'static [u8],
+    #[fill]
+    pub more: &'a [u8],
+}"#,
+        "field `data`: borrowed bytes live as long as the input, `'a`",
+    );
+}
+
+#[test]
+fn a_lifetime_needs_a_borrowed_field() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Chunk<'a> {
+    pub offset: u32,
+}"#,
+        "`Chunk`: `'a` is the lifetime of borrowed bytes, and no field borrows",
+    );
+}
+
+#[test]
+fn a_borrowing_message_takes_no_parameters() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+#[message(needs(n: u8))]
+pub struct Chunk<'a> {
+    #[len(n)]
+    pub data: &'a [u8],
+}"#,
+        "a message that borrows its input is byte-addressed and takes no parameters",
+    );
+}
+
+#[test]
+fn an_array_view_states_its_size() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Icon<'a> {
+    #[bytes(8)]
+    pub pixels: &'a [u8; 4],
+}"#,
+        "field `pixels`: #[bytes(8)] disagrees with `[u8; 4]`",
+    );
+}
+
+#[test]
+fn a_message_takes_no_type_parameters() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Frame<T> {
+    pub a: u8,
+    pub b: core::marker::PhantomData<T>,
+}"#,
+        "`Frame`: #[derive(Message)] takes at most one lifetime",
+    );
+}

@@ -58,6 +58,8 @@ pub fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
 
 struct Parsed {
     ident: syn::Ident,
+    /// The lifetime of borrowed fields: `Name<'a>`.
+    lifetime: Option<syn::Lifetime>,
     endian: Endian,
     /// `#[message(bits, order = ..)]`.
     bits: Option<BitOrder>,
@@ -309,6 +311,8 @@ enum CountSpec {
     Until {
         terminator: u8,
     },
+    /// `#[bytes(N)]` on a borrowed run, or the `N` of `&'a [u8; N]`: exactly `N` bytes.
+    Bytes(usize),
 }
 
 impl CountSpec {
@@ -318,6 +322,7 @@ impl CountSpec {
             Self::Window { .. } => "#[len]",
             Self::Fill { .. } => "#[fill]",
             Self::Terminated { .. } | Self::Until { .. } => "#[until]",
+            Self::Bytes(_) => "#[bytes]",
         }
     }
 
@@ -330,6 +335,7 @@ impl CountSpec {
                 | Self::Strided { .. }
                 | Self::Terminated { .. }
                 | Self::Until { .. }
+                | Self::Bytes(_)
         )
     }
 
@@ -339,7 +345,9 @@ impl CountSpec {
             | Self::Squared { by, .. }
             | Self::Window { by, .. }
             | Self::Strided { by, .. } => Some(by),
-            Self::Fill { .. } | Self::Terminated { .. } | Self::Until { .. } => None,
+            Self::Fill { .. } | Self::Terminated { .. } | Self::Until { .. } | Self::Bytes(_) => {
+                None
+            }
         }
     }
 
@@ -358,6 +366,65 @@ struct StrideSpec {
     span: Span,
 }
 
+/// The one lifetime of a message that borrows its input, refusing any other generics.
+fn borrowed_lifetime(input: &DeriveInput) -> syn::Result<Option<syn::Lifetime>> {
+    let ident = &input.ident;
+    let generics = &input.generics;
+    let lifetimes: Vec<&syn::LifetimeParam> = generics.lifetimes().collect();
+    if generics.params.len() != lifetimes.len()
+        || lifetimes.len() > 1
+        || generics.where_clause.is_some()
+        || lifetimes.iter().any(|l| !l.bounds.is_empty())
+    {
+        return Err(syn::Error::new(
+            generics.span(),
+            format!(
+                "`{ident}`: #[derive(Message)] takes at most one lifetime, the input's, and no \
+                 other generics. Remove the type parameters"
+            ),
+        ));
+    }
+    let lifetime = lifetimes.first().map(|l| l.lifetime.clone());
+    let Data::Struct(data) = &input.data else { return Ok(lifetime) };
+    for f in &data.fields {
+        let Some((used, _)) = crate::ty::borrowed_bytes(&f.ty) else { continue };
+        let name = f.ident.as_ref().map(crate::attr::name).unwrap_or_default();
+        match &lifetime {
+            Some(l) if l == used => {}
+            Some(l) => {
+                return Err(syn::Error::new(
+                    used.span(),
+                    format!(
+                        "field `{name}`: borrowed bytes live as long as the input, `{l}`. \
+                         Write `&{l}`"
+                    ),
+                ));
+            }
+            None => {
+                return Err(syn::Error::new(
+                    used.span(),
+                    format!(
+                        "field `{name}`: borrowed bytes need the input's lifetime on the struct. \
+                         Declare `{ident}<{used}>`"
+                    ),
+                ));
+            }
+        }
+    }
+    if let Some(l) = &lifetime
+        && !data.fields.iter().any(|f| crate::ty::borrowed_bytes(&f.ty).is_some())
+    {
+        return Err(syn::Error::new(
+            l.span(),
+            format!(
+                "`{ident}`: `{l}` is the lifetime of borrowed bytes, and no field borrows. \
+                 Remove it, or declare a `&{l} [u8]` field"
+            ),
+        ));
+    }
+    Ok(lifetime)
+}
+
 struct ElementSize {
     ty: Type,
     bytes: usize,
@@ -365,15 +432,7 @@ struct ElementSize {
 }
 
 fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
-    if !input.generics.params.is_empty() {
-        return Err(syn::Error::new(
-            input.generics.span(),
-            format!(
-                "`{}`: #[derive(Message)] does not support generics. Remove the type parameters",
-                input.ident
-            ),
-        ));
-    }
+    let lifetime = borrowed_lifetime(input)?;
 
     let MessageAttr { endian, root, closed, bits, needs } = container_attr(input)?;
     if let (Some((_, span)), Some(_)) = (&needs, &bits) {
@@ -425,7 +484,7 @@ fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
         None => named.named.iter().map(msg_field).collect::<syn::Result<Vec<_>>>()?,
     };
     let needs = needs.map(|(params, _)| params).unwrap_or_default();
-    Ok(Parsed { ident: input.ident.clone(), endian, bits, needs, root, fields })
+    Ok(Parsed { ident: input.ident.clone(), lifetime, endian, bits, needs, root, fields })
 }
 
 const REPEAT_ATTRS: &str = "`#[count(n)]`, `#[fill]`, `#[until(b)]`, or `#[until(mask = M)]`";

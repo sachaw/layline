@@ -4,8 +4,8 @@
 
 pub use layline_core::{
     BitCodec, BitReader, BitWriter, Buffer, Checksum, Choice, Dispatch, Extent, FieldCodec, Fixed,
-    I, Layout, LayoutError, MAX_NESTING_DEPTH, Message, Nonzero, Overflow, ParseError, Slot, U,
-    VarCodec, View, WireInt, audit, checksum, table,
+    I, Layout, LayoutError, MAX_NESTING_DEPTH, Message, MessageRef, Nonzero, Overflow, ParseError,
+    Slot, U, VarCodec, View, WireInt, audit, checksum, table,
 };
 
 #[cfg(feature = "derive")]

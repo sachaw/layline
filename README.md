@@ -72,6 +72,24 @@ does not count, as a RIFF chunk's odd body has.
 A field can be present when a flag is clear: `#[when(flags & 0x4 == 0)]` or `#[when(!flag)]`.
 Encode writes the flag from the field, setting the bits for `None`.
 
+A struct with a lifetime borrows its byte runs from the input instead of copying them, so it
+decodes without an allocator. It implements `MessageRef<'a>`:
+
+```rust
+use layline::{Message, MessageRef};
+
+#[derive(Message, Debug, PartialEq)]
+pub struct Chunk<'a> {
+    pub offset: u32,
+    #[fill]
+    pub data: &'a [u8],
+}
+
+let wire = [0x10, 0, 0, 0, 0xAA, 0xBB];
+let (chunk, _) = Chunk::decode(&wire).unwrap();
+assert_eq!(chunk.data, &[0xAA, 0xBB]);
+```
+
 ## Switches
 
 ```rust

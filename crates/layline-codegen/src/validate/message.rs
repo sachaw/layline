@@ -9,14 +9,32 @@ use super::coverage::{Places, check_value, coverage, stampable};
 use super::names::{Known, Reads, Seen, read_only, resolve, stated_with};
 use super::{Invalid, field_names, ident, kind_paths, type_path};
 use crate::{
-    Absence, ChoiceDef, Count, Discriminant, Kind, Len, MessageDef, Param, Presence, Scalar,
-    Segment, Stated,
+    Absence, ChoiceDef, Collection, Count, Discriminant, Kind, Len, MessageDef, Param, Presence,
+    Scalar, Segment, Stated,
 };
 
 /// Checks a message: every reference names an earlier field, and nothing follows a segment that
 /// reads to the end of the body.
 pub(crate) fn validate_message(msg: &MessageDef) -> Result<(), Invalid> {
     ident("message", &msg.name)?;
+    if let Some(lifetime) = &msg.lifetime {
+        ident("lifetime", lifetime)?;
+        if lifetime == "static" || lifetime == "_" {
+            return Err(Invalid::Other(format!(
+                "message `{}`: `'{lifetime}` cannot name the input the message borrows. \
+                 Name a lifetime, such as `'a`",
+                msg.name
+            )));
+        }
+        if !msg.needs.is_empty() || msg.bits.is_some() {
+            return Err(Invalid::Other(format!(
+                "message `{}`: a message that borrows its input is byte-addressed and takes no \
+                 parameters. Remove the lifetime, or the parameters and bit addressing",
+                msg.name
+            )));
+        }
+    }
+    borrowed(&msg.segments, msg.lifetime.is_some())?;
     let mut seen = needs(msg)?;
     if msg.bits.is_some() {
         return validate_bits(msg);
@@ -39,6 +57,7 @@ pub(crate) fn validate_choice(choice: &ChoiceDef) -> Result<(), Invalid> {
             return Err(Invalid::DuplicateArm(arm.value));
         }
         values.push(arm.value);
+        borrowed(&arm.body, false)?;
         validate_segments(&arm.body, &mut Vec::new())?;
     }
     if choice.arms.is_empty() && choice.other.is_none() {
@@ -46,6 +65,45 @@ pub(crate) fn validate_choice(choice: &ChoiceDef) -> Result<(), Invalid> {
             "choice `{}` has no arms and no fallback. Declare an arm, or add a fallback",
             choice.name
         )));
+    }
+    Ok(())
+}
+
+/// Checks borrowed collections: bytes in a message with a lifetime, sized up front.
+fn borrowed(segments: &[Segment], lifetime: bool) -> Result<(), Invalid> {
+    for seg in segments {
+        let Segment::Repeat { name, element, count, collection, .. } = seg else { continue };
+        if !collection.borrows() {
+            continue;
+        }
+        let no = |why: &str| Err(Invalid::field(name, String::from(why)));
+        if !lifetime {
+            return no(
+                "a borrowed collection needs a message with a lifetime, which the bytes outlive. \
+                 Declare the message with one, or collect a `Vec`",
+            );
+        }
+        if *element != Kind::Scalar(Scalar::U(8)) {
+            return no("a borrowed collection is bytes. Declare `&'a [u8]`, or collect a `Vec`");
+        }
+        match (collection, count) {
+            (Collection::BorrowedArray, Count::Window(Len::Bytes(_))) => {}
+            (Collection::BorrowedArray, _) => {
+                return no("`&'a [u8; N]` is N bytes. Count it with `Len::Bytes(N)`");
+            }
+            (
+                _,
+                Count::Field { .. }
+                | Count::Fill { .. }
+                | Count::Window(Len::Field { .. } | Len::Bytes(_)),
+            ) => {}
+            _ => {
+                return no(
+                    "a borrowed collection is sized before it is read: by a count, a length, \
+                     a fixed number of bytes, or the rest of the body",
+                );
+            }
+        }
     }
     Ok(())
 }

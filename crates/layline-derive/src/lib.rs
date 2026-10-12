@@ -304,6 +304,29 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[range(lo..=hi)]`: the allowed values. Decode rejects others, and encode panics on them,
 ///   checking a derived length or offset once it is known.
 ///
+/// # Borrowed fields
+///
+/// A struct with one lifetime, `Name<'a>`, implements `MessageRef<'a>` instead of `Message`: its
+/// `&'a [u8]` and `&'a [u8; N]` fields are views of the bytes it decodes from, so decode needs
+/// no allocator. Size a `&'a [u8]` with `#[len(n)]`, `#[count(n)]`, `#[bytes(N)]` or `#[fill]`;
+/// `&'a [u8; N]` is `N` bytes. Encode writes each run in one piece and states its length as for
+/// a `Vec<u8>`. A borrowing message takes no `needs(..)`, and no other message can hold it.
+///
+/// ```
+/// use layline::{Message, MessageRef};
+///
+/// #[derive(Message, Debug, PartialEq)]
+/// pub struct Chunk<'a> {
+///     pub offset: u32,
+///     #[fill]
+///     pub data: &'a [u8],
+/// }
+///
+/// let wire = [0x10, 0, 0, 0, 0xAA, 0xBB];
+/// let (chunk, used) = Chunk::decode(&wire).unwrap();
+/// assert_eq!((chunk.offset, chunk.data, used), (0x10, &[0xAA, 0xBB][..], 6));
+/// ```
+///
 /// # Bit message attributes
 ///
 /// With `#[message(bits)]`:

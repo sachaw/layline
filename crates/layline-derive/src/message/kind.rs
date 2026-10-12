@@ -130,6 +130,9 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
         (Some((CountSpec::Terminated { .. } | CountSpec::Until { .. }, _)), _, _) => {
             unreachable!("#[until] on a text field is kept in `until`")
         }
+        (Some((CountSpec::Bytes(_), _)), _, _) => {
+            unreachable!("#[bytes] on a text field is kept in `bytes`")
+        }
         (Some((CountSpec::Fill { cap: Some(_) }, cspan)), _, _) => {
             return Err(syn::Error::new(
                 cspan,

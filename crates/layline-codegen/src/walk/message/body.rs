@@ -67,6 +67,8 @@ pub(super) struct Item<'a> {
     pub(super) checks: Vec<Check>,
     /// The attribute a spare field carries, from this item's serde derive.
     pub(super) skip: TokenStream,
+    /// The lifetime borrowed fields hold, without the `'`.
+    pub(super) lifetime: Option<&'a str>,
 }
 
 impl<'a> Item<'a> {
@@ -88,6 +90,7 @@ impl<'a> Item<'a> {
             ck_n: 0,
             items: TokenStream::new(),
             checks: Vec::new(),
+            lifetime: None,
         }
     }
 }

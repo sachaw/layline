@@ -138,7 +138,7 @@ pub use extent::Extent;
 pub use field::{Layout, LayoutError};
 pub use int::{I, U};
 pub use message::{MAX_NESTING_DEPTH, ParseError};
-pub use segment::{Choice, Message};
+pub use segment::{Choice, Message, MessageRef};
 pub use slot::Slot;
 pub use var::VarCodec;
 pub use view::View;

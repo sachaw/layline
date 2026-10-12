@@ -272,6 +272,7 @@ mod tests {
                     }],
                     doc: None,
                     derives: Vec::new(),
+                    lifetime: None,
                 }),
             ],
             ..Module::new(Vec::new())
@@ -391,6 +392,7 @@ mod tests {
             ],
             doc: None,
             derives: Vec::new(),
+            lifetime: None,
         };
         assert!(matches!(
             message_parts(&msg(Coverage::from_field("nope")), &[], &Root::default()),
@@ -429,6 +431,7 @@ mod tests {
                 ],
                 doc: None,
                 derives: Vec::new(),
+                lifetime: None,
             },
             &[],
             &Root::default(),
@@ -461,6 +464,7 @@ mod tests {
             ],
             doc: None,
             derives: Vec::new(),
+            lifetime: None,
         };
 
         let out = message_parts(&msg(opt("b", Kind::Scalar(Scalar::U(8)))), &[], &Root::default());
@@ -521,6 +525,7 @@ mod tests {
                     ],
                     doc: None,
                     derives: Vec::new(),
+                    lifetime: None,
                 }),
             ],
             ..Module::new(Vec::new())

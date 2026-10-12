@@ -149,6 +149,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         CountSpec::Until { terminator } => {
                             Count::Window(Len::Until { terminator: *terminator })
                         }
+                        CountSpec::Bytes(n) => Count::Window(Len::Bytes(*n)),
                     },
                     at: at.as_ref().map(|r| r.name.clone()),
                     doc: None,
@@ -261,9 +262,12 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
     }
     flush(&mut segments, &mut block);
 
-    let msg = MessageDef::new(&crate::attr::name(&p.ident), segments)
+    let mut msg = MessageDef::new(&crate::attr::name(&p.ident), segments)
         .with_endian(p.endian)
         .with_needs(p.needs.clone());
+    if let Some(l) = &p.lifetime {
+        msg = msg.with_lifetime(&l.ident.to_string());
+    }
     Ok((msg, checks))
 }
 

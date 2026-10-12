@@ -128,3 +128,22 @@ pub(crate) fn run_element(ty: &Type) -> Option<(&Type, Collection)> {
 pub(crate) fn is_byte_vec(ty: &Type) -> bool {
     vec_element(ty).and_then(scalar_of) == Some(Scalar::U(8))
 }
+
+/// `&'l [u8]` or `&'l [u8; N]`: the lifetime, and `N` for an array.
+pub(crate) fn borrowed_bytes(ty: &Type) -> Option<(&syn::Lifetime, Option<usize>)> {
+    let Type::Reference(r) = ty else { return None };
+    let lifetime = r.lifetime.as_ref()?;
+    if r.mutability.is_some() {
+        return None;
+    }
+    match &*r.elem {
+        Type::Slice(s) if bare_ident(&s.elem).is_some_and(|i| i == "u8") => Some((lifetime, None)),
+        Type::Array(a) if bare_ident(&a.elem).is_some_and(|i| i == "u8") => {
+            let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(n), .. }) = &a.len else {
+                return None;
+            };
+            Some((lifetime, Some(n.base10_parse().ok()?)))
+        }
+        _ => None,
+    }
+}

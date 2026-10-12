@@ -145,6 +145,21 @@ pub enum Collection {
     Vec,
     /// `Box<[T]>`.
     Boxed,
+    /// `&'a [u8]`, borrowed from the bytes the message decodes from. Needs a
+    /// [`lifetime`](MessageDef::lifetime), and `u8` elements counted by a field, a byte length or
+    /// the rest of the body.
+    Borrowed,
+    /// `&'a [u8; N]`, borrowed as [`Borrowed`](Self::Borrowed) is. Needs
+    /// [`Count::Window`] of [`Len::Bytes`]`(N)`.
+    BorrowedArray,
+}
+
+impl Collection {
+    /// Whether the collection borrows from the input.
+    #[must_use]
+    pub fn borrows(self) -> bool {
+        matches!(self, Collection::Borrowed | Collection::BorrowedArray)
+    }
 }
 
 /// One part of a message.
@@ -504,6 +519,12 @@ pub struct MessageDef {
     pub doc: Option<String>,
     /// Derives for this message, written after the module's.
     pub derives: Vec<Derive>,
+    /// The lifetime of [borrowed](Collection::Borrowed) fields, without the `'`: `Some("a")`
+    /// declares `Name<'a>`.
+    ///
+    /// The message implements `layline::MessageRef<'a>` instead of `layline::Message`, so it
+    /// takes no [`needs`](Self::needs) and no other message can hold it.
+    pub lifetime: Option<String>,
 }
 
 impl MessageDef {
@@ -518,7 +539,14 @@ impl MessageDef {
             segments,
             doc: None,
             derives: Vec::new(),
+            lifetime: None,
         }
+    }
+
+    /// Declares `Name<'lifetime>`, whose borrowed fields hold views of the input.
+    #[must_use]
+    pub fn with_lifetime(self, lifetime: &str) -> Self {
+        Self { lifetime: Some(String::from(lifetime)), ..self }
     }
 
     /// Sets the documentation.
