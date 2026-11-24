@@ -129,7 +129,8 @@ pub(super) fn terminal_switches(module: &Module, m: &MessageDef) -> Result<(), E
         let Segment::Switch { name, choice, window: None, .. } = seg else {
             continue;
         };
-        if i + 1 == m.segments.len() {
+        // A condition after the switch takes no bytes.
+        if m.segments[i + 1..].iter().all(|s| matches!(s, Segment::Valid { .. })) {
             continue;
         }
         let found = module.items.iter().find_map(|it| match it {

@@ -428,8 +428,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[at(end)]`: the field is anchored to the end of the message, in its tail. The fields that
 ///   take it come last. Decode reads them first, from the end, once it has read the fields
 ///   before the first one that reaches the end: a `#[fill]`, a `#[switch]` or a nested message.
-///   That one then stops where the tail starts, and every field may read tail fields, as the
-///   tail may read the fields before it. Encode writes every field in declaration order. Each
+///   That one then stops where the tail starts, as does any arm of the switch, listed or
+///   `#[other]`, that reads to the end. Every field may read tail fields, as the tail may read
+///   the fields before it. Encode writes every field in declaration order. Each
 ///   tail field's size is known before decode reads it: fixed, or a `#[count]` or `#[len]` over
 ///   later tail fields, earlier fields and parameters, and an `Option<Vec<T>>` in the tail may be
 ///   sized so. A message with a tail reads to the end of the bytes it is given, and refuses a
@@ -489,7 +490,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[valid(c)]`: a condition the whole value must satisfy, such as
 ///   `#[valid(rtp.payload_type == PDW)]`. It writes nothing, so it is always checked: decode
 ///   refuses a body that breaks it with `ParseError::Malformed`, and encode a value that does
-///   with `EncodeError::Mismatch`, naming this field. It is checked after every field is read.
+///   with `EncodeError::Mismatch`, naming this field. It is checked after every field is read, and
+///   takes no bytes, so it may sit on any field, before or after one that reads to the end.
 ///
 /// # Borrowed fields
 ///
@@ -525,8 +527,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// # Variant attributes
 ///
-/// - `#[value(N)]`: the discriminant. The payload is a `Message`, a scalar, or a `#[bytes(N)]`
-///   layout.
+/// - `#[value(N)]`: the discriminant. The payload is a `Message`, a scalar, a `#[bytes(N)]` layout,
+///   or `Vec<u8>`: the rest of the body, as the `#[other]` arm holds it, up to the holder's tail
+///   if it has one. JEL's described DW payload is `#[value(128)] Described(Vec<u8>)`.
 /// - `#[other]`: a one-field variant for every unlisted discriminant. It holds `Vec<u8>`, or
 ///   `[u8; N]` in a fixed-size enum.
 /// - `#[with(a, b)]`: the enum's parameters, or other names an arm can read, passed in order as

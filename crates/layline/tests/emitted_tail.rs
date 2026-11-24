@@ -1,14 +1,15 @@
-//! A tail from `layline-codegen`'s model: RTP-shaped padding, counted by the last byte, and a
-//! CRC trailer over everything before it. The emitted source compiles and round-trips.
+//! A tail from `layline-codegen`'s model: RTP-shaped padding, counted by the last byte, a CRC
+//! trailer over everything before it, and a listed arm that reads to the tail past a condition.
+//! The emitted source compiles and round-trips.
 //! `support/emitted_tail.rs` is the generator's output, and a test keeps it current.
 
 #![cfg(feature = "derive")]
 
-use layline::{Message, Stated};
+use layline::{EncodeError, Message, Stated};
 use layline_codegen::emit::{Module, generate};
 use layline_codegen::{
-    Collection, Count, CoverFrom, CoverTo, Coverage, Endian, Expr, Field, Item, Kind, MessageDef,
-    Op, Presence, Scalar, Segment,
+    Arm, ChoiceDef, Collection, Count, CoverFrom, CoverTo, Coverage, Discriminant, Endian, Expr,
+    Field, Item, Kind, MessageDef, Op, Presence, Scalar, Segment,
 };
 
 /// CRC-32/ISO-HDLC.
@@ -80,6 +81,41 @@ fn tails() -> Module {
                 Coverage::new(CoverFrom::Field("kind".into()), CoverTo::After("data".into())),
             )]),
         ),
+        Item::Choice(
+            ChoiceDef::new(
+                "Body",
+                vec![
+                    Arm::new(1, "Level", vec![Segment::Block(vec![Field::new("inner", bytes())])]),
+                    Arm::new(
+                        128,
+                        "Described",
+                        vec![Segment::repeat(
+                            "inner",
+                            bytes(),
+                            Count::Fill { cap: None },
+                            None,
+                            Collection::Vec,
+                        )],
+                    ),
+                ],
+            )
+            .with_endian(Endian::Be),
+        ),
+        Item::Message(
+            MessageDef::new(
+                "Dw",
+                vec![
+                    Segment::Block(vec![
+                        Field::new("kind", bytes()),
+                        Field::new("profile", Kind::Scalar(Scalar::U(16))),
+                    ]),
+                    Segment::switch("body", Discriminant::Field(Expr::name("kind")), "Body", None),
+                    Segment::valid("profile", Expr::parse("profile == 16").unwrap()),
+                ],
+            )
+            .with_tail(vec![Segment::Block(vec![Field::new("foot", bytes())])])
+            .with_endian(Endian::Be),
+        ),
     ])
 }
 
@@ -124,4 +160,20 @@ fn an_emitted_trailer_checks_what_it_follows() {
     let mut bent = wire.clone();
     bent[1] ^= 0x80;
     assert!(matches!(Sealed::decode(&bent), Err(ParseError::Checksum { field: "crc", .. })));
+}
+
+#[test]
+fn an_emitted_listed_arm_reads_to_the_tail_past_a_condition() {
+    let dw = Dw { kind: 128, profile: 16, body: Body::Described(vec![1, 2]), foot: 9 };
+    let wire = dw.encode().unwrap();
+    assert_eq!(wire, [128, 0, 16, 1, 2, 9]);
+    assert_eq!(Dw::decode(&wire).unwrap(), (dw, 6));
+    assert_eq!(Dw::decode(&[1, 0, 16, 7, 9]).unwrap().0.body, Body::Level(7));
+    assert!(matches!(
+        Dw::decode(&[1, 0, 17, 7, 9]),
+        Err(ParseError::Malformed { field: "profile", .. })
+    ));
+    assert!(matches!(Dw::decode(&[1, 0, 16, 7, 8, 9]), Err(ParseError::Malformed { .. })));
+    let bent = Dw { kind: 1, profile: 17, body: Body::Level(7), foot: 9 };
+    assert_eq!(bent.encode(), Err(EncodeError::Mismatch { field: "profile", value: 0, stated: 1 }));
 }

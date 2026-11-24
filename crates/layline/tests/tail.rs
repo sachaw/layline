@@ -1,6 +1,7 @@
 //! Fields anchored to the end of a message: `#[at(end)]`. Decode reads them first, from the end,
-//! so a `#[fill]` before them stops where they start. RTP's padding (RFC 3550 §5.1) and a CRC
-//! trailer over everything before it, with every byte worked out by hand.
+//! so a `#[fill]` before them stops where they start, as does a switch arm, listed or not. RTP's
+//! padding (RFC 3550 §5.1), a CRC trailer over everything before it, and JEL's DW packet, whose
+//! conditions on fixed fields take no bytes, with every byte worked out by hand.
 
 #![cfg(feature = "derive")]
 
@@ -243,4 +244,192 @@ fn random_bytes_decode_to_what_encodes_back() {
         }
     }
     assert!(padded > 1000, "the corpus reaches padded packets: {padded}");
+}
+
+/// RFC 3550's header extension profile as JEL's DW stream sends it.
+const DW_PROFILE: u16 = 16;
+
+/// The extension's length in 32-bit words.
+const EXTENSION_WORDS: u16 = 2;
+
+/// The arm a payload type other than 1 selects.
+const DESCRIBED: u8 = 128;
+
+/// Elements of one 32-bit word each, up to the tail.
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(endian = be)]
+pub struct Words {
+    #[fill]
+    pub words: Vec<u32>,
+}
+
+/// A DW payload: both arms are listed, and both read to where the holder's tail starts.
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(closed)]
+pub enum DwPayload {
+    #[value(1)]
+    Words(Words),
+    /// The bytes a schema read at run time describes.
+    #[value(128)]
+    Described(Vec<u8>),
+}
+
+/// JEL's DW packet: conditions on its fixed fields, a listed arm that reads to the end, and RTP
+/// padding in the tail.
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(endian = be)]
+pub struct Dw {
+    #[bytes(4)]
+    #[valid(header.extension)]
+    pub header: RtpHeader,
+    #[valid(profile == DW_PROFILE)]
+    pub profile: u16,
+    #[valid(extension_words == EXTENSION_WORDS)]
+    pub extension_words: u16,
+    #[switch(if header.payload_type == 1 { 1 } else { DESCRIBED })]
+    pub payload: DwPayload,
+    #[at(end)]
+    #[when(header.padding)]
+    #[count(pad_count - 1)]
+    pub padding: Option<Vec<u8>>,
+    #[at(end)]
+    #[when(header.padding)]
+    pub pad_count: Stated<u8>,
+}
+
+/// A condition before a switch that reads to the end, with no tail: only the words arm holds.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct Tagged {
+    #[valid(kind == 1)]
+    pub kind: u8,
+    #[switch(kind)]
+    pub payload: DwPayload,
+}
+
+/// A condition after a field that reads to the end leaves the message open-ended.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct Rest {
+    #[valid(lead != 0)]
+    pub lead: u8,
+    #[fill]
+    pub rest: Vec<u8>,
+}
+
+fn dw(payload_type: u8, payload: DwPayload, padding: Option<Vec<u8>>) -> Dw {
+    Dw {
+        header: RtpHeader {
+            version: 2,
+            padding: padding.is_some(),
+            extension: true,
+            payload_type,
+            sequence_number: 7,
+            ..RtpHeader::default()
+        },
+        profile: DW_PROFILE,
+        extension_words: EXTENSION_WORDS,
+        payload,
+        padding,
+        pad_count: Stated::default(),
+    }
+}
+
+#[test]
+fn a_listed_arm_reads_to_the_tail() {
+    let described = dw(0, DwPayload::Described(vec![0xAA, 0xBB, 0xCC]), Some(vec![0]));
+    let wire = described.encode().unwrap();
+    #[rustfmt::skip]
+    assert_eq!(wire, [
+        0xB0, 0, 0, 7,      // V=2, P=1, X=1, payload type 0
+        0, 16, 0, 2,        // the profile and the extension's length
+        0xAA, 0xBB, 0xCC,   // the described bytes, up to the padding
+        0, 2,               // one byte of padding, then the count
+    ]);
+    assert_eq!(Dw::decode(&wire), Ok((described, wire.len())));
+
+    let words = dw(1, DwPayload::Words(Words { words: vec![0x0102_0304] }), None);
+    let wire = words.encode().unwrap();
+    assert_eq!(wire, [0x90, 1, 0, 7, 0, 16, 0, 2, 1, 2, 3, 4]);
+    assert_eq!(Dw::decode(&wire), Ok((words, wire.len())));
+    // Words stop at the padding too, and a word cut short by it is refused.
+    let (padded, _) = Dw::decode(&[0xB0, 1, 0, 7, 0, 16, 0, 2, 1, 2, 3, 4, 9, 9, 3]).unwrap();
+    assert_eq!(padded.payload, DwPayload::Words(Words { words: vec![0x0102_0304] }));
+    assert!(Dw::decode(&[0xB0, 1, 0, 7, 0, 16, 0, 2, 1, 2, 3, 4, 9, 9, 2]).is_err());
+}
+
+#[test]
+fn conditions_on_fixed_fields_hold_before_a_switch_and_a_tail() {
+    let good = [0x90, 9, 0, 7, 0, 16, 0, 2, 5];
+    assert_eq!(Dw::decode(&good).unwrap().0.payload, DwPayload::Described(vec![5]));
+    let refused = |wire: &[u8]| match Dw::decode(wire) {
+        Err(ParseError::Malformed { field, .. }) => field,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(refused(&[0x80, 9, 0, 7, 0, 16, 0, 2, 5]), "header");
+    assert_eq!(refused(&[0x90, 9, 0, 7, 0, 17, 0, 2, 5]), "profile");
+    assert_eq!(refused(&[0x90, 9, 0, 7, 0, 16, 0, 3, 5]), "extension_words");
+
+    let mut plain = dw(0, DwPayload::Described(vec![]), None);
+    plain.header.extension = false;
+    assert_eq!(plain.encode(), Err(EncodeError::Mismatch { field: "header", value: 0, stated: 1 }));
+    let mut other = dw(0, DwPayload::Described(vec![]), None);
+    other.profile = 0xBEDE;
+    assert_eq!(
+        other.encode(),
+        Err(EncodeError::Mismatch { field: "profile", value: 0, stated: 1 })
+    );
+    // The selector reads one field through a condition, so encode checks the arm against it.
+    assert_eq!(
+        dw(1, DwPayload::Described(vec![]), None).encode(),
+        Err(EncodeError::Mismatch { field: "payload", value: 128, stated: 1 })
+    );
+}
+
+#[test]
+fn a_condition_takes_no_bytes_after_what_reads_to_the_end() {
+    let tagged = Tagged { kind: 1, payload: DwPayload::Words(Words { words: vec![7] }) };
+    assert_eq!(tagged.encode().unwrap(), [1, 0, 0, 0, 7]);
+    assert_eq!(Tagged::decode(&[1, 0, 0, 0, 7]), Ok((tagged, 5)));
+    // The arm reads first, and the condition holds for the whole value once it has.
+    assert!(matches!(Tagged::decode(&[128, 1]), Err(ParseError::Malformed { field: "kind", .. })));
+    let described = Tagged { kind: 128, payload: DwPayload::Described(vec![1]) };
+    assert_eq!(
+        described.encode(),
+        Err(EncodeError::Mismatch { field: "kind", value: 0, stated: 1 })
+    );
+
+    assert_eq!(Rest::decode(&[1, 2, 3]), Ok((Rest { lead: 1, rest: vec![2, 3] }, 3)));
+    assert!(matches!(Rest::decode(&[0, 2]), Err(ParseError::Malformed { field: "lead", .. })));
+    const _: () = assert!(<Tagged as Message>::OPEN_ENDED && <Rest as Message>::OPEN_ENDED);
+    const _: () = assert!(<DwPayload as layline::Choice>::OPEN_ENDED);
+}
+
+#[test]
+fn hostile_dw_packets_are_refused_or_encode_back() {
+    let wire = dw(1, DwPayload::Words(Words { words: vec![1, 2] }), Some(vec![0, 0, 0])).encode();
+    let wire = wire.unwrap();
+    for cut in 0..wire.len() {
+        if let Ok((packet, used)) = Dw::decode(&wire[..cut]) {
+            assert_eq!(packet.encode().unwrap(), &wire[..used]);
+        }
+    }
+    let mut r = rng::Rng(0x7A11_0000_0000_0D30);
+    let mut read = [0usize; 2];
+    for _ in 0..20_000 {
+        let mut buf = vec![0u8; 8 + (r.next() % 16) as usize];
+        r.fill(&mut buf);
+        buf[0] = 0x90 | (buf[0] & 0x2F);
+        buf[1] %= 3;
+        if !r.next().is_multiple_of(8) {
+            buf[4..8].copy_from_slice(&[0, 16, 0, 2]);
+        }
+        if let Some(last) = buf.last_mut() {
+            *last %= 8;
+        }
+        if let Ok((packet, used)) = Dw::decode(&buf) {
+            assert_eq!(used, buf.len());
+            assert_eq!(packet.encode().unwrap(), buf, "{packet:?}");
+            read[usize::from(matches!(packet.payload, DwPayload::Described(_)))] += 1;
+        }
+    }
+    assert!(read.iter().all(|&n| n > 1000), "the corpus reaches both arms: {read:?}");
 }

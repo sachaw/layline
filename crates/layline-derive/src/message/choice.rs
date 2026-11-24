@@ -4,7 +4,7 @@ use quote::quote;
 use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, LitInt, Type};
 
-use layline_codegen::{Arm, ChoiceDef, Field, Kind, Segment};
+use layline_codegen::{Arm, ChoiceDef, Collection, Count, Field, Kind, Segment};
 
 use super::container::{MESSAGE_ATTRS, MessageAttr, container_attr};
 use crate::attr::{Key, noted, variant_key};
@@ -224,6 +224,27 @@ fn arm_body(v: &syn::Variant) -> syn::Result<Vec<Segment>> {
         )
     })?;
 
+    // The rest of the body, as the `#[other]` arm holds it: up to the holder's tail, if any.
+    if crate::ty::is_byte_vec(ty) {
+        if let Some(attr) = bytes {
+            return Err(syn::Error::new(
+                attr.meta.span(),
+                format!(
+                    "variant `{}`: `Vec<u8>` takes the rest of the body. \
+                     Remove #[bytes], or size the switch with #[len] or #[bytes]",
+                    v.ident,
+                ),
+            ));
+        }
+        return Ok(vec![Segment::repeat(
+            "inner",
+            Kind::Scalar(layline_codegen::Scalar::U(8)),
+            Count::Fill { cap: None },
+            None,
+            Collection::Vec,
+        )]);
+    }
+
     let (ty, boxed) = match box_element(ty) {
         Some(inner) => (inner, true),
         None => (ty, false),
@@ -247,7 +268,7 @@ fn arm_body(v: &syn::Variant) -> syn::Result<Vec<Segment>> {
             ty.span(),
             format!(
                 "variant `{}`: `{}` cannot be an arm payload. \
-                 Use a `#[derive(Message)]` type, a `#[bytes(N)]` layout, or a scalar, or mark the variant #[other]",
+                 Use a `#[derive(Message)]` type, a `#[bytes(N)]` layout, a scalar or `Vec<u8>`, or mark the variant #[other]",
                 v.ident,
                 crate::attr::spelled(ty),
             ),

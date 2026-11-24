@@ -755,3 +755,548 @@ impl Sealed {
         ::encode_with(self, ())) }
     }
 }
+#[derive(Debug, Clone, PartialEq)]
+pub enum Body {
+    Level(u8),
+    Described(Vec<u8>),
+}
+#[derive(Debug, Clone, PartialEq, ::layline::Layout)]
+#[layout(bytes = 1, endian = be, internal)]
+#[doc(hidden)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+pub struct __BodyBlock0 {
+    pub inner: u8,
+}
+impl ::layline::Choice for Body {
+    const NAME: &'static str = "Body";
+    type Ctx = ();
+    /// The arms in declaration order, open arm last, each with its value and segment table.
+    ///
+    /// Positions count from the arm's first bit.
+    const ARMS: &'static [::layline::table::ArmDef<'static>] = &[
+        ::layline::table::ArmDef::new(
+            "Level",
+            Some(1),
+            &[
+                ::layline::table::SegmentDef::new(
+                    "__BodyBlock0",
+                    ::layline::table::Start::At(0),
+                    ::layline::table::Span::Fixed(8),
+                    None,
+                    None,
+                    <__BodyBlock0 as ::layline::Layout>::FIELDS,
+                ),
+            ],
+        ),
+        ::layline::table::ArmDef::new(
+            "Described",
+            Some(128),
+            &[
+                ::layline::table::SegmentDef::new(
+                    "inner",
+                    ::layline::table::Start::At(0),
+                    ::layline::table::Span::Fill {
+                        cap: None,
+                    },
+                    None,
+                    None,
+                    &[],
+                ),
+            ],
+        ),
+    ];
+    const OPEN_ENDED: bool = true;
+    const ENCODE_FALLIBLE: bool = <__BodyBlock0 as ::layline::Layout>::ENCODE_FALLIBLE;
+    fn decode_with_nested(
+        discriminant: i64,
+        body: &[u8],
+        __depth: u32,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
+        type __O = ::layline::__private::Be;
+        if __depth > <Self as ::layline::Choice>::MAX_DEPTH {
+            return Err(::layline::ParseError::TooDeep {
+                limit: <Self as ::layline::Choice>::MAX_DEPTH,
+            });
+        }
+        let __body = body;
+        match discriminant {
+            1 => {
+                let mut __at = 0usize;
+                let mut __hi = 0usize;
+                let __b0 = __BodyBlock0::decode_slice_in::<
+                    __O,
+                >(
+                        __body
+                            .get(__at..__at + 1)
+                            .ok_or(::layline::ParseError::Short {
+                                need_bytes: __at + 1,
+                                got_bytes: __body.len(),
+                                at: __at,
+                            })?,
+                    )
+                    .map_err(|__err| __err.rebased(__at))?;
+                __at += 1;
+                if __at > __hi {
+                    __hi = __at;
+                }
+                Ok((Self::Level(__b0.inner), __hi))
+            }
+            128 => {
+                let mut __at = 0usize;
+                let mut __hi = 0usize;
+                let __n = __body.len() - __at;
+                let mut __v: Vec<u8> = Vec::with_capacity(__n.min(__body.len() - __at));
+                for _ in 0..__n {
+                    let __s = __body
+                        .get(__at..__at + 1)
+                        .ok_or(::layline::ParseError::Short {
+                            need_bytes: __at + 1,
+                            got_bytes: __body.len(),
+                            at: __at,
+                        })?;
+                    let __e = __s[0];
+                    __at += 1;
+                    __v.push(__e);
+                }
+                let inner = __v;
+                if __at > __hi {
+                    __hi = __at;
+                }
+                Ok((Self::Described(inner), __hi))
+            }
+            _ => {
+                Err(::layline::ParseError::Malformed {
+                    field: "Body",
+                    at: 0,
+                })
+            }
+        }
+    }
+    fn discriminant(&self) -> Option<i64> {
+        match self {
+            Self::Level { .. } => Some(1),
+            Self::Described { .. } => Some(128),
+        }
+    }
+    fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
+        type __O = ::layline::__private::Be;
+        match self {
+            #[allow(unused_variables)]
+            Self::Level(inner) => {
+                out.push(&__BodyBlock0 { inner: (*inner) }.encode_in::<__O>()?)?;
+            }
+            #[allow(unused_variables)]
+            Self::Described(inner) => {
+                for __e in inner {
+                    let __elem = out.len();
+                    out.push(&[*__e])?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+impl Body {
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `Overflow` if `out` has no room, or, when a held type refuses values, `EncodeError` naming that too.
+    #[inline]
+    pub fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        ctx: <Self as ::layline::Choice>::Ctx,
+    ) -> ::core::result::Result<
+        (),
+        ::layline::__private::Buffered<
+            { <__BodyBlock0 as ::layline::Layout>::ENCODE_FALLIBLE },
+        >,
+    > {
+        <::layline::__private::Fallibility<
+            { <__BodyBlock0 as ::layline::Layout>::ENCODE_FALLIBLE },
+        > as ::layline::__private::Buffers>::finish(
+            <Self as ::layline::Choice>::encode_into_with(self, out, ctx),
+        )
+    }
+    ::layline::__private::alloc_only! {
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Choice > ::Ctx) ->
+        ::layline::__private::Encoded < ::layline::__private::Vec < ::core::primitive::u8
+        >, { < __BodyBlock0 as ::layline::Layout > ::ENCODE_FALLIBLE } > { <
+        ::layline::__private::Fallibility < { < __BodyBlock0 as ::layline::Layout >
+        ::ENCODE_FALLIBLE } > as ::layline::__private::Encodes <
+        ::layline::__private::Vec < ::core::primitive::u8 > >> ::finish(< Self as
+        ::layline::Choice > ::encode_with(self, ctx)) }
+    }
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `Overflow` if `out` has no room, or, when a held type refuses values, `EncodeError` naming that too.
+    #[inline]
+    pub fn encode_into<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+    ) -> ::core::result::Result<
+        (),
+        ::layline::__private::Buffered<
+            { <__BodyBlock0 as ::layline::Layout>::ENCODE_FALLIBLE },
+        >,
+    > {
+        <::layline::__private::Fallibility<
+            { <__BodyBlock0 as ::layline::Layout>::ENCODE_FALLIBLE },
+        > as ::layline::__private::Buffers>::finish(
+            <Self as ::layline::Choice>::encode_into_with(self, out, ()),
+        )
+    }
+    ::layline::__private::alloc_only! {
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode(& self) -> ::layline::__private::Encoded < ::layline::__private::Vec <
+        ::core::primitive::u8 >, { < __BodyBlock0 as ::layline::Layout >
+        ::ENCODE_FALLIBLE } > { < ::layline::__private::Fallibility < { < __BodyBlock0 as
+        ::layline::Layout > ::ENCODE_FALLIBLE } > as ::layline::__private::Encodes <
+        ::layline::__private::Vec < ::core::primitive::u8 > >> ::finish(< Self as
+        ::layline::Choice > ::encode_with(self, ())) }
+    }
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dw {
+    pub kind: u8,
+    pub profile: u16,
+    pub body: Body,
+    pub foot: u8,
+}
+#[derive(Debug, Clone, PartialEq, ::layline::Layout)]
+#[layout(bytes = 3, endian = be, internal)]
+#[doc(hidden)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+pub struct __DwBlock0 {
+    pub kind: u8,
+    pub profile: u16,
+}
+#[derive(Debug, Clone, PartialEq, ::layline::Layout)]
+#[layout(bytes = 1, endian = be, internal)]
+#[doc(hidden)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+pub struct __DwBlock1 {
+    pub foot: u8,
+}
+impl ::layline::Message for Dw {
+    const NAME: &'static str = "Dw";
+    type Ctx = ();
+    /// Each segment in wire order, with its start and length.
+    const SEGMENTS: &'static [::layline::table::SegmentDef<'static>] = &[
+        ::layline::table::SegmentDef::new(
+            "__DwBlock0",
+            ::layline::table::Start::At(0),
+            ::layline::table::Span::Fixed(24),
+            None,
+            None,
+            <__DwBlock0 as ::layline::Layout>::FIELDS,
+        ),
+        ::layline::table::SegmentDef::new(
+            "body",
+            ::layline::table::Start::At(24),
+            ::layline::table::Span::Chosen {
+                on: ::layline::table::Discriminant::Field("kind"),
+            },
+            None,
+            Some("Body"),
+            &[],
+        ),
+        ::layline::table::SegmentDef::new(
+            "__DwBlock1",
+            ::layline::table::Start::Tail {
+                before: ::core::option::Option::None,
+                bits: 0,
+            },
+            ::layline::table::Span::Fixed(8),
+            None,
+            None,
+            <__DwBlock1 as ::layline::Layout>::FIELDS,
+        ),
+    ];
+    const NODE: ::layline::__private::Link = {
+        static NODE: ::layline::__private::Node = ::layline::__private::Node {
+            id: ::core::concat!(
+                ::core::line!(), ":", ::core::column!(), ":", "Dw", ":",
+                ::core::module_path!()
+            ),
+            open_ended: true,
+            refuses: true,
+            ends: &[],
+            holds: &[<Body as ::layline::Choice>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
+        };
+        ::layline::__private::Link::Node(&NODE)
+    };
+    const OPEN_ENDED: bool = true;
+    const ENCODE_FALLIBLE: bool = true;
+    fn decode_with_nested(
+        body: &[u8],
+        __depth: u32,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
+        type __O = ::layline::__private::Be;
+        if __depth > <Self as ::layline::Message>::MAX_DEPTH {
+            return Err(::layline::ParseError::TooDeep {
+                limit: <Self as ::layline::Message>::MAX_DEPTH,
+            });
+        }
+        let __body = body;
+        let mut __at = 0usize;
+        let mut __hi = 0usize;
+        let __b0 = __DwBlock0::decode_slice_in::<
+            __O,
+        >(
+                __body
+                    .get(__at..__at + 3)
+                    .ok_or(::layline::ParseError::Short {
+                        need_bytes: __at + 3,
+                        got_bytes: __body.len(),
+                        at: __at,
+                    })?,
+            )
+            .map_err(|__err| __err.rebased(__at))?;
+        __at += 3;
+        if __at > __hi {
+            __hi = __at;
+        }
+        let __head_at = __at;
+        let mut __tail_end = __body.len();
+        let __n: usize = 1;
+        let __from = match __tail_end.checked_sub(__n) {
+            ::core::option::Option::Some(__from) if __from >= __head_at => __from,
+            _ => {
+                return Err(::layline::ParseError::Short {
+                    need_bytes: __head_at.saturating_add(__n),
+                    got_bytes: __tail_end,
+                    at: __head_at,
+                });
+            }
+        };
+        __at = __from;
+        let __b1 = __DwBlock1::decode_slice_in::<
+            __O,
+        >(
+                __body
+                    .get(__at..__at + 1)
+                    .ok_or(::layline::ParseError::Short {
+                        need_bytes: __at + 1,
+                        got_bytes: __body.len(),
+                        at: __at,
+                    })?,
+            )
+            .map_err(|__err| __err.rebased(__at))?;
+        __at += 1;
+        if __at > __hi {
+            __hi = __at;
+        }
+        if __at != __tail_end {
+            return Err(::layline::ParseError::Malformed {
+                field: "foot",
+                at: __from,
+            });
+        }
+        __tail_end = __from;
+        __at = __head_at;
+        let __whole = __body;
+        let __body = &__whole[..__tail_end];
+        let (body, __used) = <Body as ::layline::Choice>::decode_with_nested(
+                Some(::layline::WireInt::to_i64(&__b0.kind))
+                    .ok_or(::layline::ParseError::Malformed {
+                        field: "kind",
+                        at: __at,
+                    })?,
+                &__body[__at..],
+                __depth,
+                (),
+            )
+            .map_err(|__err| __err.rebased(__at))?;
+        __at += __used;
+        if __at > __hi {
+            __hi = __at;
+        }
+        if !::layline::__private::value::eq(
+                Some(::layline::WireInt::to_i64(&__b0.profile)),
+                Some(16i64),
+            )
+            .ok_or(::layline::ParseError::Malformed {
+                field: "profile",
+                at: __at,
+            })?
+        {
+            return Err(::layline::ParseError::Malformed {
+                field: "profile",
+                at: __at,
+            });
+        }
+        if __at > __hi {
+            __hi = __at;
+        }
+        if __at != __tail_end {
+            return Err(::layline::ParseError::Malformed {
+                field: "foot",
+                at: __at,
+            });
+        }
+        Ok((
+            Self {
+                kind: __b0.kind,
+                profile: __b0.profile,
+                foot: __b1.foot,
+                body,
+            },
+            __hi,
+        ))
+    }
+    fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
+        type __O = ::layline::__private::Be;
+        out.push(
+            &__DwBlock0 {
+                kind: {
+                    ::layline::EncodeError::fit::<
+                        u8,
+                    >(
+                        "kind",
+                        match ::layline::Choice::discriminant(&self.body) {
+                            Some(__d) => {
+                                let __source = __d;
+                                ::layline::__private::value::Wide::wide(__source)
+                            }
+                            None => ::layline::WireInt::to_i64(&self.kind),
+                        },
+                        0,
+                    )?;
+                    <u8 as ::layline::WireInt>::from_i64(
+                        match ::layline::Choice::discriminant(&self.body) {
+                            Some(__d) => {
+                                let __source = __d;
+                                ::layline::__private::value::Wide::wide(__source)
+                            }
+                            None => ::layline::WireInt::to_i64(&self.kind),
+                        },
+                    )
+                },
+                profile: self.profile,
+            }
+                .encode_in::<__O>()?,
+        )?;
+        let __chosen = out.len();
+        ::layline::Choice::encode_into_with(&self.body, out, ())?;
+        if ::layline::Choice::discriminant(&self.body).is_none() {
+            let __stated = match Some(
+                match ::layline::Choice::discriminant(&self.body) {
+                    Some(__d) => {
+                        let __source = __d;
+                        ::layline::__private::value::Wide::wide(__source)
+                    }
+                    None => ::layline::WireInt::to_i64(&self.kind),
+                },
+            ) {
+                Some(__n) => __n,
+                _ => {
+                    return Err(::layline::EncodeError::Inexact {
+                        field: "body",
+                        value: 0,
+                    });
+                }
+            };
+            if <Body as ::layline::Choice>::defines(__stated) {
+                return Err(::layline::EncodeError::Claimed {
+                    field: "body",
+                    value: __stated,
+                });
+            }
+        }
+        match ::layline::__private::value::eq(
+            Some(::layline::WireInt::to_i64(&self.profile)),
+            Some(16i64),
+        ) {
+            Some(__holds) => {
+                ::layline::EncodeError::agree(
+                    "profile",
+                    ::core::primitive::i64::from(__holds),
+                    1,
+                )?
+            }
+            _ => {
+                return Err(::layline::EncodeError::Inexact {
+                    field: "profile",
+                    value: 0,
+                });
+            }
+        }
+        out.push(&__DwBlock1 { foot: self.foot }.encode_in::<__O>()?)?;
+        Ok(())
+    }
+}
+impl Dw {
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
+    #[inline]
+    pub fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        ctx: <Self as ::layline::Message>::Ctx,
+    ) -> ::core::result::Result<(), ::layline::EncodeError> {
+        <::layline::__private::Fallibility<
+            true,
+        > as ::layline::__private::Buffers>::finish(
+            <Self as ::layline::Message>::encode_into_with(self, out, ctx),
+        )
+    }
+    ::layline::__private::alloc_only! {
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx) ->
+        ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
+        ::layline::EncodeError > { < ::layline::__private::Fallibility < true > as
+        ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
+        > >> ::finish(< Self as ::layline::Message > ::encode_with(self, ctx)) }
+    }
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
+    #[inline]
+    pub fn encode_into<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+    ) -> ::core::result::Result<(), ::layline::EncodeError> {
+        <::layline::__private::Fallibility<
+            true,
+        > as ::layline::__private::Buffers>::finish(
+            <Self as ::layline::Message>::encode_into_with(self, out, ()),
+        )
+    }
+    ::layline::__private::alloc_only! {
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode(& self) -> ::core::result::Result < ::layline::__private::Vec <
+        ::core::primitive::u8 >, ::layline::EncodeError > { <
+        ::layline::__private::Fallibility < true > as ::layline::__private::Encodes <
+        ::layline::__private::Vec < ::core::primitive::u8 > >> ::finish(< Self as
+        ::layline::Message > ::encode_with(self, ())) }
+    }
+}

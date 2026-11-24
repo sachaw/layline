@@ -293,8 +293,10 @@ pub(super) fn walk_segments(
     let mut tail_rows: Option<Rows> = None;
     for &i in &order {
         let seg = &segments[i];
-        // The last segment before the tail reads up to it.
-        let last = if i < tail { i + 1 == tail } else { i + 1 == n };
+        // The last segment before the tail reads up to it. A condition takes no bytes, so one
+        // after it does not count.
+        let end = if i < tail { tail } else { n };
+        let last = segments[i + 1..end].iter().all(|s| matches!(s, Segment::Valid { .. }));
         w.in_tail = i >= tail;
         w.done = segments[..i].iter().flat_map(Segment::places).map(String::from).collect();
         if i + 1 == n && i >= tail {

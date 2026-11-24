@@ -23,7 +23,8 @@ pub(super) fn unbounded_recursion(owner: &str, field: &str) -> String {
     )
 }
 
-/// Where a body ends: by itself, or through the type its last field holds.
+/// Where a body ends: by itself, or through the type its last field holds. A condition after it
+/// takes no bytes.
 pub(super) fn open_end(segments: &[Segment], owner: &str, root: &Root) -> End {
     let through = |ty: &str, of: TokenStream| {
         if names_self(ty, owner) {
@@ -32,7 +33,7 @@ pub(super) fn open_end(segments: &[Segment], owner: &str, root: &Root) -> End {
         let p = path(ty);
         End { open: false, through: vec![quote!(<#p as #root::#of>::NODE)] }
     };
-    match segments.last() {
+    match segments.iter().rfind(|s| !matches!(s, Segment::Valid { .. })) {
         Some(Segment::Switch { choice, window: None, .. }) => through(choice, quote!(Choice)),
         Some(
             Segment::Value { kind: Kind::Msg { ty, .. }, .. }
