@@ -6,7 +6,9 @@ use layline_codegen::emit::Committed;
 
 #[test]
 fn the_hint_says_commit_the_result_when_ci_is_set() {
-    let dir = std::env::temp_dir().join(format!("layline-committed-ci-{}", std::process::id()));
+    // Cargo's scratch space for integration tests, under `target/`.
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("committed-ci-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a scratch directory");
     let file = dir.join("wire.rs");

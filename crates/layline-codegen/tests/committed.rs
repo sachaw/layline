@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 
 use layline_codegen::emit::{Change, Committed, Drift};
 
-/// An empty temporary directory for one test.
+/// An empty directory for one test, in the scratch space Cargo gives integration tests under
+/// `target/`, so nothing is left in the system's temporary directory.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("layline-committed-{}-{name}", std::process::id()));
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("committed-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a scratch directory");
     dir
