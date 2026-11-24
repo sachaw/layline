@@ -700,9 +700,10 @@ impl ::layline::Message for Record {
             let __mark = out.len();
             for __c in self.name.chars() {
                 <::layline::__private::Utf8 as ::layline::__private::TextCodec>::encode_char(
-                    __c,
-                    &mut *out,
-                )?;
+                        __c,
+                        &mut *out,
+                    )
+                    .map_err(|__e| __e.named("name"))?;
             }
             let __text = &out.written()[__mark..];
             {
@@ -743,9 +744,10 @@ impl ::layline::Message for Record {
                 let __mark = out.len();
                 for __c in __v.chars() {
                     <::layline::__private::Utf8 as ::layline::__private::TextCodec>::encode_char(
-                        __c,
-                        &mut *out,
-                    )?;
+                            __c,
+                            &mut *out,
+                        )
+                        .map_err(|__e| __e.named("note"))?;
                 }
                 let __text = &out.written()[__mark..];
                 {

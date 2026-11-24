@@ -88,7 +88,8 @@ pub(super) fn text_write(
             #reserve
             let __mark = out.len();
             for __c in #value.chars() {
-                <#codec as #root::__private::TextCodec>::encode_char(__c, &mut *out)?;
+                <#codec as #root::__private::TextCodec>::encode_char(__c, &mut *out)
+                    .map_err(|__e| __e.named(#field))?;
             }
             let __text = &out.written()[__mark..];
             #refuse

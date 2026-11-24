@@ -91,6 +91,14 @@ pub enum EncodeError {
         /// The field that selects the arm.
         field: &'static str,
     },
+    /// Text holds a character its encoding has no bytes for, as ASCII has none for `é`, so decode
+    /// would refuse whatever encode wrote in its place.
+    Unencodable {
+        /// The text field.
+        field: &'static str,
+        /// The character.
+        character: char,
+    },
 }
 
 impl EncodeError {
@@ -169,6 +177,7 @@ impl EncodeError {
             Self::Empty { .. } => Self::Empty { field: to },
             Self::Claimed { value, .. } => Self::Claimed { field: to, value },
             Self::Unstated { .. } => Self::Unstated { field: to },
+            Self::Unencodable { character, .. } => Self::Unencodable { field: to, character },
         }
     }
 
@@ -225,6 +234,9 @@ impl core::fmt::Display for EncodeError {
                 f,
                 "`{field}` is stated, and the open arm has no discriminant for encode to write"
             ),
+            Self::Unencodable { field, character } => {
+                write!(f, "`{field}` holds {character:?}, which its text encoding has no bytes for")
+            }
         }
     }
 }
@@ -340,7 +352,7 @@ mod tests {
     use crate::field::Fallibility;
 
     /// Every variant, so a new one is listed here and in `Display`.
-    fn every_variant() -> [EncodeError; 10] {
+    fn every_variant() -> [EncodeError; 11] {
         [
             EncodeError::Overflow,
             EncodeError::Unfit { field: "len", value: 300, bits: 8 },
@@ -352,6 +364,7 @@ mod tests {
             EncodeError::Empty { field: "items" },
             EncodeError::Claimed { field: "body", value: 1 },
             EncodeError::Unstated { field: "kind" },
+            EncodeError::Unencodable { field: "name", character: 'é' },
         ]
     }
 
@@ -370,6 +383,7 @@ mod tests {
                 | EncodeError::Delimiter { field, .. }
                 | EncodeError::Empty { field }
                 | EncodeError::Unstated { field }
+                | EncodeError::Unencodable { field, .. }
                 | EncodeError::Claimed { field, .. } => {
                     assert!(text.contains(field), "{text} does not name {field}");
                 }

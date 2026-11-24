@@ -269,7 +269,10 @@ fn latin1_maps_every_byte_to_a_code_point() {
     assert!(core::str::from_utf8(&m.encode().unwrap()[..3]).is_err());
 
     let wide = Latin { label: String::from("→") };
-    assert_eq!(wide.encode().unwrap(), vec![b'?', 0, 0, 0]);
+    assert_eq!(
+        wide.encode(),
+        Err(layline::EncodeError::Unencodable { field: "label", character: '→' })
+    );
 }
 
 #[test]

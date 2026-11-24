@@ -431,7 +431,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   `#[text]` string.
 /// - `#[codec(N)]`: a `FieldCodec` stored as an 8, 16, 32 or 64-bit integer.
 /// - `#[var]`: a `VarCodec` value, whose size is read from the wire.
-/// - `#[text]`, `#[text(Codec)]`: a `String`, as UTF-8 or through the `TextCodec` `Codec`.
+/// - `#[text]`, `#[text(Codec)]`: a `String`, as UTF-8 or through the `TextCodec` `Codec`. Encode
+///   refuses a character the codec has no bytes for, as decode refuses bytes it reads no character
+///   from, and is fallible exactly when the codec's `ENCODE_FALLIBLE` says so.
 /// - `#[message]`: a nested `Message`, boxed or not.
 /// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's or the switch's
 ///   enum's `needs`: integers, `bool`s, fields of a nested layout (`hdr.f`) or parameters. Use

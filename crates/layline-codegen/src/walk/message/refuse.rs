@@ -71,6 +71,10 @@ pub(super) fn held_refusal(kind: &Kind, owner: &str, root: &Root) -> Option<Held
             let p = path(ty);
             Some(Held::Leaf(quote!(<#p as #root::FieldCodec>::ENCODE_FALLIBLE)))
         }
+        Kind::Text { codec: Some(ty), .. } => {
+            let p = path(ty);
+            Some(Held::Leaf(quote!(<#p as #root::__private::TextCodec>::ENCODE_FALLIBLE)))
+        }
         Kind::Msg { ty, .. } if names_self(ty, owner) => None,
         Kind::Msg { ty, .. } => {
             let p = path(ty);
