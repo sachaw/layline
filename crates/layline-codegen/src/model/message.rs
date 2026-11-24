@@ -23,6 +23,20 @@ pub enum Count {
         /// The largest count allowed.
         cap: Option<usize>,
     },
+    /// An integer immediately before the elements: adjacent framing, which is no field.
+    ///
+    /// Decode reads it and refuses a count past `cap`. Encode writes the collection's length,
+    /// refusing one the integer cannot hold with `EncodeError::Unfit` and one past `cap` with
+    /// `EncodeError::OverCap`. The message's `SEGMENTS` give it a row of its own, named
+    /// `<field>.count`. A byte length before the elements is [`Count::Window`] of
+    /// [`Len::Prefix`].
+    Prefix {
+        /// The integer: [`Scalar::U`] or [`Scalar::I`] of 8, 16, 32 or 64 bits, in the message's
+        /// byte order.
+        repr: Scalar,
+        /// The largest count allowed.
+        cap: Option<usize>,
+    },
     /// A count, and each element's byte size from a second expression.
     ///
     /// Decode reads each element from the start of its stride. A stride shorter than the element
@@ -67,8 +81,12 @@ pub enum Presence {
     /// bits and leaves the rest of the flags field alone. Encode checks any other condition
     /// against whether the field is `Some`.
     When(Expr),
-    /// When an unnamed bit just before the field is set. Bit-addressed messages only.
-    Bit,
+    /// When a flag just before the field is set: one bit in a bit-addressed message, and in a
+    /// byte-addressed one a byte that decode reads as 0 or 1, refusing any other with
+    /// [`ParseError::Malformed`](layline_core::ParseError). Encode writes it from whether the
+    /// field is `Some`. The flag is adjacent framing, which is no field: a byte-addressed
+    /// message's `SEGMENTS` give it a row of its own, named `<field>.present`.
+    Prefix,
     /// When the body has bytes left. Must be the last field.
     Remaining,
 }
@@ -177,6 +195,13 @@ pub enum Segment {
         at: Option<Expr>,
         /// The Rust type.
         collection: Collection,
+        /// When an `Option` of the collection is present, or `None` for a collection that always
+        /// is.
+        ///
+        /// An optional collection states its own size: a [`Count::Prefix`], or a
+        /// [`Count::Window`] of [`Len::Prefix`], [`Len::Bytes`] or [`Len::Until`], or a
+        /// [`Count::Terminated`] run. It has no offset.
+        when: Option<Presence>,
     },
     /// One record at a byte offset read from an earlier field.
     ///
@@ -298,7 +323,18 @@ impl Segment {
             count,
             at,
             collection,
+            when: None,
         }
+    }
+
+    /// Makes a [`Segment::Repeat`] an `Option` of its collection, present `when`. Does nothing
+    /// on any other segment.
+    #[must_use]
+    pub fn with_presence(mut self, presence: Presence) -> Self {
+        if let Segment::Repeat { when, .. } = &mut self {
+            *when = Some(presence);
+        }
+        self
     }
 
     /// A [`Segment::Placed`] at the byte offset `at`. Optional when `absent` is set.
@@ -378,6 +414,7 @@ impl Segment {
     pub fn places(&self) -> Vec<&str> {
         match self {
             Segment::Block(fields) => fields.iter().map(|f| f.name.as_str()).collect(),
+            Segment::Repeat { when: Some(_), .. } => Vec::new(),
             Segment::Value { name, .. }
             | Segment::Repeat { name, .. }
             | Segment::Switch { name, .. }
@@ -405,7 +442,8 @@ impl Segment {
     pub fn placed_optionally(&self) -> Option<&str> {
         match self {
             Segment::Opt { field, .. } => Some(field.name.as_str()),
-            Segment::Placed { name, absent: Some(_), .. } => Some(name.as_str()),
+            Segment::Placed { name, absent: Some(_), .. }
+            | Segment::Repeat { name, when: Some(_), .. } => Some(name.as_str()),
             _ => None,
         }
     }
@@ -446,8 +484,8 @@ impl Segment {
             Segment::Checksum { repr, .. } => Some(repr.bits()),
             Segment::Valid { .. } => Some(0),
             Segment::Value { kind, .. } => kind.bits(),
-            Segment::Repeat { count, at, .. } => match (count, at) {
-                (Count::Window(Len::Bytes(n)), None) => Some(*n as u64 * 8),
+            Segment::Repeat { count, at, when, .. } => match (count, at, when) {
+                (Count::Window(Len::Bytes(n)), None, None) => Some(*n as u64 * 8),
                 _ => None,
             },
             Segment::Switch { window: Some(Len::Bytes(n)), .. } => Some(*n as u64 * 8),
@@ -514,7 +552,7 @@ pub struct MessageDef {
     pub endian_from: Option<String>,
     /// The bit order, or `None` for a byte-addressed message.
     ///
-    /// A bit-addressed message holds bit fields and inline [presence bits](Presence::Bit),
+    /// A bit-addressed message holds bit fields and inline [presence bits](Presence::Prefix),
     /// padded with zeros to a whole byte.
     pub bits: Option<BitOrder>,
     /// The parameters, which generate a `<Name>Ctx` struct used as `Message::Ctx`.

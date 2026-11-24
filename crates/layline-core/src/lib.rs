@@ -5,6 +5,7 @@
 //! - [`Layout`]: a fixed-size type, described by a [`FieldDef`](table::FieldDef) table.
 //! - [`Message`]: a variable-length type, described by a [`SegmentDef`](table::SegmentDef) table.
 //! - [`EncodeError`]: why an encode refused a value.
+//! - [`Stated`]: a number the wire states about other fields, which encode writes.
 //! - [`audit`]: prints those tables.
 //! - [`frame`] (feature `frame`): stream framing.
 //! - [`num`] (feature `num`): LEB128, VLQ, Exp-Golomb and reserved values.
@@ -42,6 +43,7 @@ mod message;
 mod row;
 mod segment;
 mod slot;
+mod stated;
 mod value;
 mod var;
 mod view;
@@ -174,6 +176,7 @@ pub use int::{I, U};
 pub use message::{MAX_NESTING_DEPTH, ParseError};
 pub use segment::{Choice, Message, MessageRef};
 pub use slot::Slot;
+pub use stated::Stated;
 pub use var::VarCodec;
 pub use view::View;
 

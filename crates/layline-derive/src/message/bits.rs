@@ -129,6 +129,7 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         with: Vec::new(),
         align: None,
         valid: None,
+        framing: false,
     })
 }
 
@@ -250,7 +251,7 @@ pub(super) fn lower_bits(p: &Parsed, order: BitOrder) -> (MessageDef, Vec<TokenS
             Some(absent) => {
                 flush(&mut segments, &mut block);
                 let when = match absent {
-                    BitPresence::Present => Presence::Bit,
+                    BitPresence::Present => Presence::Prefix,
                     BitPresence::When(when) => when.presence(),
                 };
                 segments.push(Segment::opt(when, field));

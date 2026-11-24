@@ -4,6 +4,10 @@
 //! encode works the number back to that field. Any other expression derives nothing, and encode
 //! checks it instead.
 
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+
 use crate::model::{Ty, split_ref};
 use crate::{Absence, Count, Coverage, Discriminant, Expr, Kind, Len, Presence, Segment};
 
@@ -77,12 +81,17 @@ pub(crate) enum Derived {
         /// The field the discriminant is written to.
         field: String,
         by: Expr,
+        /// Whether the field is framing, which holds no discriminant for the open arm.
+        framing: bool,
     },
     /// `field = field, with each mask's bits set when its optional field is Some`, or for a mask
     /// that marks absence, when it is None
     Flags {
-        /// The flags field. Encode keeps the bits that no optional field uses.
+        /// The flags field. Encode keeps the bits that no optional field uses, unless the field
+        /// is framing: then they are zero, and decode refuses them set.
         field: String,
+        /// Whether the field is framing.
+        framing: bool,
         /// `(mask, optional field name, whether set bits mean present)`, in declaration order.
         /// A mask is a literal or a constant.
         bits: Vec<(Expr, String, bool)>,
@@ -104,6 +113,7 @@ pub(crate) enum Derived {
     },
 }
 
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
 impl Derived {
     /// The noun phrase an error message uses for this derivation.
     pub(crate) fn what(&self) -> &'static str {
@@ -149,6 +159,7 @@ impl Derived {
 }
 
 /// What a reserved field holds.
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlotOf {
     /// The segment's byte position.
@@ -167,6 +178,14 @@ pub(crate) fn declares(segments: &[Segment], name: &str) -> bool {
     })
 }
 
+/// Whether `name` is a framing field of a block: `layline::Stated<T>`.
+pub(crate) fn framing(segments: &[Segment], name: &str) -> bool {
+    segments.iter().any(|seg| match seg {
+        Segment::Block(fields) => fields.iter().any(|f| f.framing && f.name == name),
+        _ => false,
+    })
+}
+
 /// Every computed field in the segments, as `(field, derivation)`.
 pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
     let is_field = |name: &str| declares(segments, name);
@@ -178,6 +197,31 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
             }
         };
     for seg in segments {
+        if let Some((e, of)) = tested(seg)
+            && let Some(t) = e.test().filter(|t| is_field(t.field))
+        {
+            let flag = String::from(t.field);
+            match t.mask {
+                Some(mask) => {
+                    let bit = (mask.clone(), String::from(of), t.set);
+                    match out
+                        .iter_mut()
+                        .find(|(df, d)| *df == flag && matches!(d, Derived::Flags { .. }))
+                    {
+                        Some((_, Derived::Flags { bits, .. })) => bits.push(bit),
+                        _ => out.push((
+                            flag.clone(),
+                            Derived::Flags {
+                                framing: framing(segments, &flag),
+                                field: flag,
+                                bits: vec![bit],
+                            },
+                        )),
+                    }
+                }
+                None => out.push((flag, Derived::Presence { of: String::from(of), set: t.set })),
+            }
+        }
         match seg {
             Segment::Repeat { name: coll, element, count, at, .. } => {
                 match count {
@@ -245,6 +289,7 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                         of: body.clone(),
                         field: String::from(field),
                         by,
+                        framing: framing(segments, field),
                     });
                 }
                 if let Some(Len::Field { by, cap, .. }) = window {
@@ -253,28 +298,6 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                         by,
                         cap: *cap,
                     });
-                }
-            }
-            Segment::Opt { when: Presence::When(e), field } => {
-                let Some(t) = e.test().filter(|t| is_field(t.field)) else { continue };
-                let flag = String::from(t.field);
-                match t.mask {
-                    Some(mask) => {
-                        let bit = (mask.clone(), field.name.clone(), t.set);
-                        match out
-                            .iter_mut()
-                            .find(|(df, d)| *df == flag && matches!(d, Derived::Flags { .. }))
-                        {
-                            Some((_, Derived::Flags { bits, .. })) => bits.push(bit),
-                            _ => out.push((
-                                flag.clone(),
-                                Derived::Flags { field: flag, bits: vec![bit] },
-                            )),
-                        }
-                    }
-                    None => {
-                        out.push((flag, Derived::Presence { of: field.name.clone(), set: t.set }))
-                    }
                 }
             }
             Segment::Checksum { name, algorithm, over, .. } => {
@@ -289,7 +312,17 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
     out
 }
 
+/// The presence condition of an optional field, and the field.
+fn tested(seg: &Segment) -> Option<(&Expr, &str)> {
+    match seg {
+        Segment::Opt { when: Presence::When(e), field } => Some((e, &field.name)),
+        Segment::Repeat { when: Some(Presence::When(e)), name, .. } => Some((e, name)),
+        _ => None,
+    }
+}
+
 /// Reserved fields filled in after a later segment, as `(field, segment)`.
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
 pub(crate) fn back_patched(segments: &[Segment]) -> Vec<(String, String)> {
     derivations(segments)
         .into_iter()
@@ -298,13 +331,17 @@ pub(crate) fn back_patched(segments: &[Segment]) -> Vec<(String, String)> {
 }
 
 /// Every expression in the segments, and whether it gives a number or a condition.
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
 pub(crate) fn expressions(segments: &[Segment]) -> Vec<(Expr, Ty)> {
     let mut out: Vec<(Expr, Ty)> = Vec::new();
     let mut conditions: Vec<(Expr, Ty)> = Vec::new();
     let mut number = |e: &Expr| out.push((e.clone(), Ty::Int));
     for seg in segments {
         match seg {
-            Segment::Repeat { count, at, .. } => {
+            Segment::Repeat { count, at, when, .. } => {
+                if let Some(Presence::When(e)) = when {
+                    conditions.push((e.clone(), Ty::Bool));
+                }
                 match count {
                     Count::Field { by, .. } | Count::Window(Len::Field { by, .. }) => number(by),
                     Count::Strided { by, stride, .. } => {

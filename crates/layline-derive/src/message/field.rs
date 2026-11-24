@@ -19,6 +19,16 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
     let span = f.ident.as_ref().map_or_else(|| f.span(), syn::Ident::span);
     let mut a = parse_attrs(f, &name)?;
     let when = a.when.take();
+    let present = a.present.take();
+    if let (Some(span), Some(_)) = (present, &when) {
+        return Err(syn::Error::new(
+            span,
+            format!("field `{name}`: `#[present]` and `#[when]` both gate this field. Use one"),
+        ));
+    }
+    if let Some(inner) = crate::ty::stated_element(&f.ty) {
+        return framing_field(f, inner, &name, span, a, when.is_some() || present.is_some());
+    }
     let with: Vec<Ref> = a.with.iter().flat_map(|(refs, _)| refs).map(Ref::same).collect();
 
     let stated = a.at;
@@ -27,11 +37,26 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
     let walk_span = walked_by(&a)
         .map(|(_, s)| s)
         .or_else(|| when.as_ref().map(|w| w.span))
+        .or(present)
         .or_else(|| a.seek.as_ref().map(|r| r.span))
         .unwrap_or(span);
 
     let body = match (when, option_element(&f.ty)) {
-        (Some(when), Some(inner)) => optional(&name, when, field_body(inner, &name, span, a)?)?,
+        (None, Some(inner)) if present.is_some() => optional(
+            &name,
+            Err(present.expect("just matched")),
+            field_body(inner, &name, span, a)?,
+        )?,
+        (None, None) if present.is_some() => {
+            return Err(syn::Error::new(
+                present.expect("just matched"),
+                format!(
+                    "field `{name}`: #[present] needs an `Option` field. Declare it `Option<{}>`",
+                    crate::attr::spelled(&f.ty),
+                ),
+            ));
+        }
+        (Some(when), Some(inner)) => optional(&name, Ok(when), field_body(inner, &name, span, a)?)?,
         (Some(when), None) => {
             return Err(syn::Error::new(
                 when.span,
@@ -73,8 +98,18 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
                 ));
             }
             if let Body::Fixed { kind, claims } = field_body(inner, &name, span, a)? {
-                let body = Body::Opt { when: None, kind, claims };
-                return Ok(MsgField { name, span, walk_span, body, stated, with, align, valid });
+                let body = Body::Opt { when: None, present: false, kind, claims };
+                return Ok(MsgField {
+                    name,
+                    span,
+                    walk_span,
+                    body,
+                    stated,
+                    with,
+                    align,
+                    valid,
+                    framing: false,
+                });
             }
             return Err(syn::Error::new(
                 span,
@@ -89,16 +124,115 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
                 span,
                 format!(
                     "field `{name}`: nothing says whether this `Option` is present. \
-                     Add `#[when(flags & 0x01)]`, or `#[seek(off)]` where a zero offset means absent"
+                     Add `#[present]` for a flag byte just before it, `#[when(flags & 0x01)]`, or \
+                     `#[seek(off)]` where a zero offset means absent"
                 ),
             ));
         }
         (None, None) => field_body(&f.ty, &name, span, a)?,
     };
-    Ok(MsgField { name, span, walk_span, body, stated, with, align, valid })
+    Ok(MsgField { name, span, walk_span, body, stated, with, align, valid, framing: false })
 }
 
-fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
+/// A `Stated<T>` field: an integer or `bool` in a block, which encode writes.
+fn framing_field(
+    f: &syn::Field,
+    inner: &Type,
+    name: &str,
+    span: Span,
+    a: FieldAttrs,
+    gated: bool,
+) -> syn::Result<MsgField> {
+    let refused = |why: &str| {
+        syn::Error::new(
+            f.ty.span(),
+            format!(
+                "field `{name}`: `Stated<T>` is a number or flag encode writes, so {why}. \
+                 Declare `Stated<u8>`, another integer, or `Stated<bool>`"
+            ),
+        )
+    };
+    if gated {
+        return Err(refused("it is always on the wire, with no `Option`"));
+    }
+    if let Some((what, wspan)) = walked_by(&a) {
+        return Err(syn::Error::new(
+            wspan,
+            format!(
+                "field `{name}`: {what} does not apply to `Stated<T>`, which is one integer or \
+                 `bool` in place. Remove {what}"
+            ),
+        ));
+    }
+    let (stated, align, valid) = (a.at, a.align, a.valid);
+    let FieldAttrs { seek, bits, bytes, range, magic, until, stride, with, .. } = a;
+    let placed = [seek.is_some(), magic.is_some(), bytes.is_some(), until.is_some()];
+    if placed.into_iter().any(|p| p) || stride.is_some() || with.is_some() {
+        return Err(refused(
+            "it takes no `#[seek]`, `#[magic]`, `#[bytes]`, `#[until]`, `#[stride]` or `#[with]`",
+        ));
+    }
+    let (kind, bound) = fixed_kind(name, inner, bits, None, range.as_ref())?;
+    if !matches!(
+        kind,
+        Kind::Scalar(Scalar::U(_) | Scalar::I(_) | Scalar::ByteBool) | Kind::Codec { .. }
+    ) {
+        return Err(refused(&format!("`{}` cannot be one", crate::attr::spelled(inner))));
+    }
+    let body = Body::Fixed { kind, claims: Claims { range: bound, magic: None } };
+    Ok(MsgField {
+        name: String::from(name),
+        span,
+        walk_span: span,
+        body,
+        stated,
+        with: Vec::new(),
+        align,
+        valid,
+        framing: true,
+    })
+}
+
+/// An `Option<T>` field, present `when`, or with `Err(span)`, by a `#[present]` flag.
+fn optional(name: &str, when: Result<WhenSpec, Span>, body: Body) -> syn::Result<Body> {
+    let (when, present) = match when {
+        Ok(when) => (when, false),
+        Err(span) => match body {
+            Body::Repeat { element, count, at, assert, collection, .. } => {
+                return gated(name, span, Gate::Present, (element, count, at, assert, collection));
+            }
+            Body::Fixed { kind, claims } | Body::Opt { kind, claims, .. } => {
+                return Ok(Body::Opt { when: None, present: true, kind, claims });
+            }
+            Body::Value { kind, len_ref: None } => {
+                return Ok(Body::Opt {
+                    when: None,
+                    present: true,
+                    kind,
+                    claims: Claims::default(),
+                });
+            }
+            Body::Value { len_ref: Some(r), .. } => {
+                return Err(syn::Error::new(
+                    r.span,
+                    format!(
+                        "field `{name}`: an optional string cannot take its length from `{r}`, \
+                         which is always present. Write `#[len(prefix = u16)]`, `#[until(0)]` or \
+                         `#[bytes(N)]`",
+                    ),
+                ));
+            }
+            _ => {
+                return Err(syn::Error::new(
+                    span,
+                    format!(
+                        "field `{name}`: #[present] gates a value, a string or a collection. \
+                         Remove it, and the `Option`"
+                    ),
+                ));
+            }
+        },
+    };
     let mut claims = Claims::default();
     let kind = match body {
         Body::Bits { .. } => {
@@ -113,19 +247,15 @@ fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
                 r.span,
                 format!(
                     "field `{name}`: an optional string cannot take its length from `{r}`, \
-                     which is always present. Write `#[until(0)]` or `#[bytes(N)]`",
+                     which is always present. Write `#[len(prefix = u16)]`, `#[until(0)]` or \
+                     `#[bytes(N)]`",
                 ),
             ));
         }
         Body::Value { kind, .. } => kind,
-        Body::Repeat { .. } => {
-            return Err(syn::Error::new(
-                when.span,
-                format!(
-                    "field `{name}`: #[when(..)] cannot make a collection optional. \
-                     Remove the `Option` and use a count of zero"
-                ),
-            ));
+        Body::Repeat { element, count, at, assert, collection, .. } => {
+            let span = when.span;
+            return gated(name, span, Gate::When(when), (element, count, at, assert, collection));
         }
         Body::Switch { .. } => {
             return Err(syn::Error::new(
@@ -177,7 +307,25 @@ fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
         },
         Body::Opt { .. } => unreachable!("`#[when]` is taken before the body is decided"),
     };
-    Ok(Body::Opt { when: Some(when), kind, claims })
+    Ok(Body::Opt { when: Some(when), present, kind, claims })
+}
+
+type Run = (Kind, CountSpec, Option<Value>, Option<Box<ElementSize>>, Collection);
+
+/// An optional collection, which states its own size in place.
+fn gated(name: &str, span: Span, gate: Gate, run: Run) -> syn::Result<Body> {
+    let (element, count, at, assert, collection) = run;
+    if !count.in_place() || at.is_some() || collection.borrows() {
+        return Err(syn::Error::new(
+            span,
+            format!(
+                "field `{name}`: an optional collection states its own size in place, and owns \
+                 its elements. Write `#[count(prefix = u16)]` or `#[len(prefix = u32)]`, with no \
+                 `#[seek]`, or remove the `Option` and use a count of zero"
+            ),
+        ));
+    }
+    Ok(Body::Repeat { element, count, at, assert, collection, gate: Some(gate) })
 }
 
 fn walked_by(a: &FieldAttrs) -> Option<(&'static str, Span)> {
@@ -204,6 +352,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
         at: _,
         align: _,
         valid: _,
+        present: _,
     } = a;
     let at = seek;
 
@@ -270,7 +419,8 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
                 Some((
                     c @ (CountSpec::Field { .. }
                     | CountSpec::Window { .. }
-                    | CountSpec::Fill { .. }),
+                    | CountSpec::Fill { .. }
+                    | CountSpec::Prefix { .. }),
                     _,
                 )),
                 None,
@@ -301,6 +451,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
             at,
             assert: None,
             collection,
+            gate: None,
         });
     }
 
@@ -374,7 +525,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
 
     if let Some((KindWord::Switch(_), sspan)) = &kind {
         if let Some((c, cspan)) = &count
-            && !matches!(c, CountSpec::Window { .. })
+            && !matches!(c, CountSpec::Window { .. } | CountSpec::Prefix { bytes: true, .. })
         {
             return Err(syn::Error::new(
                 *cspan,
@@ -453,6 +604,29 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
                 ));
             }
             (Some((CountSpec::Window { by, cap }, _)), None) => SwitchWindow::Field { by, cap },
+            (Some((CountSpec::Prefix { bytes: true, .. }, lspan)), Some((n, _))) => {
+                return Err(syn::Error::new(
+                    lspan,
+                    format!(
+                        "field `{name}`: a `prefix` and #[bytes({n})] both set the union's size. \
+                         Remove one",
+                    ),
+                ));
+            }
+            (Some((CountSpec::Prefix { bytes: true, .. }, lspan)), None)
+                if matches!(on, SwitchOn::BodyLength(_)) =>
+            {
+                return Err(syn::Error::new(
+                    lspan,
+                    format!(
+                        "field `{name}`: #[switch(..)] reads the remaining length, and a `prefix` \
+                         sets it. Remove the `prefix`, or write #[switch(n)]",
+                    ),
+                ));
+            }
+            (Some((CountSpec::Prefix { repr, cap, bytes: true }, _)), None) => {
+                SwitchWindow::Prefix { repr, cap }
+            }
             (Some(_), _) => unreachable!("a count that is not a byte length was refused above"),
         };
         return Ok(Body::Switch { on, ty: crate::attr::spelled(ty), window });
@@ -569,7 +743,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
             unreachable!("a switch and a checksum are answered before this point")
         }
         None => {
-            if let Some((c @ CountSpec::Window { .. }, cspan)) = &count
+            if let Some((c @ (CountSpec::Window { .. } | CountSpec::Prefix { .. }), cspan)) = &count
                 && elem.is_none()
             {
                 return Err(syn::Error::new(
@@ -603,7 +777,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
                 ));
             }
             let count = with_stride(name, count, cspan, stride)?;
-            Ok(Body::Repeat { element, count, at, assert, collection })
+            Ok(Body::Repeat { element, count, at, assert, collection, gate: None })
         }
         (Some(_), None) => Err(syn::Error::new(
             span,

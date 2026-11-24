@@ -246,6 +246,58 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// Consecutive plain fields become a hidden `#[derive(Layout)]` struct. Encode fills in count,
 /// length, offset, discriminant and flag fields from the fields they describe.
 ///
+/// # Framing
+///
+/// A length, count or presence flag describes another field and carries no information of its
+/// own. Where it sits immediately before what it describes, it is no field: the attribute says
+/// where it is, as `#[len(prefix = u16)]`, `#[count(prefix = u8)]` or `#[present]`. Where it sits
+/// anywhere else, it keeps its place in declaration order, which is wire order, and its type says
+/// what it is: `Stated<T>`. Encode writes it, decode reads it, and `PartialEq`, `Eq` and `Hash`
+/// ignore it, so a decoded value equals the one built with `Stated::default()`. An attribute must
+/// write it, as the next section says, or the type is refused. A plain integer field keeps its
+/// own meaning: encode writes it where an attribute does, and otherwise takes the value's.
+///
+/// ```
+/// use layline::{Message, Stated};
+///
+/// #[derive(Message, Debug, PartialEq, Default)]
+/// #[message(endian = be)]
+/// pub struct Header {
+///     #[len(prefix = u8)]
+///     #[text]
+///     pub key: String,
+///     #[len(prefix = u16, cap = 16384)]
+///     pub value: Vec<u8>,
+/// }
+///
+/// #[derive(Message, Debug, PartialEq, Default)]
+/// #[message(endian = be)]
+/// pub struct Batch {
+///     pub size: Stated<u32>,
+///     pub n: Stated<u8>,
+///     #[count(n)]
+///     #[message]
+///     pub headers: Vec<Header>,
+///     #[present]
+///     #[len(prefix = u16)]
+///     #[text]
+///     pub note: Option<String>,
+///     #[len(size - 5)]
+///     pub rest: Vec<u8>,
+/// }
+///
+/// let batch = Batch {
+///     headers: vec![Header { key: "k".into(), value: vec![7] }],
+///     rest: vec![1],
+///     ..Batch::default()
+/// };
+/// let wire = batch.encode().unwrap();
+/// assert_eq!(wire, [0, 0, 0, 6, 1, 1, b'k', 0, 1, 7, 0, 1]);
+/// let (back, _) = Batch::decode(&wire).unwrap();
+/// assert_eq!((back.size.get(), back.n.get()), (6, 1));
+/// assert_eq!(back, batch);
+/// ```
+///
 /// `encode` and `encode_into` return `Result<_, EncodeError>` when the message declares something
 /// a value can break, or holds a type that does, and otherwise the bytes and
 /// `Result<(), Overflow>`. What a value can break: a field narrower than its type, a `#[range]`, a
@@ -285,7 +337,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// toward zero, and `&&` and `||` short-circuit.
 ///
 /// What encode does with an expression is decided when the type is built, by one rule: **what
-/// encode can work backwards.**
+/// encode can work backwards.** A field holds a value encode has: the caller's in a plain field,
+/// or, in a `Stated<T>`, none until encode writes one.
 ///
 /// - An expression that reads exactly one field, once, through steps that each have an inverse,
 ///   is written: encode works the number back to that field. The steps are `+ k`, `- k`,
@@ -297,13 +350,19 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - A condition that tests one field is written too: `f` for a `bool`, `f & MASK` for bits,
 ///   with a literal or constant mask, and `!` or `== 0` for their absence. Encode sets or clears
 ///   them from whether the field is `Some`, keeping the field's other bits.
-/// - Any other expression is checked. Every field it reads holds a value encode already has: the
-///   caller's, a parameter's, or one another attribute writes, read as encode writes it. Encode
-///   returns `EncodeError::Mismatch` where the value disagrees with the expression, naming the
-///   field the attribute is on. An expression that reads a field encode fills in only after a
-///   later segment, such as a `#[seek]` record's offset, is refused when the type is built.
+/// - Any other expression is checked. It reads each field as encode writes it: a plain field
+///   holds the caller's value unless an attribute writes it, a `Stated<T>` only what an attribute
+///   writes, and a parameter the holder's. Encode returns `EncodeError::Mismatch` where the value
+///   disagrees with the expression, naming the field the attribute is on. An expression that
+///   reads a field encode fills in only after a later segment, such as a `#[seek]` record's
+///   offset, is refused when the type is built.
 ///
-/// Where two attributes would write one field, the first writes it and the second is checked.
+/// Where two attributes would write one field, the first writes it and the second is checked. A
+/// `Stated<T>` that no attribute writes is refused when the type is built: `#[count(n * m)]` reads
+/// two fields, so it writes neither. A `#[with(n)]` passes a written field as encode writes it.
+/// An `#[other]` arm has no discriminant, so encode refuses one with `EncodeError::Unstated` when
+/// a `Stated<T>` selects it. In a `Stated<T>` flags word, bits no `#[when]` tests are zero:
+/// encode writes them so, and decode refuses them set.
 ///
 /// # Container attributes
 ///
@@ -330,6 +389,12 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   as `n`, `hdr.n`, `n * 2 - 1` or `rows * cols`. Decode rejects more than `N`.
 /// - `#[len(e)]`, `#[len(e, cap = N)]`: as many bytes as `e` gives. Also sizes a `#[text]` string
 ///   or a `#[switch]` body.
+/// - `#[count(prefix = T)]`, `#[len(prefix = T)]`, either with `cap = N`: the count or byte
+///   length is an integer `T` immediately before the value, `u8` to `u64` or `i8` to `i64`, in the
+///   message's byte order. It is no field. Encode writes it, refusing a number `T` cannot hold
+///   with `EncodeError::Unfit` and one past `N` with `EncodeError::OverCap`. A prefix is the
+///   number itself and takes no expression: a count of 4-byte words is a `Stated<T>` that
+///   `#[len(words * 4)]` reads. `SEGMENTS` gives it a row named `<field>.count` or `<field>.len`.
 /// - `#[fill]`, `#[fill(cap = N)]`: whole elements until the message ends.
 /// - `#[until(b)]`: bytes up to the terminator `b`. Decode consumes it and encode appends it.
 /// - `#[until(mask = M)]`: elements up to and including the first whose first byte has the `M`
@@ -368,6 +433,13 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   length. Decode skips the padding without reading it, and encode writes zeros. A RIFF chunk
 ///   is `#[len(size)] #[align(2)] body: Vec<u8>`.
 /// - `#[fill]` on an `Option<T>`: present when bytes remain.
+/// - `#[present]` on an `Option<T>`: present when a byte just before it is 1, absent when it is 0.
+///   Decode refuses any other byte with `ParseError::Malformed`, and encode writes it from
+///   `Some`. With a prefix, the wire holds the flag, then the prefix, then the value: OpenWire's
+///   nullable string is `#[present] #[len(prefix = u16)] #[text(Mutf8)] Option<String>`. An
+///   `Option<Vec<T>>` or `Option<Box<[T]>>` takes `#[present]` or `#[when]` and states its own
+///   size: a prefix, `#[bytes(N)]` or `#[until]`. `SEGMENTS` gives the flag a row named
+///   `<field>.present`.
 /// - `#[magic(0xFE)]`, `#[magic(b"SEAL")]`: fixed bytes. Decode checks them and encode writes
 ///   them.
 /// - `#[checksum(Alg, over = a..=b)]`: a checksum over fields `a` to `b`. Decode verifies it and

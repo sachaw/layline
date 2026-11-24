@@ -37,7 +37,8 @@ impl Walk<'_> {
         item.via.extend(super::refuse::held_refusal(kind, owner, false, root));
         let ctx = self.with_ctx(kind, own)?;
         let step = element_step(kind, field, ctx.as_ref(), root)?;
-        let mut row = Row::new(field, span_of_kind(kind)).decoded_by(deferred_type(kind)).seek(at);
+        let mut row =
+            Row::new(field, span_of_kind(kind, field)).decoded_by(deferred_type(kind)).seek(at);
         if let Some(absent) = absent {
             row = row.when(match absent {
                 Absence::ZeroOffset => row::Presence::Offset,

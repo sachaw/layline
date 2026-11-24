@@ -7,8 +7,10 @@ use super::body::{Bind, Item, Own, Walk};
 use super::cursor::{consumed_nothing, take};
 use super::env::Env;
 use super::patch::{Target, derived_value, fits};
+use super::prefix::Prefix;
 use super::table::{Row, deferred_type, span_of_kind};
 use super::text::{text_decode, text_unpad, text_write};
+use crate::model::Ty;
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, doc_attr, kind_ty, path};
@@ -71,6 +73,22 @@ pub(super) fn discovered_read(
                 };
             })
         }
+        Kind::Text { len: len @ Len::Prefix { .. }, codec } => {
+            let read = Prefix::of_len(len).expect("a prefix length").read(what, root);
+            let bytes = take(&quote!(__n), root);
+            let decode = text_decode(codec, what, root);
+            Ok(quote! {
+                let (__e, __used) = {
+                    let __from = __at;
+                    #read
+                    let __s = #bytes;
+                    let __e = #decode;
+                    let __used = __at + __n - __from;
+                    __at = __from;
+                    (__e, __used)
+                };
+            })
+        }
         Kind::Text { len: Len::Bytes(n), codec } => {
             let lit = Literal::usize_unsuffixed(*n);
             let bytes = take(&quote!(#lit), root);
@@ -103,10 +121,14 @@ pub(super) fn value_read(
 ) -> Result<TokenStream, Error> {
     let ident = ident(field);
     match kind {
-        Kind::Text { len: Len::Field { by, cap, .. }, codec } => {
+        Kind::Text { len: len @ (Len::Field { .. } | Len::Prefix { .. }), codec } => {
             let decode = text_decode(codec, field, root);
-            let n = env.size_n(owner, "#[len]", by, *cap)?;
-            let by = super::eval::blamed(by, field);
+            let (n, by) = match len {
+                Len::Field { by, cap, .. } => {
+                    (env.size_n(owner, "#[len]", by, *cap)?, super::eval::blamed(by, field))
+                }
+                _ => (Prefix::of_len(len).expect("a prefix length").read(field, root), field),
+            };
             Ok(quote! {
                 #n
                 let __end = __at
@@ -238,6 +260,16 @@ impl Walk<'_> {
                 )));
             };
             read.push(access);
+            // A derived field passes the number encode writes, a framing field only that.
+            if self.derived.iter().any(|(f, _)| f == name) {
+                let want = if flag { Ty::Bool } else { Ty::Int };
+                let (value, _) = self.written(own, name, want)?;
+                held.push(match flag {
+                    true => value,
+                    false => quote!(#root::WireInt::from_i64(#value)),
+                });
+                continue;
+            }
             let value = own.get(name);
             held.push(match flag {
                 true => quote!(#root::__private::WireFlag::to_flag(&#value)),
@@ -264,7 +296,14 @@ impl Walk<'_> {
         let d = doc_attr(doc);
         self.public_fields.extend(quote! { #d pub #ident: #ty, });
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });
-        self.rows.push(Row::new(field, span_of_kind(kind)).decoded_by(deferred_type(kind)));
+        if let Kind::Text { len, .. } = kind
+            && let Some(p) = Prefix::of_len(len)
+        {
+            let name = p.row_name(field);
+            self.rows.push(p.row(&name));
+            self.rows.advance(Some(p.repr.bits()));
+        }
+        self.rows.push(Row::new(field, span_of_kind(kind, field)).decoded_by(deferred_type(kind)));
         let ctx = self.with_ctx(kind, own)?;
         self.parse_steps.extend(value_read(
             &self.env,

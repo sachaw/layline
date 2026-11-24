@@ -6,8 +6,8 @@ use quote::{format_ident, quote};
 use super::body::{Bind, Item, Own, Walk, needs_clone};
 use super::cursor::read_layout;
 use super::patch::{
-    Slot, SlotWrite, Target, derived_flag, derived_value, fits, nested_accessors, placeholder,
-    slot_ident,
+    Slot, SlotWrite, Target, derived_flag, derived_value, fits, mask_tokens, nested_accessors,
+    placeholder, slot_ident,
 };
 use super::table::Row;
 use crate::model::split_ref;
@@ -203,11 +203,29 @@ impl Walk<'_> {
         self.parse_steps.extend(read_layout(&sub_var, &sub, &len, root));
         for f in fields {
             let fname = ident(&f.name);
-            self.binds.push(Bind {
-                name: fname.clone(),
-                ty: kind_ty(&f.kind, root),
-                value: quote!(#sub_var.#fname),
-            });
+            let ty = kind_ty(&f.kind, root);
+            let (ty, value) = if f.framing {
+                (quote!(#root::Stated<#ty>), quote!(#root::Stated::new(#sub_var.#fname)))
+            } else {
+                (ty, quote!(#sub_var.#fname))
+            };
+            self.binds.push(Bind { name: fname.clone(), ty, value });
+            if f.framing
+                && let Some((_, Derived::Flags { bits, .. })) = self
+                    .derived
+                    .iter()
+                    .find(|(df, d)| df == &f.name && matches!(d, Derived::Flags { .. }))
+            {
+                // Framing holds nothing but its presence bits, so decode refuses any other.
+                let masks = bits.iter().map(|(m, ..)| mask_tokens(m, root));
+                let err = root.prelude().err;
+                let name = f.name.as_str();
+                self.parse_steps.extend(quote! {
+                    if #root::WireInt::to_i64(&#sub_var.#fname) & !(#(#masks)|*) != 0 {
+                        return #err(#root::ParseError::Malformed { field: #name, at: __at });
+                    }
+                });
+            }
             if f.kind.is_integer() {
                 self.env.bind(&f.name, quote!(#sub_var.#fname));
             } else if matches!(f.kind, Kind::Scalar(Scalar::Bool | Scalar::ByteBool)) {
@@ -244,6 +262,12 @@ impl Walk<'_> {
                         }
                     }
                 },
+                None if f.framing => {
+                    return Err(Error::Internal(format!(
+                        "{owner}: framing field `{}` has no attribute that writes it",
+                        f.name
+                    )));
+                }
                 None => {
                     let clone = if needs_clone(&f.kind) { quote!(.clone()) } else { quote!() };
                     let held = own.get(&f.name);

@@ -85,6 +85,12 @@ pub enum EncodeError {
         /// The discriminant.
         value: i64,
     },
+    /// The `#[other]` arm has no discriminant of its own, and the field that selects it is a
+    /// [`Stated`](crate::Stated), which holds none for encode to write.
+    Unstated {
+        /// The field that selects the arm.
+        field: &'static str,
+    },
 }
 
 impl EncodeError {
@@ -162,6 +168,7 @@ impl EncodeError {
             Self::Delimiter { byte, .. } => Self::Delimiter { field: to, byte },
             Self::Empty { .. } => Self::Empty { field: to },
             Self::Claimed { value, .. } => Self::Claimed { field: to, value },
+            Self::Unstated { .. } => Self::Unstated { field: to },
         }
     }
 
@@ -213,6 +220,10 @@ impl core::fmt::Display for EncodeError {
             Self::Claimed { field, value } => write!(
                 f,
                 "`{field}` holds the open arm with discriminant {value}, which a listed arm claims"
+            ),
+            Self::Unstated { field } => write!(
+                f,
+                "`{field}` is stated, and the open arm has no discriminant for encode to write"
             ),
         }
     }
@@ -329,7 +340,7 @@ mod tests {
     use crate::field::Fallibility;
 
     /// Every variant, so a new one is listed here and in `Display`.
-    fn every_variant() -> [EncodeError; 9] {
+    fn every_variant() -> [EncodeError; 10] {
         [
             EncodeError::Overflow,
             EncodeError::Unfit { field: "len", value: 300, bits: 8 },
@@ -340,6 +351,7 @@ mod tests {
             EncodeError::Delimiter { field: "name", byte: 0 },
             EncodeError::Empty { field: "items" },
             EncodeError::Claimed { field: "body", value: 1 },
+            EncodeError::Unstated { field: "kind" },
         ]
     }
 
@@ -357,6 +369,7 @@ mod tests {
                 | EncodeError::Mismatch { field, .. }
                 | EncodeError::Delimiter { field, .. }
                 | EncodeError::Empty { field }
+                | EncodeError::Unstated { field }
                 | EncodeError::Claimed { field, .. } => {
                     assert!(text.contains(field), "{text} does not name {field}");
                 }

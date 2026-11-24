@@ -14,6 +14,15 @@ pub(crate) fn validate_layout(layout: &LayoutDef) -> Result<(), Invalid> {
     ident("layout", &layout.name)?;
     for f in &layout.fields {
         field_names(f)?;
+        if f.framing {
+            return Err(Invalid::field(
+                &f.name,
+                String::from(
+                    "a layout states nothing about other fields, so it holds no framing. \
+                     Declare a plain field, or move the framing to a message",
+                ),
+            ));
+        }
     }
     validate_container(&layout.container)?;
     let declared = layout.container.field_bits();

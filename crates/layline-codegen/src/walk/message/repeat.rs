@@ -6,6 +6,7 @@ use quote::quote;
 use super::body::{Bind, Item, Own, Walk};
 use super::cursor::{consumed_nothing, take, windowed};
 use super::eval::blamed;
+use super::prefix::Prefix;
 use super::table::{Row, deferred_type, span_of_count};
 use super::value::{WithCtx, discovered_read, value_write};
 use crate::root::Prelude;
@@ -163,12 +164,24 @@ impl Walk<'_> {
     ) -> Result<(), Error> {
         let Prelude { err, some, none, vec, boxed, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
-        let Segment::Repeat { name: coll, element, count, at, collection, doc, .. } = seg else {
+        let Segment::Repeat { name: coll, element, count, at, collection, doc, when, .. } = seg
+        else {
             unreachable!("just matched")
         };
         if collection.borrows() {
             return self.borrowed(item, own, seg);
         }
+        // An optional collection is read and written in place of the field, inside its test.
+        let outer = own;
+        let (own, outer_parse, outer_bytes) = match when {
+            Some(_) => (
+                Own::Arm,
+                core::mem::take(&mut self.parse_steps),
+                core::mem::take(&mut self.byte_steps),
+            ),
+            None => (own, TokenStream::new(), TokenStream::new()),
+        };
+        let prefix = Prefix::of_count(count);
         item.via.extend(super::refuse::held_refusal(element, owner, true, root));
         let coll_ident = ident(coll);
         let elem_ty = kind_ty(element, root);
@@ -179,6 +192,13 @@ impl Walk<'_> {
             _ => (quote!(#vec<#elem_ty>), quote!(#coll_ident)),
         };
         let d = doc_attr(doc);
+        let (coll_ty, coll_val, inner_val) = match when {
+            Some(_) => {
+                let option = root.prelude().option;
+                (quote!(#option<#coll_ty>), quote!(#coll_ident), coll_val)
+            }
+            None => (coll_ty, coll_val.clone(), coll_val),
+        };
         self.public_fields.extend(quote! { #d pub #coll_ident: #coll_ty, });
         self.binds.push(Bind { name: coll_ident.clone(), ty: coll_ty, value: coll_val });
 
@@ -189,9 +209,23 @@ impl Walk<'_> {
             Step::Fixed { len, .. } => Some(*len as u64 * 8),
             Step::Discovered { .. } => None,
         };
-        let mut row = Row::new(coll, span_of_count(count, each)).decoded_by(deferred_type(element));
+        let gate = when.as_ref().map(|when| self.presence_rows(when, coll));
+        if let Some(p) = prefix {
+            let name = p.row_name(coll);
+            let mut row = p.row(&name);
+            if let Some(gate) = &gate {
+                row = row.when(gate.clone());
+            }
+            self.rows.push(row);
+            self.rows.advance(Some(p.repr.bits()));
+        }
+        let mut row =
+            Row::new(coll, span_of_count(count, each, coll)).decoded_by(deferred_type(element));
         if let Some(at) = at {
             row = row.seek(at);
+        }
+        if let Some(gate) = gate {
+            row = row.when(gate);
         }
         self.rows.push(row);
 
@@ -217,6 +251,10 @@ impl Walk<'_> {
         match count {
             Count::Field { by, cap } => {
                 let n = self.env.size_n(owner, "#[count]", by, *cap)?;
+                self.parse_steps.extend(read_n(n));
+            }
+            Count::Prefix { .. } => {
+                let n = prefix.expect("a prefix count").read(coll, root);
                 self.parse_steps.extend(read_n(n));
             }
             Count::Strided { by, cap, stride } => {
@@ -285,7 +323,10 @@ impl Walk<'_> {
                 });
             }
             Count::Window(len) => {
-                let bound = self.window_len(len, "collection", coll)?;
+                let bound = match prefix {
+                    Some(p) => p.read(coll, root),
+                    None => self.window_len(len, "collection", coll)?,
+                };
                 let one = step.read_one(false, root);
                 let elements = quote! {
                     let mut __v: #vec<#elem_ty> = #vec::new();
@@ -295,7 +336,8 @@ impl Walk<'_> {
                     }
                     let __e = __v;
                 };
-                let window = windowed(coll, matches!(len, Len::Field { .. }), elements, root);
+                let stated = matches!(len, Len::Field { .. } | Len::Prefix { .. });
+                let window = windowed(coll, stated, elements, root);
                 self.parse_steps.extend(quote! {
                     #bound
                     #window
@@ -387,6 +429,13 @@ impl Walk<'_> {
         }
         let i64 = quote!(::core::primitive::i64);
         let (before, after) = match count {
+            Count::Prefix { .. } => {
+                let p = prefix.expect("a prefix count");
+                (p.write(coll, quote!((#held).len()), root), quote!())
+            }
+            Count::Window(Len::Prefix { .. }) => {
+                prefix.expect("a prefix length").reserve(coll, root)
+            }
             Count::Window(Len::Field { by, cap, .. }) => (
                 quote! { let __span_start = out.len(); },
                 self.stamp_or_agree(
@@ -473,6 +522,23 @@ impl Walk<'_> {
             }
             #after
         });
+        if let Some(when) = when {
+            let (parse, bytes) = (
+                core::mem::replace(&mut self.parse_steps, outer_parse),
+                core::mem::replace(&mut self.byte_steps, outer_bytes),
+            );
+            let Prelude { some, none, .. } = root.prelude();
+            let present = self.presence_read(when, coll)?;
+            self.parse_steps.extend(quote! {
+                let #coll_ident = if #present {
+                    #parse
+                    #some(#inner_val)
+                } else {
+                    #none
+                };
+            });
+            self.optional_write(outer, when, (coll, quote!(#coll_ident)), bytes)?;
+        }
         Ok(())
     }
 }
@@ -507,7 +573,13 @@ impl Walk<'_> {
             value: quote!(#coll_ident),
         });
 
-        let mut row = Row::new(coll, span_of_count(count, Some(8)));
+        let prefix = Prefix::of_count(count);
+        if let Some(p) = prefix {
+            let name = p.row_name(coll);
+            self.rows.push(p.row(&name));
+            self.rows.advance(Some(p.repr.bits()));
+        }
+        let mut row = Row::new(coll, span_of_count(count, Some(8), coll));
         if let Some(at) = at {
             row = row.seek(at);
         }
@@ -515,6 +587,9 @@ impl Walk<'_> {
 
         let n = match count {
             Count::Field { by, cap } => self.env.size_n(owner, "#[count]", by, *cap)?,
+            Count::Prefix { .. } | Count::Window(Len::Prefix { .. }) => {
+                prefix.expect("a prefix").read(coll, root)
+            }
             Count::Window(len @ (Len::Field { .. } | Len::Bytes(_))) => {
                 self.window_len(len, "collection", coll)?
             }
@@ -568,6 +643,9 @@ impl Walk<'_> {
         }
         let held = own.get(coll);
         let (before, after) = match count {
+            Count::Prefix { .. } | Count::Window(Len::Prefix { .. }) => {
+                (prefix.expect("a prefix").write(coll, quote!(#held.len()), root), quote!())
+            }
             Count::Window(Len::Field { by, cap, .. }) => (
                 quote! { let __span_start = out.len(); },
                 self.stamp_or_agree(

@@ -4,6 +4,8 @@ use proc_macro2::Span;
 use syn::LitInt;
 use syn::spanned::Spanned;
 
+use layline_codegen::Scalar;
+
 use super::container::MESSAGE_ATTRS;
 use super::*;
 use crate::attr::bare;
@@ -85,6 +87,7 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         range: None,
         align: None,
         valid: None,
+        present: None,
     };
 
     let owner = format!("field `{name}`");
@@ -130,13 +133,9 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         } else if path.is_ident("switch") {
             set_kind(&mut a.kind, KindWord::Switch(parse_switch(attr, name)?), aspan, name)?;
         } else if path.is_ident("present") {
-            return Err(syn::Error::new(
-                aspan,
-                format!(
-                    "field `{name}`: `#[present]` needs a bit-addressed message. \
-                     Use `#[when(flags & 0x01)]`, or add `#[message(bits)]`"
-                ),
-            ));
+            crate::attr::once_attr(&mut a.present, attr, &owner, || {
+                bare(attr, name, "#[present]").map(|()| aspan)
+            })?;
         } else if path.is_ident("when") {
             crate::attr::once_attr(&mut a.when, attr, &owner, || parse_when(attr, name))?;
         } else if path.is_ident("with") {
@@ -350,28 +349,74 @@ fn parse_count(attr: &syn::Attribute, name: &str, bytes: bool) -> syn::Result<Co
     let what = if bytes { "#[len]" } else { "#[count]" };
     let unit = if bytes { "byte length" } else { "count" };
     let Args { expr, keys } = args(attr)?;
-    let by = expression(
-        attr,
-        expr,
-        name,
-        what,
-        &format!("where `n` is an earlier field holding the {unit}"),
-    )?;
+    let prefixed = keys.iter().any(|(key, _)| key == "prefix");
+    let by = match (expr, prefixed) {
+        (None, true) => None,
+        (expr, _) => Some(expression(
+            attr,
+            expr,
+            name,
+            what,
+            &format!(
+                "where `n` is an earlier field holding the {unit}, or `{}(prefix = u8)` for one \
+                 just before the value",
+                what.trim_end_matches(']')
+            ),
+        )?),
+    };
     let mut cap: Option<usize> = None;
+    let mut prefix: Option<Scalar> = None;
     for (key, value) in keys {
         if key == "cap" {
             let lit: LitInt = syn::parse2(value)?;
             cap = Some(lit.base10_parse()?);
+        } else if key == "prefix" {
+            if let Some(by) = &by {
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!(
+                        "field `{name}`: {what} takes an expression or a `prefix`, not both. \
+                         A prefix is the {unit} itself, just before the value. A number that is \
+                         not, such as a count of words, is a `Stated<T>` field the expression \
+                         reads: `{}({by})]`",
+                        what.trim_end_matches(']'),
+                    ),
+                ));
+            }
+            prefix = Some(prefix_type(&value, name, what)?);
         } else if key == "scale" || key == "offset" {
-            return Err(moved_key(&key, name, what, Some(&by)));
+            return Err(moved_key(&key, name, what, by.as_ref()));
         } else {
             return Err(syn::Error::new(
                 key.span(),
-                format!("field `{name}`: expected `cap` after the expression"),
+                format!("field `{name}`: expected `cap` or `prefix` after the expression"),
             ));
         }
     }
-    Ok(if bytes { CountSpec::Window { by, cap } } else { CountSpec::Field { by, cap } })
+    Ok(match (by, prefix) {
+        (_, Some(repr)) => CountSpec::Prefix { repr, cap, bytes },
+        (Some(by), None) if bytes => CountSpec::Window { by, cap },
+        (Some(by), None) => CountSpec::Field { by, cap },
+        (None, None) => unreachable!("an expression is parsed unless a prefix is given"),
+    })
+}
+
+/// The integer of `prefix = T`: a whole-byte integer type.
+fn prefix_type(value: &proc_macro2::TokenStream, name: &str, what: &str) -> syn::Result<Scalar> {
+    let refused = || {
+        syn::Error::new(
+            value.span(),
+            format!(
+                "field `{name}`: {what}'s `prefix` is the integer type just before the value: \
+                 `u8`, `u16`, `u32`, `u64`, or a signed one"
+            ),
+        )
+    };
+    let ty: syn::Type = syn::parse2(value.clone()).map_err(|_| refused())?;
+    match crate::ty::scalar_of(&ty) {
+        Some(s @ (Scalar::U(8 | 16 | 32 | 64) | Scalar::I(8 | 16 | 32 | 64))) => Ok(s),
+        _ => Err(refused()),
+    }
 }
 
 fn parse_stride(attr: &syn::Attribute, name: &str) -> syn::Result<StrideSpec> {

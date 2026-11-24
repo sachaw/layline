@@ -186,7 +186,7 @@ pub(super) fn bits_parts(
         rows.push(row::SegmentDef {
             name: f.name.clone(),
             start,
-            span: span_of_kind(&f.kind),
+            span: span_of_kind(&f.kind, &f.name),
             when,
             decoded_by: match &f.kind {
                 Kind::Var { ty } => Some(ty.clone()),
@@ -275,8 +275,6 @@ pub(super) fn bits_parts(
                 #ok(())
             }
         }
-
-        #[automatically_derived]
         impl #name {
             #inherent
         }
@@ -311,7 +309,7 @@ fn bit_declared(m: &MessageDef) -> Result<Vec<(Field, BitPresence)>, Error> {
             }
             Segment::Opt { when, field } => {
                 let presence = match when.tests() {
-                    _ if matches!(when, Presence::Bit) => BitPresence::Present,
+                    _ if matches!(when, Presence::Prefix) => BitPresence::Present,
                     Some((flag, mask, set)) => BitPresence::Mask { field: flag.into(), mask, set },
                     None => {
                         return Err(Error::Refused(format!(

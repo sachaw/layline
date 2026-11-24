@@ -143,15 +143,15 @@ fn a_bit_flag_is_an_earlier_field_of_solved_width_that_is_always_there() {
 }
 
 #[test]
-fn present_outside_a_bits_message() {
+fn present_on_a_field_that_is_not_optional() {
     refused(
         r#"#[derive(Message)]
 pub struct Packet {
     pub flags: u8,
     #[present]
-    pub extra: Option<u16>,
+    pub extra: u16,
 }"#,
-        "`#[present]` needs a bit-addressed message",
+        "#[present] needs an `Option` field",
     );
 }
 

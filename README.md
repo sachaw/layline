@@ -66,12 +66,11 @@ type Crc16 = Crc<u16, 0x1021, 0xFFFF, 0x0000, false>;
 #[derive(Message, Debug, PartialEq)]
 pub struct Frame {
     #[magic(0xFE)] pub start: u8,
-    pub len: u8,
-    #[count(len)] pub payload: Vec<u8>,
-    #[checksum(Crc16, over = len..)] pub crc: u16,
+    #[count(prefix = u8)] pub payload: Vec<u8>,
+    #[checksum(Crc16, over = payload..)] pub crc: u16,
 }
 
-let frame = Frame { start: 0, len: 0, payload: vec![1, 2, 3], crc: 0 };
+let frame = Frame { start: 0, payload: vec![1, 2, 3], crc: 0 };
 let wire = frame.encode().unwrap();
 assert_eq!(wire[..5], [0xFE, 3, 1, 2, 3]);
 
@@ -81,6 +80,27 @@ assert!(long.encode().is_err());
 
 let (back, used) = Frame::decode(&wire).unwrap();
 assert_eq!((back.payload, used), (vec![1, 2, 3], wire.len()));
+```
+
+A length, count or presence flag just before its value is no field: `#[count(prefix = u8)]`,
+`#[len(prefix = u16)]` and `#[present]` say where it is. One elsewhere is a `Stated<T>` field in
+its place in wire order, which an attribute such as `#[count(n)]` writes. Encode writes it,
+decode reads it, and equality ignores it, so a decoded value equals the one built.
+
+```rust
+use layline::{Message, Stated};
+
+#[derive(Message, Debug, PartialEq, Default)]
+pub struct Batch {
+    pub n: Stated<u8>,
+    pub tag: u16,
+    #[count(n)] pub items: Vec<u16>,
+}
+
+let batch = Batch { tag: 7, items: vec![1, 2], ..Batch::default() };
+let wire = batch.encode().unwrap();
+assert_eq!(wire, [2, 7, 0, 1, 0, 2, 0]);
+assert_eq!(Batch::decode(&wire).unwrap().0, batch);
 ```
 
 `#[align(N)]` after a `#[len(n)]` field adds zero padding up to a multiple of `N` bytes that `n`

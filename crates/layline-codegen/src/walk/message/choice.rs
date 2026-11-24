@@ -312,8 +312,6 @@ fn lower_choice(
                 #ok(())
             }
         }
-
-        #[automatically_derived]
         impl #name {
             #inherent
         }

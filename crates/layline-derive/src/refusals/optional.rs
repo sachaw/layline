@@ -217,7 +217,7 @@ pub struct Packet {
     #[count(n)]
     pub items: Option<Vec<u8>>,
 }"#,
-        "field `items`: #[when(..)] cannot make a collection optional",
+        "field `items`: an optional collection states its own size in place",
     );
 }
 

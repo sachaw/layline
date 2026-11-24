@@ -96,7 +96,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                 unreachable!("a bit-addressed message is lowered by `lower_bits`")
             }
             Body::Fixed { kind, claims } => {
-                block.push(solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?);
+                let mut field = solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?;
+                field.framing = f.framing;
+                block.push(field);
             }
             Body::Value { kind, .. } => {
                 flush(&mut segments, &mut block);
@@ -113,7 +115,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     doc: None,
                 });
             }
-            Body::Repeat { element, count, at, assert, collection } => {
+            Body::Repeat { element, count, at, assert, collection, gate } => {
                 flush(&mut segments, &mut block);
                 if let Some(a) = assert {
                     checks.push(element_size_check(&f.name, a, &p.root));
@@ -146,9 +148,16 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                             Count::Window(Len::Until { terminator: *terminator })
                         }
                         CountSpec::Bytes(n) => Count::Window(Len::Bytes(*n)),
+                        CountSpec::Prefix { repr, cap, bytes: true } => {
+                            Count::Window(Len::Prefix { repr: *repr, cap: *cap })
+                        }
+                        CountSpec::Prefix { repr, cap, bytes: false } => {
+                            Count::Prefix { repr: *repr, cap: *cap }
+                        }
                     },
                     at: at.as_ref().map(|r| r.expr.clone()),
                     doc: None,
+                    when: gate.as_ref().map(Gate::presence),
                 });
             }
             Body::Placed { kind, at, absent, assert } => {
@@ -198,11 +207,14 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         SwitchWindow::Field { by, cap } => {
                             Some(Len::Field { by: by.expr.clone(), cap: *cap, align: None })
                         }
+                        SwitchWindow::Prefix { repr, cap } => {
+                            Some(Len::Prefix { repr: *repr, cap: *cap })
+                        }
                     },
                     doc: None,
                 });
             }
-            Body::Opt { when, kind, claims } => {
+            Body::Opt { when, present, kind, claims } => {
                 flush(&mut segments, &mut block);
                 if let Kind::Var { ty } = kind {
                     checks.push(var_codec_check(&f.name, ty, f.span, &p.root));
@@ -227,8 +239,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         &p.root,
                     ));
                 }
+                let otherwise = if *present { Presence::Prefix } else { Presence::Remaining };
                 segments.push(Segment::Opt {
-                    when: when.as_ref().map_or(Presence::Remaining, WhenSpec::presence),
+                    when: when.as_ref().map_or(otherwise, WhenSpec::presence),
                     field: solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?,
                 });
             }
@@ -341,10 +354,11 @@ fn referenced(p: &Parsed) -> Vec<&str> {
     let mut names: Vec<&str> = Vec::new();
     for f in &p.fields {
         match &f.body {
-            Body::Repeat { count, at, .. } => {
+            Body::Repeat { count, at, gate, .. } => {
                 values.extend(count.by());
                 values.extend(count.stride());
                 values.extend(at.as_ref());
+                values.extend(gate.as_ref().and_then(Gate::when).map(|w| &w.value));
             }
             Body::Placed { at, absent, .. } => {
                 values.push(at);

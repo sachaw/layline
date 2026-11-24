@@ -95,13 +95,14 @@ fn borrowed(segments: &[Segment], lifetime: bool) -> Result<(), Invalid> {
             (
                 _,
                 Count::Field { .. }
+                | Count::Prefix { .. }
                 | Count::Fill { .. }
-                | Count::Window(Len::Field { .. } | Len::Bytes(_)),
+                | Count::Window(Len::Field { .. } | Len::Bytes(_) | Len::Prefix { .. }),
             ) => {}
             _ => {
                 return no(
                     "a borrowed collection is sized before it is read: by a count, a length, \
-                     a fixed number of bytes, or the rest of the body",
+                     a prefix, a fixed number of bytes, or the rest of the body",
                 );
             }
         }
@@ -256,6 +257,22 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                             ),
                         ));
                     }
+                    if f.framing
+                        && !matches!(
+                            f.kind,
+                            Kind::Scalar(Scalar::U(_) | Scalar::I(_) | Scalar::ByteBool)
+                                | Kind::Codec { .. }
+                        )
+                    {
+                        return Err(Invalid::field(
+                            &f.name,
+                            format!(
+                                "framing is a number or a flag, and this is {}. \
+                                 Declare an integer or a `bool`",
+                                f.kind.describe()
+                            ),
+                        ));
+                    }
                     if let Some(stated) = f.stated {
                         stated_here(at, &f.name, stated)?;
                     }
@@ -269,6 +286,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     Kind::Var { .. } | Kind::Msg { .. } => {}
                     Kind::Text { len, .. } => match len {
                         Len::Field { by, .. } => expr::number(seen, by)?,
+                        Len::Prefix { repr, .. } => prefix(name, *repr)?,
                         Len::Bytes(_) | Len::Until { .. } => {}
                         Len::Fill => open_ended = Some("text(fill)"),
                     },
@@ -285,11 +303,17 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 stated_with(seen, kind)?;
                 seen.push(Known::field(name, kind));
             }
-            Segment::Repeat { name, element, count, at, .. } => {
+            Segment::Repeat { name, element, count, at, when, collection, .. } => {
                 kind_paths(name, element)?;
                 variable_element(name, element)?;
+                if let Some(when) = when {
+                    optional_collection(seen, name, when, count, at.is_some(), *collection)?;
+                }
                 match count {
                     Count::Field { by, .. } => expr::number(seen, by)?,
+                    Count::Prefix { repr, .. } | Count::Window(Len::Prefix { repr, .. }) => {
+                        prefix(name, *repr)?
+                    }
                     Count::Window(Len::Until { .. }) => {
                         if element.bits() != Some(8) {
                             return Err(Invalid::Other(format!(
@@ -434,6 +458,18 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                         }
                         expr::number(seen, by)?;
                     }
+                    Some(Len::Prefix { repr, .. }) => {
+                        if matches!(on, Discriminant::BodyLength) {
+                            return Err(Invalid::field(
+                                name,
+                                String::from(
+                                    "a switch on the body length cannot also take its size \
+                                     from a prefix. Switch on a field, or remove the window",
+                                ),
+                            ));
+                        }
+                        prefix(name, *repr)?;
+                    }
                     Some(other) => {
                         return Err(Invalid::field(
                             name,
@@ -453,15 +489,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     Presence::When(e) => {
                         expr::presence(seen, e).map_err(|why| in_field(&field.name, why))?
                     }
-                    Presence::Bit => {
-                        return Err(Invalid::field(
-                            &field.name,
-                            String::from(
-                                "a byte-addressed message has no inline presence bits. \
-                                 Test a flag field, or make this message bit-addressed",
-                            ),
-                        ));
-                    }
+                    Presence::Prefix => {}
                 }
                 match &field.kind {
                     Kind::Text { len: Len::Field { by: src, .. }, .. } => {
@@ -474,6 +502,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                         ));
                     }
                     Kind::Text { len: Len::Fill, .. } => open_ended = Some("optional text(fill)"),
+                    Kind::Text { len: Len::Prefix { repr, .. }, .. } => prefix(&field.name, *repr)?,
                     Kind::Text { len, .. } if !matches!(len, Len::Bytes(_) | Len::Until { .. }) => {
                         return Err(Invalid::field(
                             &field.name,
@@ -497,6 +526,82 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
         pos = advance(pos, seg.fixed_bits());
     }
     stampable(segments)?;
+    written(segments)
+}
+
+/// Refuses a framing field that no attribute writes, since encode would have nothing to put there.
+fn written(segments: &[Segment]) -> Result<(), Invalid> {
+    let derived = crate::derived::derivations(segments);
+    let framing = segments.iter().flat_map(|seg| match seg {
+        Segment::Block(fields) => fields.iter().filter(|f| f.framing).collect(),
+        _ => Vec::new(),
+    });
+    for f in framing {
+        if !derived.iter().any(|(field, _)| *field == f.name) {
+            return Err(Invalid::field(
+                &f.name,
+                String::from(
+                    "is `Stated`, and no attribute writes it, so encode has nothing to put there. \
+                     Read it in a `#[count]`, `#[len]`, `#[switch]`, `#[when]` or other attribute \
+                     encode can work back, or declare it a plain integer",
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a prefix that is not a whole-byte integer.
+fn prefix(name: &str, repr: Scalar) -> Result<(), Invalid> {
+    match repr {
+        Scalar::U(8 | 16 | 32 | 64) | Scalar::I(8 | 16 | 32 | 64) => Ok(()),
+        other => Err(Invalid::field(
+            name,
+            format!(
+                "a prefix is an integer of 8, 16, 32 or 64 bits, not {other:?}. \
+                 Declare one of those"
+            ),
+        )),
+    }
+}
+
+/// Refuses an optional collection that does not state its own size, or that sits at an offset.
+fn optional_collection(
+    seen: &Seen<'_>,
+    name: &str,
+    when: &Presence,
+    count: &Count,
+    placed: bool,
+    collection: Collection,
+) -> Result<(), Invalid> {
+    match when {
+        Presence::When(e) => expr::presence(seen, e).map_err(|why| in_field(name, why))?,
+        Presence::Prefix => {}
+        Presence::Remaining => {
+            return Err(Invalid::field(
+                name,
+                String::from(
+                    "an optional collection is present by a flag. \
+                     Test a flag field, or give it a presence prefix",
+                ),
+            ));
+        }
+    }
+    let sized = matches!(
+        count,
+        Count::Prefix { .. }
+            | Count::Terminated { .. }
+            | Count::Window(Len::Prefix { .. } | Len::Bytes(_) | Len::Until { .. })
+    );
+    if !sized || placed || collection.borrows() {
+        return Err(Invalid::field(
+            name,
+            String::from(
+                "an optional collection states its own size, in place: a prefix count or \
+                 length, a fixed length or a terminator, with no offset, and owns its elements",
+            ),
+        ));
+    }
     Ok(())
 }
 
@@ -507,6 +612,7 @@ fn variable_element(name: &str, element: &Kind) -> Result<(), Invalid> {
     };
     match len {
         Len::Bytes(_) | Len::Until { .. } => Ok(()),
+        Len::Prefix { repr, .. } => prefix(name, *repr),
         other => Err(Invalid::Other(format!(
             "collection `{name}`: text elements of {other:?} length have no end. \
              Give each a terminator or a fixed length",

@@ -166,6 +166,19 @@ pub enum Len {
         /// their own, of [`Span::Pad`](layline_core::table::Span::Pad).
         align: Option<u64>,
     },
+    /// An integer immediately before the value: adjacent framing, which is no field.
+    ///
+    /// Decode reads it and refuses a length past `cap`. Encode writes the value's length,
+    /// refusing one the integer cannot hold with `EncodeError::Unfit` and one past `cap` with
+    /// `EncodeError::OverCap`. The message's `SEGMENTS` give it a row of its own, named
+    /// `<field>.len`.
+    Prefix {
+        /// The integer: [`Scalar::U`] or [`Scalar::I`] of 8, 16, 32 or 64 bits, in the message's
+        /// byte order.
+        repr: Scalar,
+        /// The largest length allowed.
+        cap: Option<usize>,
+    },
     /// Up to and including the first `terminator` byte.
     Until {
         /// The byte that ends the value.
@@ -338,6 +351,14 @@ pub struct Field {
     /// The bits round-trip like any other field. Serde leaves a spare field out, under the same
     /// `cfg` as the module's serde derive.
     pub spare: bool,
+    /// Whether the field is framing: a number the wire states about other fields, away from
+    /// them, and that carries no information of its own. Its Rust type is
+    /// `layline::Stated<T>`.
+    ///
+    /// Encode writes it, so an attribute must: a [`Count`](crate::Count), [`Len`], offset,
+    /// stride, switch or presence test that works back to it. Decode reads it, and equality
+    /// ignores it. Only a byte-addressed message's integer or `bool` field in a block can be one.
+    pub framing: bool,
     /// The field's visibility, such as `pub(crate)`. `None` is `pub`.
     ///
     /// A field the generated type keeps in step with something else, such as a label that a
@@ -357,8 +378,15 @@ impl Field {
             magic: None,
             range: None,
             spare: false,
+            framing: false,
             visibility: None,
         }
+    }
+
+    /// Marks the field framing: its Rust type is `layline::Stated<T>`, and encode writes it.
+    #[must_use]
+    pub fn with_framing(self) -> Self {
+        Self { framing: true, ..self }
     }
 
     /// Marks the field spare: its bits carry no information.

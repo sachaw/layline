@@ -51,27 +51,39 @@ pub(super) fn derived_value(
             let arm = arm_ident(of);
             inverted(by, quote!(#arm), cap.map(|cap| (cap, of.as_str())), field, root)?
         }
-        Derived::Discriminant { of, field: held_field, by } => {
+        Derived::Discriminant { of, field: held_field, by, framing } => {
             let body = own.get(of);
-            let held = own.get(held_field);
             let chosen = inverted(by, quote!(__d), None, field, root)?;
+            // The open arm's discriminant is the field's own, and a framing field holds none.
+            let open = if *framing {
+                let err = root.prelude().err;
+                quote! { return #err(#root::EncodeError::Unstated { field: #held_field }) }
+            } else {
+                let held = own.get(held_field);
+                quote!(#root::WireInt::to_i64(&#held))
+            };
             quote! {
                 match #root::Choice::discriminant(&#body) {
                     #some(__d) => #chosen,
-                    #none => #root::WireInt::to_i64(&#held),
+                    #none => #open,
                 }
             }
         }
-        Derived::Flags { field, bits } => {
+        Derived::Flags { field, bits, framing } => {
             let held = own.get(field);
             let masks: Vec<TokenStream> = bits.iter().map(|(m, ..)| mask_tokens(m, root)).collect();
             let set = bits.iter().zip(&masks).map(|((_, of, set), mask)| {
                 let opt = own.get(of);
                 let marked = if *set { quote!(#opt.is_some()) } else { quote!(#opt.is_none()) };
-                quote!(| (if #marked { #mask } else { 0 }))
+                quote!((if #marked { #mask } else { 0 }))
             });
-            quote! {
-                (#root::WireInt::to_i64(&#held) & !(0 #(| #masks)*)) #(#set)*
+            // A framing word holds no other bits, so it is the masks alone.
+            if *framing {
+                quote!(#(#set)|*)
+            } else {
+                quote! {
+                    (#root::WireInt::to_i64(&#held) & !(#(#masks)|*)) #(| #set)*
+                }
             }
         }
         Derived::Presence { of, .. } => {
@@ -87,7 +99,7 @@ pub(super) fn derived_value(
 }
 
 /// A presence mask, a literal or a constant, as an `i64`.
-fn mask_tokens(mask: &Expr, root: &Root) -> TokenStream {
+pub(super) fn mask_tokens(mask: &Expr, root: &Root) -> TokenStream {
     match (mask.fold(), mask) {
         (Some(n), _) => {
             let n = Literal::i64_unsuffixed(n);

@@ -17,7 +17,7 @@ fn a_bit_addressed_message_takes_bit_fields_and_inline_presence_bits() {
     assert_eq!(validate_message(&bits_msg(Vec::new())), Ok(()));
     assert_eq!(
         validate_message(&bits_msg(vec![Segment::opt(
-            Presence::Bit,
+            Presence::Prefix,
             field("origin", Kind::Scalar(Scalar::U(12))),
         )])),
         Ok(())
@@ -136,7 +136,7 @@ fn a_bit_addressed_message_refuses_a_flag_it_cannot_write_the_presence_bits_back
         ),
         (
             vec![
-                Segment::opt(Presence::Bit, field("absent", Kind::Scalar(Scalar::U(4)))),
+                Segment::opt(Presence::Prefix, field("absent", Kind::Scalar(Scalar::U(4)))),
                 Segment::opt(
                     Presence::When(Expr::binary(
                         layline_codegen::Op::BitAnd,
@@ -232,19 +232,15 @@ fn a_bit_addressed_message_refuses_a_flag_it_cannot_write_the_presence_bits_back
 }
 
 #[test]
-fn an_inline_presence_bit_is_refused_in_a_byte_addressed_message() {
+fn a_presence_prefix_in_a_byte_addressed_message_is_a_flag_byte() {
     let m = msg(
         "Packet",
         vec![
             Segment::block(vec![field("flags", Kind::Scalar(Scalar::U(8)))]),
-            Segment::opt(Presence::Bit, field("extra", Kind::Scalar(Scalar::U(16)))),
+            Segment::opt(Presence::Prefix, field("extra", Kind::Scalar(Scalar::U(16)))),
         ],
     );
-    let why = validate_message(&m);
-    assert!(
-        matches!(&why, Err(Invalid::Field { why, .. }) if why.contains("byte-addressed message")),
-        "{why:?}"
-    );
+    assert_eq!(validate_message(&m), Ok(()));
 }
 
 #[test]

@@ -31,10 +31,14 @@ pub(super) fn reference_site<'a>(
         }
         let found = |v: Option<&'a Value>| v.and_then(|v| v.find(target));
         let site = match &f.body {
-            Body::Repeat { count, at, .. } => found(count.by())
+            Body::Repeat { count, at, gate, .. } => found(count.by())
                 .map(|r| (r, count.spelling()))
                 .or_else(|| found(count.stride()).map(|r| (r, "#[stride]")))
-                .or_else(|| found(at.as_ref()).map(|r| (r, "#[seek]"))),
+                .or_else(|| found(at.as_ref()).map(|r| (r, "#[seek]")))
+                .or_else(|| {
+                    found(gate.as_ref().and_then(Gate::when).map(|w| &w.value))
+                        .map(|r| (r, "#[when]"))
+                }),
             Body::Placed { at, absent, .. } => {
                 found(Some(at)).map(|r| (r, "#[seek]")).or_else(|| match absent {
                     Some(PlacedAbsence::ZeroLength(by)) if by.name == target => {

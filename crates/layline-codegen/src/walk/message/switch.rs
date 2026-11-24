@@ -7,6 +7,7 @@ use super::Check;
 use super::body::{Bind, Item, Own, Walk};
 use super::cursor::windowed;
 use super::eval::number;
+use super::prefix::Prefix;
 use super::recursion::bounded_check;
 use super::table::Row;
 use crate::root::Prelude;
@@ -51,8 +52,13 @@ impl Walk<'_> {
         let d = doc_attr(doc);
         self.public_fields.extend(quote! { #d pub #ident: #cty, });
         self.binds.push(Bind { name: ident.clone(), ty: quote!(#cty), value: quote!(#ident) });
+        let prefix = window.as_ref().and_then(Prefix::of_len);
         let span = match window {
             None => row::Span::Chosen { on: row::On::of(on) },
+            Some(Len::Prefix { .. }) => row::Span::ChosenWithin {
+                on: row::On::of(on),
+                by: row::By::named(&format!("{field}.len")),
+            },
             Some(Len::Bytes(n)) => row::Span::ChosenIn { on: row::On::of(on), bits: *n as u64 * 8 },
             Some(Len::Field { by, .. }) => {
                 row::Span::ChosenWithin { on: row::On::of(on), by: row::By::of(by) }
@@ -64,6 +70,11 @@ impl Walk<'_> {
                 )));
             }
         };
+        let prefix_row = prefix.map(|p| p.row_name(field));
+        if let (Some(p), Some(name)) = (prefix, &prefix_row) {
+            self.rows.push(p.row(name));
+            self.rows.advance(Some(p.repr.bits()));
+        }
         self.rows.push(Row::new(field, span).decoded_by(Some(choice)));
 
         let disc = match on {
@@ -90,13 +101,17 @@ impl Walk<'_> {
                 __at += __used;
             }),
             Some(len) => {
-                let bound = self.window_len(len, "switch", field)?;
+                let bound = match prefix {
+                    Some(p) => p.read(field, root),
+                    None => self.window_len(len, "switch", field)?,
+                };
                 let arm = quote! {
                     let (__e, __used) =
                         <#cty as #root::Choice>::decode_with_nested(#disc, __body, __depth)?;
                     __at += __used;
                 };
-                let window = windowed(field, matches!(len, Len::Field { .. }), arm, root);
+                let stated = matches!(len, Len::Field { .. } | Len::Prefix { .. });
+                let window = windowed(field, stated, arm, root);
                 self.parse_steps.extend(quote! {
                     #bound
                     #window
@@ -144,9 +159,15 @@ impl Walk<'_> {
                 agree.extend(self.agree(own, field, quote!(out.len() - __chosen), by)?);
             }
         }
+        let (reserve, stamp) = match prefix {
+            Some(p) => p.reserve(field, root),
+            None => (quote!(), quote!()),
+        };
         self.byte_steps.extend(quote! {
+            #reserve
             let __chosen = out.len();
             #root::Choice::encode_into(&#held, out)?;
+            #stamp
             #filled
             #agree
             if #root::Choice::discriminant(&#held).is_none() {

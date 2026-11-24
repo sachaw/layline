@@ -126,6 +126,11 @@ impl By {
     pub(crate) fn of(e: &Expr) -> Self {
         affine(e).unwrap_or_else(|| By { field: spelled(e), scale: 1, offset: 0 })
     }
+
+    /// The number in the row `name`, unscaled.
+    pub(crate) fn named(name: &str) -> Self {
+        By { field: String::from(name), scale: 1, offset: 0 }
+    }
 }
 
 /// `e` as `field * scale + offset`, with a positive scale, if it is one.

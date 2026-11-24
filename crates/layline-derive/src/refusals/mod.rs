@@ -8,6 +8,7 @@ mod checksum;
 mod codec;
 mod dispatch;
 mod expressions;
+mod framing;
 mod layout;
 mod message;
 mod needs;

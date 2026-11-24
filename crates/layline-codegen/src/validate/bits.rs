@@ -38,7 +38,7 @@ pub(super) fn validate_bits(msg: &MessageDef) -> Result<(), Invalid> {
             Segment::Opt { when, field } => {
                 bit_field(field, true)?;
                 match when.tests() {
-                    _ if matches!(when, Presence::Bit) => {}
+                    _ if matches!(when, Presence::Prefix) => {}
                     Some((flag, mask, _)) => {
                         bit_flag(&seen, &field.name, flag)?;
                         if when.reads_flag() {
@@ -111,6 +111,15 @@ fn segment_word(seg: &Segment) -> &'static str {
 /// `alone` is true for a segment of its own, which may be a `#[var]` value.
 fn bit_field(f: &Field, alone: bool) -> Result<(), Invalid> {
     field_names(f)?;
+    if f.framing {
+        return Err(Invalid::field(
+            &f.name,
+            String::from(
+                "a bit-addressed message writes no framing. Declare a plain field, or make the \
+                 message byte-addressed",
+            ),
+        ));
+    }
     if alone && matches!(f.kind, Kind::Var { .. }) {
         return Ok(());
     }

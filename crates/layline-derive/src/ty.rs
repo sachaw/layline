@@ -113,6 +113,11 @@ pub(crate) fn option_element(ty: &Type) -> Option<&Type> {
     wrapped(ty, "Option")
 }
 
+/// The `T` of `Stated<T>` or `layline::Stated<T>`: a framing field.
+pub(crate) fn stated_element(ty: &Type) -> Option<&Type> {
+    wrapped(ty, "Stated")
+}
+
 pub(crate) fn vec_element(ty: &Type) -> Option<&Type> {
     wrapped(ty, "Vec")
 }

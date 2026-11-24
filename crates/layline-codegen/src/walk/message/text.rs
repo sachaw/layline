@@ -3,6 +3,7 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 
+use super::prefix::Prefix;
 use crate::root::Prelude;
 use crate::walk::path;
 use crate::{Len, Root};
@@ -76,10 +77,15 @@ pub(super) fn text_write(
                 quote! { out.pad(__mark + #lit - out.len())?; },
             )
         }
-        Len::Field { .. } | Len::Fill => (quote!(), quote!()),
+        Len::Field { .. } | Len::Fill | Len::Prefix { .. } => (quote!(), quote!()),
+    };
+    let (reserve, stamp) = match Prefix::of_len(len) {
+        Some(p) => p.reserve(field, root),
+        None => (quote!(), quote!()),
     };
     quote! {
         {
+            #reserve
             let __mark = out.len();
             for __c in #value.chars() {
                 <#codec as #root::__private::TextCodec>::encode_char(__c, &mut *out)?;
@@ -87,6 +93,7 @@ pub(super) fn text_write(
             let __text = &out.written()[__mark..];
             #refuse
             #close
+            #stamp
         }
     }
 }

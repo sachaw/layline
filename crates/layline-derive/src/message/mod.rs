@@ -85,6 +85,8 @@ struct MsgField {
     align: Option<(u64, Span)>,
     /// `#[valid(..)]`: a condition the value must satisfy.
     valid: Option<Value>,
+    /// Whether the type is `Stated<T>`: framing encode writes.
+    framing: bool,
 }
 
 enum Body {
@@ -104,6 +106,8 @@ enum Body {
         /// Checks `#[bytes(N)]` against a nested element's size.
         assert: Option<Box<ElementSize>>,
         collection: Collection,
+        /// When an `Option` of the collection is present.
+        gate: Option<Gate>,
     },
     /// `#[seek(f)]`: one record at the byte offset in an earlier field.
     Placed {
@@ -143,11 +147,37 @@ enum Body {
     },
     /// An optional value: `#[when(flags & 0x01)] x: Option<T>`.
     Opt {
-        /// `None`: present when bytes remain.
+        /// `None`: present when bytes remain, or with `present`, when its flag is set.
         when: Option<WhenSpec>,
+        /// `#[present]`: a flag byte just before the value.
+        present: bool,
         kind: Kind,
         claims: Claims,
     },
+}
+
+/// What makes an optional collection present.
+enum Gate {
+    /// `#[present]`: a flag byte just before it.
+    Present,
+    /// `#[when(..)]`.
+    When(WhenSpec),
+}
+
+impl Gate {
+    fn presence(&self) -> layline_codegen::Presence {
+        match self {
+            Gate::Present => layline_codegen::Presence::Prefix,
+            Gate::When(when) => when.presence(),
+        }
+    }
+
+    fn when(&self) -> Option<&WhenSpec> {
+        match self {
+            Gate::Present => None,
+            Gate::When(when) => Some(when),
+        }
+    }
 }
 
 /// The presence test of a bit-addressed field.
@@ -214,13 +244,15 @@ enum SwitchWindow {
     Fixed(usize),
     /// `#[len(g)]`: read from earlier fields.
     Field { by: Value, cap: Option<usize> },
+    /// `#[len(prefix = T)]`: an integer just before the arm.
+    Prefix { repr: Scalar, cap: Option<usize> },
 }
 
 impl SwitchWindow {
     fn field(&self) -> Option<&Value> {
         match self {
             Self::Field { by, .. } => Some(by),
-            Self::Open | Self::Fixed(_) => None,
+            Self::Open | Self::Fixed(_) | Self::Prefix { .. } => None,
         }
     }
 }
@@ -261,6 +293,7 @@ fn sometimes_absent(body: &Body) -> bool {
         Body::Opt { .. }
             | Body::Placed { absent: Some(_), .. }
             | Body::Bits { absent: Some(_), .. }
+            | Body::Repeat { gate: Some(_), .. }
     )
 }
 
@@ -294,6 +327,13 @@ enum CountSpec {
     },
     /// `#[bytes(N)]` on a borrowed run, or the `N` of `&'a [u8; N]`: exactly `N` bytes.
     Bytes(usize),
+    /// `#[count(prefix = T)]` or `#[len(prefix = T)]`: an integer just before the value.
+    Prefix {
+        repr: Scalar,
+        cap: Option<usize>,
+        /// Whether it counts bytes, `#[len]`, rather than elements.
+        bytes: bool,
+    },
 }
 
 impl CountSpec {
@@ -304,7 +344,17 @@ impl CountSpec {
             Self::Fill { .. } => "#[fill]",
             Self::Terminated { .. } | Self::Until { .. } => "#[until]",
             Self::Bytes(_) => "#[bytes]",
+            Self::Prefix { bytes: true, .. } => "#[len]",
+            Self::Prefix { bytes: false, .. } => "#[count]",
         }
+    }
+
+    /// Whether the collection states its own size in place, as an optional one must.
+    fn in_place(&self) -> bool {
+        matches!(
+            self,
+            Self::Prefix { .. } | Self::Terminated { .. } | Self::Until { .. } | Self::Bytes(_)
+        )
     }
 
     fn open_ended(&self) -> bool {
@@ -316,15 +366,18 @@ impl CountSpec {
                 | Self::Terminated { .. }
                 | Self::Until { .. }
                 | Self::Bytes(_)
+                | Self::Prefix { .. }
         )
     }
 
     fn by(&self) -> Option<&Value> {
         match self {
             Self::Field { by, .. } | Self::Window { by, .. } | Self::Strided { by, .. } => Some(by),
-            Self::Fill { .. } | Self::Terminated { .. } | Self::Until { .. } | Self::Bytes(_) => {
-                None
-            }
+            Self::Fill { .. }
+            | Self::Terminated { .. }
+            | Self::Until { .. }
+            | Self::Bytes(_)
+            | Self::Prefix { .. } => None,
         }
     }
 
@@ -520,6 +573,8 @@ struct FieldAttrs {
     align: Option<(u64, Span)>,
     /// `#[valid(..)]`: a condition the value must satisfy.
     valid: Option<Value>,
+    /// `#[present]`: a flag just before an `Option<T>`.
+    present: Option<Span>,
 }
 
 enum KindWord {

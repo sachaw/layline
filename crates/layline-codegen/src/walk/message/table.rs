@@ -280,27 +280,31 @@ fn opt_u64(value: Option<u64>, root: &Root) -> TokenStream {
     }
 }
 
-fn span_of_len(len: &Len) -> row::Span {
+fn span_of_len(len: &Len, field: &str) -> row::Span {
     match len {
         Len::Bytes(n) => row::Span::Fixed(*n as u64 * 8),
         Len::Field { by, .. } => row::Span::Window { by: By::of(by) },
+        Len::Prefix { .. } => row::Span::Window { by: By::named(&format!("{field}.len")) },
         Len::Until { terminator } => row::Span::Until { terminator: *terminator },
         Len::Fill => row::Span::Fill { cap: None },
     }
 }
 
-/// The span of one value of `kind`.
-pub(super) fn span_of_kind(kind: &Kind) -> row::Span {
+/// The span of one value of `kind`, the field `field`.
+pub(super) fn span_of_kind(kind: &Kind, field: &str) -> row::Span {
     match kind {
         Kind::Var { .. } | Kind::Msg { .. } => row::Span::SelfDelimiting,
-        Kind::Text { len, .. } => span_of_len(len),
+        Kind::Text { len, .. } => span_of_len(len, field),
         other => row::Span::Fixed(other.width()),
     }
 }
 
-/// The span of a collection counted by `count`, with elements `each` bits wide if fixed.
-pub(super) fn span_of_count(count: &Count, each: Option<u64>) -> row::Span {
+/// The span of the collection `field` counted by `count`, with elements `each` bits wide if fixed.
+pub(super) fn span_of_count(count: &Count, each: Option<u64>, field: &str) -> row::Span {
     match count {
+        Count::Prefix { .. } => {
+            row::Span::Counted { by: By::named(&format!("{field}.count")), each }
+        }
         Count::Field { by: Expr::Binary(Op::Mul, a, b), .. } if a == b => {
             row::Span::Squared { by: By::of(a), each }
         }
@@ -308,7 +312,7 @@ pub(super) fn span_of_count(count: &Count, each: Option<u64>) -> row::Span {
         Count::Strided { by, stride, .. } => {
             row::Span::Strided { by: By::of(by), stride: By::of(stride) }
         }
-        Count::Window(len) => span_of_len(len),
+        Count::Window(len) => span_of_len(len, field),
         Count::Terminated { mask } => row::Span::Terminated { mask: *mask },
         Count::Fill { cap } => {
             row::Span::Fill { cap: cap.and_then(|c| each.map(|bits| c as u64 * bits)) }

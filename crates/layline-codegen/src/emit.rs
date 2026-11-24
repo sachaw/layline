@@ -330,6 +330,7 @@ mod tests {
                             Segment::Repeat {
                                 stated: None,
                                 collection: Collection::Vec,
+                                when: None,
                                 name: "tail".into(),
                                 doc: None,
                                 element: Kind::Scalar(Scalar::U(8)),
@@ -425,6 +426,7 @@ mod tests {
                     Segment::Repeat {
                         stated: None,
                         collection: Collection::Vec,
+                        when: None,
                         name: "items".into(),
                         element: Kind::Scalar(Scalar::U(8)),
                         count: Count::Field { by: Expr::name("crc"), cap: None },
@@ -481,6 +483,7 @@ mod tests {
             &msg(Segment::Repeat {
                 stated: None,
                 collection: Collection::Vec,
+                when: None,
                 name: "items".into(),
                 element: Kind::Scalar(Scalar::U(8)),
                 count: Count::Field { by: Expr::name("head.on"), cap: None },

@@ -275,7 +275,7 @@ fn coverage_range(over: &Coverage) -> TokenStream {
 
 /// One field declaration, with its docs, width attribute, `#[at]` position and value checks.
 pub fn emit_field(f: &Field, bit_addressed: bool, root: &Root, skip: &TokenStream) -> TokenStream {
-    let Field { name, kind, doc, stated, magic: _, range: _, spare, visibility } = f;
+    let Field { name, kind, doc, stated, magic: _, range: _, spare, framing: _, visibility } = f;
     let skip = spare.then(|| skip.clone());
     let name = ident(name);
     let doc = doc_attr(doc);
@@ -344,7 +344,17 @@ pub(crate) fn hidden_block(
 ///
 /// `#[at]` counts from the start of the record, but a block can start partway through it.
 pub(crate) fn block_field(f: &Field, root: &Root) -> TokenStream {
-    let Field { name, kind, doc: _, stated: _, magic: _, range: _, spare: _, visibility: _ } = f;
+    let Field {
+        name,
+        kind,
+        doc: _,
+        stated: _,
+        magic: _,
+        range: _,
+        spare: _,
+        framing: _,
+        visibility: _,
+    } = f;
     let name = ident(name);
     let attrs = field_attrs(kind, false);
     let asserts = assert_attr(f);
@@ -362,11 +372,13 @@ pub fn emit_message_field(
     skip: &TokenStream,
 ) -> TokenStream {
     let Prelude { option, .. } = root.prelude();
-    let Field { name, kind, doc, stated: _, magic: _, range: _, spare, visibility } = f;
-    let skip = spare.then(|| skip.clone());
+    let Field { name, kind, doc, stated: _, magic: _, range: _, spare, framing, visibility } = f;
+    // Framing carries no information, as a spare field carries none.
+    let skip = (*spare || *framing).then(|| skip.clone());
     let name = ident(name);
     let doc = doc_attr(doc);
     let ty = kind_ty(kind, root);
+    let ty = if *framing { quote!(#root::Stated<#ty>) } else { ty };
     let ty = if optional { quote!(#option<#ty>) } else { ty };
     let vis = visibility_tokens(visibility);
     quote! { #doc #skip #vis #name: #ty, }

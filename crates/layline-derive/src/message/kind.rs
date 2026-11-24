@@ -79,6 +79,7 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
             at: None,
             assert: None,
             collection: Collection::Vec,
+            gate: None,
         });
     }
 
@@ -117,6 +118,18 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
     let (len, len_ref) = match (count, until, bytes) {
         (Some((CountSpec::Window { by, cap }, _)), _, _) => {
             (Len::Field { by: by.expr.clone(), cap, align: None }, Some(by))
+        }
+        (Some((CountSpec::Prefix { repr, cap, bytes: true }, _)), _, _) => {
+            (Len::Prefix { repr, cap }, None)
+        }
+        (Some((CountSpec::Prefix { bytes: false, .. }, cspan)), _, _) => {
+            return Err(syn::Error::new(
+                cspan,
+                format!(
+                    "field `{name}`: #[count] does not apply to a string. \
+                     Write `#[len(prefix = ..)]` for its size in bytes",
+                ),
+            ));
         }
         (Some((CountSpec::Field { by, .. }, cspan)), _, _) => {
             return Err(syn::Error::new(
@@ -221,9 +234,14 @@ pub(super) fn var_field(
 
     let kind = Kind::Var { ty: crate::attr::spelled(ty) };
     match (elem, count) {
-        (Some(_), Some((count, _))) => {
-            Ok(Body::Repeat { element: kind, count, at, assert: None, collection: Collection::Vec })
-        }
+        (Some(_), Some((count, _))) => Ok(Body::Repeat {
+            element: kind,
+            count,
+            at,
+            assert: None,
+            collection: Collection::Vec,
+            gate: None,
+        }),
         (Some(_), None) => Err(syn::Error::new(
             span,
             format!("field `{name}`: a `Vec` needs a count. Add one of {REPEAT_ATTRS}"),
@@ -298,9 +316,14 @@ pub(super) fn message_field(
     let with: Vec<String> = with.into_iter().map(|r| r.name).collect();
     let kind = Kind::Msg { ty: crate::attr::spelled(ty), boxed, with };
     match (elem, count) {
-        (Some(_), Some((count, _))) => {
-            Ok(Body::Repeat { element: kind, count, at, assert: None, collection: Collection::Vec })
-        }
+        (Some(_), Some((count, _))) => Ok(Body::Repeat {
+            element: kind,
+            count,
+            at,
+            assert: None,
+            collection: Collection::Vec,
+            gate: None,
+        }),
         (Some(_), None) => Err(syn::Error::new(
             span,
             format!(

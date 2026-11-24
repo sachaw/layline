@@ -11,6 +11,7 @@ mod eval;
 mod opt;
 mod patch;
 mod placed;
+mod prefix;
 mod recursion;
 mod refuse;
 mod repeat;
@@ -241,8 +242,6 @@ fn lower_message(
                     #encode
                 }
             }
-
-            #[automatically_derived]
             impl<#lifetime> #name<#lifetime> {
                 #inherent_ref
             }
@@ -285,8 +284,6 @@ fn lower_message(
                 #encode
             }
         }
-
-        #[automatically_derived]
         impl #name {
             #inherent
         }
@@ -311,10 +308,14 @@ pub(super) fn inherent_encodes(
     let vec = quote!(#root::__private::Vec<::core::primitive::u8>);
     let (into, _) = refuse::signatures(fallible, &quote!(()), root);
     let (_, bytes) = refuse::signatures(fallible, &vec, root);
-    let fin =
-        quote!(<#root::__private::Fallibility<{ #fallible }> as #root::__private::Buffers>::finish);
+    // A literal needs no braces, and emitted source would warn on them.
+    let known = match refuse::known(fallible) {
+        Some(_) => fallible.clone(),
+        None => quote!({ #fallible }),
+    };
+    let fin = quote!(<#root::__private::Fallibility<#known> as #root::__private::Buffers>::finish);
     let fin_vec = quote! {
-        <#root::__private::Fallibility<{ #fallible }> as #root::__private::Encodes<#vec>>::finish
+        <#root::__private::Fallibility<#known> as #root::__private::Encodes<#vec>>::finish
     };
     let errors = match refuse::known(fallible) {
         Some(false) => "# Errors\n\n`Overflow` if `out` has no room.",
@@ -437,7 +438,6 @@ fn held_order(
     let (be, le) = (quote!(#root::__private::Be), quote!(#root::__private::Le));
     let order = quote!(#root::__private::ByteOrder);
     let held = quote! {
-        #[automatically_derived]
         impl #name {
             /// Decode in the byte order `__O`.
             #[doc(hidden)]

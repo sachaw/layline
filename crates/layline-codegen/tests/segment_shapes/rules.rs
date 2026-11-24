@@ -284,6 +284,7 @@ fn a_run_the_wire_places_may_not_state_a_literal_window() {
                 Segment::Repeat {
                     stated: None,
                     collection: Collection::Vec,
+                    when: None,
                     name: "tables".into(),
                     element: Kind::Nested { ty: "Table".into(), bytes: 8 },
                     count: Count::Window(Len::Bytes(16)),

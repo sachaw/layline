@@ -14,6 +14,7 @@
 
 extern crate alloc;
 
+mod derived;
 mod model;
 mod validate;
 #[cfg(feature = "walk")]
