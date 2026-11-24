@@ -25,6 +25,14 @@ fn fixed_block() {
     assert_eq!(validate_message(&as_message(&layout)), Ok(()));
 }
 
+/// A message that only marks a state, such as a ready frame, is no bytes.
+#[test]
+fn a_message_with_no_fields() {
+    let ready = msg("Ready", Vec::new());
+    assert_eq!(validate_message(&ready), Ok(()));
+    assert_eq!(validate_message(&msg("Ready", vec![Segment::block(Vec::new())])), Ok(()));
+}
+
 #[test]
 fn constant_count_nested_array() {
     let layout = LayoutDef::new(

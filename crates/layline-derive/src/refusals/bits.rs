@@ -209,7 +209,8 @@ fn a_bits_message_with_no_fields() {
         r#"#[derive(Message)]
 #[message(bits)]
 pub struct Header {}"#,
-        "a message must have at least one field",
+        "a bit-addressed message needs at least one field. Declare a field, or remove the bit \
+         addressing",
     );
 }
 

@@ -467,23 +467,22 @@ fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
             ),
         ));
     };
-    let Fields::Named(named) = &data.fields else {
-        return Err(syn::Error::new(
-            input.ident.span(),
-            format!("`{}`: #[derive(Message)] requires named fields", input.ident),
-        ));
+    // A unit struct is a message with no fields: `Ready {}` builds it too.
+    let named = match &data.fields {
+        Fields::Named(named) => &named.named,
+        Fields::Unit => &syn::punctuated::Punctuated::new(),
+        Fields::Unnamed(_) => {
+            return Err(syn::Error::new(
+                input.ident.span(),
+                format!("`{}`: #[derive(Message)] requires named fields", input.ident),
+            ));
+        }
     };
-    if named.named.is_empty() {
-        return Err(syn::Error::new(
-            input.ident.span(),
-            format!("`{}`: a message must have at least one field", input.ident),
-        ));
-    }
 
     let bits = bits.map(|(order, _)| order);
     let fields = match bits {
-        Some(_) => named.named.iter().map(bit_field).collect::<syn::Result<Vec<_>>>()?,
-        None => named.named.iter().map(msg_field).collect::<syn::Result<Vec<_>>>()?,
+        Some(_) => named.iter().map(bit_field).collect::<syn::Result<Vec<_>>>()?,
+        None => named.iter().map(msg_field).collect::<syn::Result<Vec<_>>>()?,
     };
     let needs = needs.map(|(params, _)| params).unwrap_or_default();
     if let Some(p) = &endian_from {

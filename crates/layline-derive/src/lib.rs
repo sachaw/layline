@@ -233,7 +233,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// Consecutive plain fields become a hidden `#[derive(Layout)]` struct. Encode fills in count,
 /// length, offset, discriminant and flag fields from the fields they describe. In a byte-mode
-/// message a `bool` is one strict byte, as in a `bytes = N` layout.
+/// message a `bool` is one strict byte, as in a `bytes = N` layout. A struct with no fields,
+/// `struct Ready {}` or `struct Ready;`, is a message of no bytes, such as a frame whose selector
+/// alone says what happened.
 ///
 /// # Container attributes
 ///

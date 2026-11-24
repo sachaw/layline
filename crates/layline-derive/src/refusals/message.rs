@@ -805,6 +805,17 @@ pub struct Chunk<'a> {
 }
 
 #[test]
+fn a_tuple_struct_has_no_field_names() {
+    refused(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Pair(u8, u8);"#,
+        "`Pair`: #[derive(Message)] requires named fields",
+    );
+}
+
+#[test]
 fn a_borrowing_message_takes_no_parameters() {
     refused(
         r#"use layline::Message;
