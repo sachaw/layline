@@ -111,7 +111,7 @@ fn a_ranged_length_outside_its_range_is_refused() {
 #[message(needs(with_bounds: u16))]
 pub struct Cell {
     pub obj: u16,
-    #[count(with_bounds, scale = 4)]
+    #[count(with_bounds * 4)]
     pub bounds: Vec<i16>,
 }
 

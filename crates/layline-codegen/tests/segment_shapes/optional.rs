@@ -41,7 +41,7 @@ fn an_optional_field_binds_no_name() {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: By::field("n"), cap: None },
+                Count::Field { by: Expr::name("n"), cap: None },
                 None,
                 Collection::Vec,
             ),
@@ -53,7 +53,7 @@ fn an_optional_field_binds_no_name() {
 #[test]
 fn a_bare_flag_must_name_an_earlier_bool() {
     let flag = |target: &str| Segment::Opt {
-        when: Presence::Flag { field: target.into() },
+        when: Presence::When(Expr::name(target)),
         field: field("x", Kind::Scalar(Scalar::U(8))),
     };
 
@@ -99,7 +99,7 @@ fn a_bool_answers_only_the_presence_question() {
         vec![
             block(),
             Segment::Opt {
-                when: Presence::Flag { field: "urgent".into() },
+                when: Presence::When(Expr::name("urgent")),
                 field: field("deadline", Kind::Scalar(Scalar::U(16))),
             },
         ],
@@ -113,7 +113,7 @@ fn a_bool_answers_only_the_presence_question() {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: By::field("urgent"), cap: None },
+                Count::Field { by: Expr::name("urgent"), cap: None },
                 None,
                 Collection::Vec,
             ),
@@ -159,7 +159,7 @@ fn an_optional_string_delimits_itself() {
                 field(
                     "s",
                     Kind::Text {
-                        len: Len::Field { by: By::field("n"), cap: None, align: None },
+                        len: Len::Field { by: Expr::name("n"), cap: None, align: None },
                         codec: None,
                     },
                 ),
@@ -193,14 +193,23 @@ fn a_cleared_test_reads_what_its_set_twin_reads() {
         msg("Node", vec![number(), Segment::opt(when, field("x", Kind::Scalar(Scalar::U(8))))])
     };
     assert_eq!(
-        validate_message(&cleared(Presence::MaskClear { field: "flag".into(), mask: 0x4 })),
+        validate_message(&cleared(Presence::When(Expr::binary(
+            layline_codegen::Op::Eq,
+            Expr::binary(layline_codegen::Op::BitAnd, Expr::name("flag"), Expr::int(0x4)),
+            Expr::int(0)
+        )))),
         Ok(())
     );
     assert!(
-        validate_message(&cleared(Presence::MaskClear { field: "flag".into(), mask: 0 })).is_err()
+        validate_message(&cleared(Presence::When(Expr::binary(
+            layline_codegen::Op::Eq,
+            Expr::binary(layline_codegen::Op::BitAnd, Expr::name("flag"), Expr::int(0)),
+            Expr::int(0)
+        ))))
+        .is_err()
     );
     assert_eq!(
-        validate_message(&cleared(Presence::FlagClear { field: "flag".into() })),
+        validate_message(&cleared(Presence::When(!Expr::name("flag")))),
         Err(Invalid::NotAFlagReference("flag".into()))
     );
 }

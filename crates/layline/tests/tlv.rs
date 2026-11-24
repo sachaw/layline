@@ -244,7 +244,7 @@ fn scale_offset_and_cap_apply_to_the_window() {
         #[var]
         words: Uleb128,
         #[switch(tag)]
-        #[len(words, scale = 2, offset = 2, cap = 8)]
+        #[len(words * 2 + 2, cap = 8)]
         value: Value,
     }
 

@@ -119,7 +119,7 @@ mod stated_exactly {
     #[derive(Debug, Clone, PartialEq, Message)]
     struct Paired {
         n: u8,
-        #[count(n, scale = 2)]
+        #[count(n * 2)]
         items: Vec<u8>,
     }
 
@@ -143,7 +143,7 @@ mod stated_exactly {
     struct Words {
         words: u8,
         #[text]
-        #[len(words, scale = 2, cap = 4)]
+        #[len(words * 2, cap = 4)]
         name: String,
     }
 
@@ -166,7 +166,7 @@ mod stated_exactly {
     #[derive(Debug, Clone, PartialEq, Message)]
     struct Spanned {
         words: u8,
-        #[len(words, scale = 2)]
+        #[len(words * 2)]
         bytes: Vec<u8>,
     }
 

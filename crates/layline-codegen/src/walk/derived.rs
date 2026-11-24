@@ -1,58 +1,52 @@
 //! Wire fields that encode computes instead of taking from the caller.
+//!
+//! An attribute's expression derives a field when it is invertible in the one field it reads:
+//! encode works the number back to that field. Any other expression derives nothing, and encode
+//! checks it instead.
 
-use crate::{Absence, Count, Coverage, Discriminant, Kind, Len, Presence, Segment};
+use crate::model::{Ty, split_ref};
+use crate::{Absence, Count, Coverage, Discriminant, Expr, Kind, Len, Presence, Segment};
 
 /// A wire field that encode computes from the value.
+///
+/// `by` is the attribute's expression, which encode works back from the number to the field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Derived {
-    /// `field = (collection.len() - offset) / scale`
+    /// `by = collection.len()`
     Count {
         /// The collection the field counts.
         of: String,
-        scale: u32,
-        offset: i32,
+        by: Expr,
         /// The decode limit on elements, if any.
         cap: Option<usize>,
     },
-    /// `field = (isqrt(collection.len()) - offset) / scale`
-    ///
-    /// Encode refuses a length that is not a square.
-    Squared {
-        /// The square collection whose order the field holds.
-        of: String,
-        scale: u32,
-        offset: i32,
-        /// The decode limit on `order * order`, if any.
-        cap: Option<usize>,
-    },
-    /// `field = (encoded byte length of the text field - offset) / scale`
+    /// `by = encoded byte length of the text field`
     TextLen {
         /// The text field whose byte length this is.
         of: String,
         /// The text's `TextCodec`, which sets the byte count. `None` means UTF-8.
         codec: Option<String>,
-        scale: u32,
-        offset: i32,
+        by: Expr,
         /// The decode limit on bytes, if any.
         cap: Option<usize>,
     },
-    /// `field = the byte position the segment was written at`
+    /// `by = the byte position the segment was written at`
     Offset {
         /// The segment whose position this is.
         of: String,
         /// Whether the segment is a single record. Only error messages use it.
         record: bool,
+        by: Expr,
     },
-    /// `field = (one element's wire width - offset) / scale`
+    /// `by = one element's wire width`
     ///
     /// Encode packs elements at `WIRE_BYTES` apart, with no gaps.
     Stride {
         /// The element [`Kind`].
         elem: Kind,
-        scale: u32,
-        offset: i32,
+        by: Expr,
     },
-    /// `field = (the byte length the collection wrote - offset) / scale`
+    /// `by = the byte length the collection wrote`
     ///
     /// Reserved, like [`Offset`](Derived::Offset).
     ByteLen {
@@ -60,34 +54,38 @@ pub(crate) enum Derived {
         of: String,
         /// Whether the segment is a single record. Only error messages use it.
         record: bool,
+        by: Expr,
+        /// The decode limit on bytes, if any.
+        cap: Option<usize>,
     },
-    /// `field = (the arm's encoded byte length - offset) / scale`
+    /// `by = the arm's encoded byte length`
     ///
     /// Measured before the field is written, because a varint field has no fixed size to reserve.
     ArmLen {
         /// The switch whose byte length this is.
         of: String,
-        scale: u32,
-        offset: i32,
+        by: Expr,
         /// The decode limit on bytes, if any.
         cap: Option<usize>,
     },
-    /// `field = the value of the switch's arm`
+    /// `by = the value of the switch's arm`
     ///
-    /// The open arm has no value. It keeps its raw bytes instead.
+    /// The open arm has no value. It keeps the field's own value instead.
     Discriminant {
         /// The switch whose arm the field selects.
         of: String,
         /// The field the discriminant is written to.
         field: String,
+        by: Expr,
     },
-    /// `field = field, with each mask bit set when its optional field is Some`, or for a mask that
-    /// marks absence, when it is None
+    /// `field = field, with each mask's bits set when its optional field is Some`, or for a mask
+    /// that marks absence, when it is None
     Flags {
         /// The flags field. Encode keeps the bits that no optional field uses.
         field: String,
         /// `(mask, optional field name, whether set bits mean present)`, in declaration order.
-        bits: Vec<(u64, String, bool)>,
+        /// A mask is a literal or a constant.
+        bits: Vec<(Expr, String, bool)>,
     },
     /// `field = whether its optional field is Some`, or with `set` false, None
     Presence {
@@ -111,7 +109,6 @@ impl Derived {
     pub(crate) fn what(&self) -> &'static str {
         match self {
             Derived::Count { .. } => "length of a collection",
-            Derived::Squared { .. } => "order of a square collection",
             Derived::TextLen { .. } => "encoded length of a string",
             Derived::Offset { record: false, .. } => "position of a collection",
             Derived::Offset { record: true, .. } => "position of a record",
@@ -160,61 +157,74 @@ pub(crate) enum SlotOf {
     Length,
 }
 
+/// Whether `name` is a field of `segments`, or of a nested layout in one, and not a parameter.
+pub(crate) fn declares(segments: &[Segment], name: &str) -> bool {
+    let (outer, _) = split_ref(name);
+    segments.iter().any(|seg| match seg {
+        Segment::Block(fields) => fields.iter().any(|f| f.name == outer),
+        Segment::Opt { field, .. } => field.name == outer,
+        other => other.name() == Some(outer),
+    })
+}
+
 /// Every computed field in the segments, as `(field, derivation)`.
 pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
-    let mut out = Vec::new();
+    let is_field = |name: &str| declares(segments, name);
+    let mut out: Vec<(String, Derived)> = Vec::new();
+    let derive =
+        |out: &mut Vec<(String, Derived)>, by: &Expr, d: &dyn Fn(&str, Expr) -> Derived| {
+            if let Some(inv) = by.inverse(&is_field) {
+                out.push((String::from(inv.field), d(inv.field, by.clone())));
+            }
+        };
     for seg in segments {
         match seg {
             Segment::Repeat { name: coll, element, count, at, .. } => {
                 match count {
                     Count::Field { by, cap } | Count::Strided { by, cap, .. } => {
-                        out.push((
-                            by.field.clone(),
-                            Derived::Count {
-                                of: coll.clone(),
-                                scale: by.scale,
-                                offset: by.offset,
-                                cap: *cap,
-                            },
-                        ));
+                        derive(&mut out, by, &|_, by| Derived::Count {
+                            of: coll.clone(),
+                            by,
+                            cap: *cap,
+                        });
                     }
-                    Count::Squared { by, cap } => {
-                        out.push((
-                            by.field.clone(),
-                            Derived::Squared {
-                                of: coll.clone(),
-                                scale: by.scale,
-                                offset: by.offset,
-                                cap: *cap,
-                            },
-                        ));
-                    }
-                    Count::Window(Len::Field { by, .. }) => {
-                        out.push((
-                            by.field.clone(),
-                            Derived::ByteLen { of: coll.clone(), record: false },
-                        ));
+                    Count::Window(Len::Field { by, cap, .. }) => {
+                        derive(&mut out, by, &|_, by| Derived::ByteLen {
+                            of: coll.clone(),
+                            record: false,
+                            by,
+                            cap: *cap,
+                        });
                     }
                     _ => {}
                 }
                 if let Count::Strided { stride, .. } = count {
-                    out.push((
-                        stride.field.clone(),
-                        Derived::Stride {
-                            elem: element.clone(),
-                            scale: stride.scale,
-                            offset: stride.offset,
-                        },
-                    ));
+                    derive(&mut out, stride, &|_, by| Derived::Stride {
+                        elem: element.clone(),
+                        by,
+                    });
                 }
-                if let Some(field) = at {
-                    out.push((field.clone(), Derived::Offset { of: coll.clone(), record: false }));
+                if let Some(at) = at {
+                    derive(&mut out, at, &|_, by| Derived::Offset {
+                        of: coll.clone(),
+                        record: false,
+                        by,
+                    });
                 }
             }
             Segment::Placed { name, at, absent, .. } => {
-                out.push((at.clone(), Derived::Offset { of: name.clone(), record: true }));
+                derive(&mut out, at, &|_, by| Derived::Offset {
+                    of: name.clone(),
+                    record: true,
+                    by,
+                });
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
-                    out.push((by.clone(), Derived::ByteLen { of: name.clone(), record: true }));
+                    derive(&mut out, &Expr::name(by), &|_, by| Derived::ByteLen {
+                        of: name.clone(),
+                        record: true,
+                        by,
+                        cap: None,
+                    });
                 }
             }
             Segment::Value {
@@ -222,60 +232,50 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                 kind: Kind::Text { len: Len::Field { by, cap, .. }, codec },
                 ..
             } => {
-                out.push((
-                    by.field.clone(),
-                    Derived::TextLen {
-                        of: text.clone(),
-                        codec: codec.clone(),
-                        scale: by.scale,
-                        offset: by.offset,
-                        cap: *cap,
-                    },
-                ));
+                derive(&mut out, by, &|_, by| Derived::TextLen {
+                    of: text.clone(),
+                    codec: codec.clone(),
+                    by,
+                    cap: *cap,
+                });
             }
             Segment::Switch { name: body, on, window, .. } => {
-                if let Discriminant::Field(field) = on {
-                    out.push((
-                        field.clone(),
-                        Derived::Discriminant { of: body.clone(), field: field.clone() },
-                    ));
+                if let Discriminant::Field(on) = on {
+                    derive(&mut out, on, &|field, by| Derived::Discriminant {
+                        of: body.clone(),
+                        field: String::from(field),
+                        by,
+                    });
                 }
                 if let Some(Len::Field { by, cap, .. }) = window {
-                    out.push((
-                        by.field.clone(),
-                        Derived::ArmLen {
-                            of: body.clone(),
-                            scale: by.scale,
-                            offset: by.offset,
-                            cap: *cap,
-                        },
-                    ));
+                    derive(&mut out, by, &|_, by| Derived::ArmLen {
+                        of: body.clone(),
+                        by,
+                        cap: *cap,
+                    });
                 }
             }
-            Segment::Opt {
-                when:
-                    Presence::Mask { field: flag, mask } | Presence::MaskClear { field: flag, mask },
-                field,
-            } => {
-                let set = matches!(seg, Segment::Opt { when: Presence::Mask { .. }, .. });
-                let bit = (*mask, field.name.clone(), set);
-                match out
-                    .iter_mut()
-                    .find(|(df, d)| df == flag && matches!(d, Derived::Flags { .. }))
-                {
-                    Some((_, Derived::Flags { bits, .. })) => bits.push(bit),
-                    _ => out.push((
-                        flag.clone(),
-                        Derived::Flags { field: flag.clone(), bits: vec![bit] },
-                    )),
+            Segment::Opt { when: Presence::When(e), field } => {
+                let Some(t) = e.test().filter(|t| is_field(t.field)) else { continue };
+                let flag = String::from(t.field);
+                match t.mask {
+                    Some(mask) => {
+                        let bit = (mask.clone(), field.name.clone(), t.set);
+                        match out
+                            .iter_mut()
+                            .find(|(df, d)| *df == flag && matches!(d, Derived::Flags { .. }))
+                        {
+                            Some((_, Derived::Flags { bits, .. })) => bits.push(bit),
+                            _ => out.push((
+                                flag.clone(),
+                                Derived::Flags { field: flag, bits: vec![bit] },
+                            )),
+                        }
+                    }
+                    None => {
+                        out.push((flag, Derived::Presence { of: field.name.clone(), set: t.set }))
+                    }
                 }
-            }
-            Segment::Opt {
-                when: Presence::Flag { field: flag } | Presence::FlagClear { field: flag },
-                field,
-            } => {
-                let set = matches!(seg, Segment::Opt { when: Presence::Flag { .. }, .. });
-                out.push((flag.clone(), Derived::Presence { of: field.name.clone(), set }));
             }
             Segment::Checksum { name, algorithm, over, .. } => {
                 out.push((
@@ -295,4 +295,49 @@ pub(crate) fn back_patched(segments: &[Segment]) -> Vec<(String, String)> {
         .into_iter()
         .filter_map(|(field, d)| d.reserves().map(|(_, of)| (field, String::from(of))))
         .collect()
+}
+
+/// Every expression in the segments, and whether it gives a number or a condition.
+pub(crate) fn expressions(segments: &[Segment]) -> Vec<(Expr, Ty)> {
+    let mut out: Vec<(Expr, Ty)> = Vec::new();
+    let mut conditions: Vec<(Expr, Ty)> = Vec::new();
+    let mut number = |e: &Expr| out.push((e.clone(), Ty::Int));
+    for seg in segments {
+        match seg {
+            Segment::Repeat { count, at, .. } => {
+                match count {
+                    Count::Field { by, .. } | Count::Window(Len::Field { by, .. }) => number(by),
+                    Count::Strided { by, stride, .. } => {
+                        number(by);
+                        number(stride);
+                    }
+                    _ => {}
+                }
+                at.iter().for_each(&mut number);
+            }
+            Segment::Placed { at, absent, .. } => {
+                number(at);
+                if let Some(Absence::ZeroLength { by, .. }) = absent {
+                    number(&Expr::name(by));
+                }
+            }
+            Segment::Value { kind: Kind::Text { len: Len::Field { by, .. }, .. }, .. } => {
+                number(by)
+            }
+            Segment::Switch { on, window, .. } => {
+                if let Discriminant::Field(on) = on {
+                    number(on);
+                }
+                if let Some(Len::Field { by, .. }) = window {
+                    number(by);
+                }
+            }
+            Segment::Opt { when: Presence::When(e), .. } | Segment::Valid { holds: e, .. } => {
+                conditions.push((e.clone(), Ty::Bool));
+            }
+            _ => {}
+        }
+    }
+    out.extend(conditions);
+    out
 }

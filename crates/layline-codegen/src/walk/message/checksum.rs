@@ -387,7 +387,7 @@ impl Walk<'_> {
                 root,
             ));
         } else {
-            let n = derived_value(d, own, field, root);
+            let n = derived_value(d, own, field, root)?;
             self.byte_steps.extend(quote! {
                 {
                     let __ck = <#ty as #root::WireInt>::from_i64(#n);

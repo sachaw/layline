@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use layline_core::table::StatedUnit;
 
-use super::Coverage;
+use super::{Coverage, Expr};
 
 /// An `#[at]` position, checked against the position computed from field widths.
 ///
@@ -141,34 +141,6 @@ impl Scalar {
     }
 }
 
-/// A number taken from an earlier field: `field * scale + offset`.
-///
-/// The runtime equivalent is [`layline_core::table::By`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct By {
-    /// The field to read. It must come before the field that uses it.
-    pub field: String,
-    /// The multiplier.
-    pub scale: u32,
-    /// The value added after scaling.
-    pub offset: i32,
-}
-
-impl By {
-    /// The field's value, unscaled.
-    #[must_use]
-    pub fn field(field: &str) -> Self {
-        Self { field: String::from(field), scale: 1, offset: 0 }
-    }
-
-    /// `field * scale + offset`.
-    #[must_use]
-    pub fn new(field: &str, scale: u32, offset: i32) -> Self {
-        Self { field: String::from(field), scale, offset }
-    }
-}
-
 /// A byte length.
 ///
 /// [`Count`](crate::Count) counts elements instead.
@@ -177,10 +149,13 @@ impl By {
 pub enum Len {
     /// A fixed number of bytes.
     Bytes(usize),
-    /// Read from an earlier field. Encode writes the field from the actual length.
+    /// Given by an [`Expr`] over earlier fields and parameters.
+    ///
+    /// If the expression is invertible in the one field it reads, encode writes that field from
+    /// the actual length. Otherwise encode checks the length against it.
     Field {
-        /// The length field.
-        by: By,
+        /// The length in bytes.
+        by: Expr,
         /// The largest length allowed.
         cap: Option<usize>,
         /// Padding that is not part of the length: `#[align(N)]`.

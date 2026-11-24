@@ -6,12 +6,13 @@ use syn::spanned::Spanned;
 pub(super) const LAYOUT_ATTRS: &[&str] = &[
     "layout", "bits", "codec", "bytes", "at", "overlay", "magic", "checksum", "range", "count",
     "len", "stride", "fill", "seek", "text", "until", "var", "message", "switch", "when", "align",
+    "valid",
 ];
 
 /// The attributes in [`LAYOUT_ATTRS`] that only `#[derive(Message)]` reads.
 const MESSAGE_VOCABULARY: &[&str] = &[
     "count", "len", "stride", "fill", "seek", "text", "until", "var", "message", "switch", "when",
-    "align",
+    "align", "valid",
 ];
 
 pub(super) fn walk_vocabulary(name: &str) -> bool {

@@ -2,7 +2,7 @@
 mod support;
 
 use layline_codegen::{
-    Absence, Arm, By, ChoiceDef, Collection, Container, Count, Discriminant, Endian, Field,
+    Absence, Arm, ChoiceDef, Collection, Container, Count, Discriminant, Endian, Expr, Field,
     Invalid, Kind, LayoutDef, Len, MessageDef, Presence, Scalar, Segment, Stated,
 };
 
@@ -21,7 +21,14 @@ fn choice(name: &str, open: bool, arms: Vec<Arm>) -> ChoiceDef {
 }
 
 fn opt(flag: &str, mask: u64, field: Field) -> Segment {
-    Segment::Opt { when: Presence::Mask { field: flag.into(), mask }, field }
+    Segment::Opt {
+        when: Presence::When(Expr::binary(
+            layline_codegen::Op::BitAnd,
+            Expr::name(flag),
+            Expr::int(mask as i64),
+        )),
+        field,
+    }
 }
 
 fn switch(name: &str, on: Discriminant, ty: &str) -> Segment {

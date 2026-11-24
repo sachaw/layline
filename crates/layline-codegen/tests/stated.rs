@@ -4,7 +4,7 @@
 mod support;
 
 use layline_codegen::{
-    BitOrder, By, Collection, Container, Count, Endian, Field, Invalid, Kind, LayoutDef, Len,
+    BitOrder, Collection, Container, Count, Endian, Expr, Field, Invalid, Kind, LayoutDef, Len,
     Presence, Scalar, Segment, Stated,
 };
 use support::{msg, u, validate_layout, validate_message};
@@ -336,7 +336,11 @@ fn an_optional_field_may_state_the_position_it_has_when_it_is_there() {
     let present = vec![
         Segment::Block(vec![Field::new("flags", u(8)).with_stated(Stated::byte(0))]),
         Segment::Opt {
-            when: Presence::Mask { field: "flags".into(), mask: 0x01 },
+            when: Presence::When(Expr::binary(
+                layline_codegen::Op::BitAnd,
+                Expr::name("flags"),
+                Expr::int(0x01),
+            )),
             field: Field::new("extra", u(16)).with_stated(Stated::byte(1)),
         },
     ];
@@ -345,7 +349,11 @@ fn an_optional_field_may_state_the_position_it_has_when_it_is_there() {
     let wrong = vec![
         Segment::Block(vec![Field::new("flags", u(8))]),
         Segment::Opt {
-            when: Presence::Mask { field: "flags".into(), mask: 0x01 },
+            when: Presence::When(Expr::binary(
+                layline_codegen::Op::BitAnd,
+                Expr::name("flags"),
+                Expr::int(0x01),
+            )),
             field: Field::new("extra", u(16)).with_stated(Stated::byte(2)),
         },
     ];
@@ -384,7 +392,7 @@ fn a_counted_run_ends_the_stated_numbering() {
         Segment::repeat(
             "entries",
             u(8),
-            Count::Field { by: By::field("n"), cap: None },
+            Count::Field { by: Expr::name("n"), cap: None },
             None,
             Collection::Vec,
         ),

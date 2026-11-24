@@ -23,6 +23,7 @@ fn not_in_a_bits_message(name: &str, word: &str) -> String {
             "Declare the collection in the enclosing message"
         }
         "seek" => "Declare the record in the enclosing message",
+        "valid" => "Declare the condition in the enclosing message",
         "at" => "Remove it. `SEGMENTS` gives each field's bit offset",
         "switch" => "Declare the switch in the enclosing message",
         "text" | "message" => "Declare the field in the enclosing message",
@@ -63,18 +64,6 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
     }
 
-    if let Some(when) = &when
-        && matches!(when.test, WhenTest::Positive)
-    {
-        return Err(syn::Error::new(
-            when.span,
-            format!(
-                "field `{name}`: `#[when({} > 0)]` works only on a `#[seek]` record. \
-                 Write `#[when({} & 0x01)]`, or `#[present]` for a presence bit",
-                when.by.name, when.by.name,
-            ),
-        ));
-    }
     if let (Some(_), Some(when)) = (present, &when) {
         return Err(syn::Error::new(
             when.span,
@@ -139,6 +128,7 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         stated: None,
         with: Vec::new(),
         align: None,
+        valid: None,
     })
 }
 

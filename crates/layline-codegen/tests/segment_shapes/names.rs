@@ -10,7 +10,7 @@ fn a_count_may_not_name_a_later_discovered_value() {
             Segment::repeat(
                 "value",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: By::field("len"), cap: None },
+                Count::Field { by: Expr::name("len"), cap: None },
                 None,
                 Collection::Vec,
             ),
@@ -35,7 +35,7 @@ fn a_reference_must_name_something_with_a_number_in_it() {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: By::field("label"), cap: None },
+                Count::Field { by: Expr::name("label"), cap: None },
                 None,
                 Collection::Vec,
             ),
@@ -53,7 +53,7 @@ fn a_reference_must_name_something_with_a_number_in_it() {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: By::field("pair"), cap: None },
+                Count::Field { by: Expr::name("pair"), cap: None },
                 None,
                 Collection::Vec,
             ),
@@ -74,8 +74,8 @@ fn a_reference_must_name_something_with_a_number_in_it() {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: By::field("n"), cap: None },
-                Some("ratio"),
+                Count::Field { by: Expr::name("n"), cap: None },
+                Some(layline_codegen::Expr::name("ratio")),
                 Collection::Vec,
             ),
         ],

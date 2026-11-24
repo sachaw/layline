@@ -22,7 +22,7 @@ pub struct Riff {
     pub magic: [u8; 4],
     pub size: u32,
     pub form: [u8; 4],
-    #[len(size, offset = -4)]
+    #[len(size - 4)]
     #[message]
     pub chunks: Vec<Chunk>,
 }
@@ -172,7 +172,7 @@ pub struct Symb {
     #[magic(b"SYMB")]
     pub magic: [u8; 4],
     pub block_size: u32,
-    #[len(block_size, offset = -8)]
+    #[len(block_size - 8)]
     pub body: Vec<u8>,
 }
 

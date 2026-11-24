@@ -7,12 +7,14 @@ use super::Check;
 use super::checksum::Marked;
 use super::cursor::{seek_to, skip_padding, write_padding};
 use super::env::Env;
-use super::patch::{Slot, arm_ident, nested_in_blocks, nested_probe};
+use super::eval::{condition, number};
+use super::patch::{Slot, arm_ident, derived_flag, derived_value, nested_in_blocks, nested_probe};
 use super::table::{Row, Rows};
-use crate::model::split_ref;
+use crate::model::{Ty, split_ref};
+use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{Derived, derivations, endian_arg, row};
-use crate::{Absence, Endian, Error, Kind, Len, Param, Root, Segment};
+use crate::walk::{Derived, derivations, endian_arg, expressions, row};
+use crate::{Absence, Endian, Error, Expr, Kind, Len, Param, Root, Segment};
 
 /// Where encode reads a body's values from.
 #[derive(Clone, Copy)]
@@ -147,6 +149,8 @@ pub(super) struct Walk<'a> {
     pub(super) rows: Rows,
     /// The attribute a spare field carries.
     pub(super) skip: TokenStream,
+    /// The segments encode has written so far.
+    pub(super) done: Vec<String>,
 }
 
 /// Generate decode, encode and the table for `segments` in one pass.
@@ -181,6 +185,7 @@ pub(super) fn walk_segments(
         slots: Vec::new(),
         rows: Rows::new(),
         skip: item.skip.clone(),
+        done: Vec::new(),
     };
     for p in item.needs {
         let id = ident(&p.name);
@@ -207,10 +212,26 @@ pub(super) fn walk_segments(
         }
     }
 
-    for (field, d) in &w.derived {
-        let (outer, Some(inner)) = split_ref(field) else {
-            continue;
+    // Every field of a nested layout an expression reads, and whether it reads it as a number.
+    let nested: core::cell::RefCell<Vec<(String, bool)>> = core::cell::RefCell::default();
+    for (e, want) in expressions(segments) {
+        let record = |name: &str, ty: Ty| -> Result<(TokenStream, Ty), Error> {
+            if split_ref(name).1.is_some() {
+                let mut nested = nested.borrow_mut();
+                match nested.iter_mut().find(|(n, _)| n == name) {
+                    Some((_, number)) => *number |= ty == Ty::Int,
+                    None => nested.push((String::from(name), ty == Ty::Int)),
+                }
+            }
+            Ok((quote!(0), ty))
         };
+        match want {
+            Ty::Int => number(&e, &record, root)?,
+            Ty::Bool => condition(&e, &record, root)?,
+        };
+    }
+    for (field, number) in nested.into_inner() {
+        let (outer, Some(inner)) = split_ref(&field) else { continue };
         let Some(ty) = nested_in_blocks(segments, outer) else {
             return Err(Error::Refused(format!(
                 "{owner}: `{field}` reads a field inside `{outer}`, but `{outer}` is not a \
@@ -218,16 +239,16 @@ pub(super) fn walk_segments(
             )));
         };
         item.checks.push(Check {
+            tokens: nested_probe(owner, ty, outer, inner, number, root)?,
             field: field.clone(),
-            tokens: nested_probe(owner, ty, outer, inner, d, root)?,
         });
     }
 
     for (i, seg) in segments.iter().enumerate() {
         let last = i + 1 == segments.len();
         if let Some(at) = seeks(seg) {
-            let start = w.env.get(owner, "#[at]", at)?;
-            w.parse_steps.extend(seek_to(&start, at, root));
+            let start = w.env.number(owner, "#[seek]", at)?;
+            w.parse_steps.extend(seek_to(&start, super::eval::blamed(at, owner), root));
         }
         if !matches!(seg, Segment::Block(_)) {
             for name in seg.places() {
@@ -248,12 +269,14 @@ pub(super) fn walk_segments(
             Segment::Opt { .. } => w.opt(item, own, seg, last)?,
             Segment::Switch { .. } => w.switch(item, own, seg, last)?,
             Segment::Checksum { .. } => w.checksum(item, segments, own, seg)?,
+            Segment::Valid { field, holds } => w.valid(own, field, holds)?,
         }
         if !matches!(seg, Segment::Block(_)) {
             for name in seg.places() {
                 w.marked.end(name, &mut w.parse_steps, &mut w.byte_steps);
             }
         }
+        w.done.extend(seg.places().into_iter().map(String::from));
         if let Some(align) = padded {
             w.parse_steps.extend(skip_padding(align, root));
             w.byte_steps.extend(write_padding(align));
@@ -339,18 +362,17 @@ fn clashes(owner: &str, derived: &[(String, Derived)]) -> Result<(), Error> {
 /// Whether two strides on one field give different widths.
 fn stride_clash(a: &Derived, b: &Derived) -> bool {
     match (a, b) {
-        (
-            Derived::Stride { elem: x, scale: sx, offset: ox },
-            Derived::Stride { elem: y, scale: sy, offset: oy },
-        ) => x != y || sx != sy || ox != oy,
+        (Derived::Stride { elem: x, by: a }, Derived::Stride { elem: y, by: b }) => {
+            x != y || a != b
+        }
         _ => false,
     }
 }
 
-/// The offset field to seek to before `seg`, if the seek is unconditional.
+/// The offset to seek to before `seg`, if the seek is unconditional.
 ///
-/// A absent record seeks inside its own presence test.
-fn seeks(seg: &Segment) -> Option<&str> {
+/// An absent record seeks inside its own presence test.
+fn seeks(seg: &Segment) -> Option<&Expr> {
     match seg {
         Segment::Repeat { at: Some(at), .. } | Segment::Placed { at, absent: None, .. } => Some(at),
         _ => None,
@@ -374,26 +396,109 @@ impl Walk<'_> {
         self.params.iter().any(|p| p.name == name)
     }
 
-    /// The number `name` refers to, in encode: from the context for a parameter, else from the value.
-    pub(super) fn held(&self, name: &str, own: Own) -> TokenStream {
-        if self.is_param(name) {
+    /// How `name` reads in encode, for [`eval`](super::eval): the value encode writes for it.
+    ///
+    /// A parameter from the context, a derived field as encode derives it, and any other field as
+    /// the value holds it. Refuses a field encode fills in only after a later segment.
+    pub(super) fn written(
+        &self,
+        own: Own,
+        name: &str,
+        want: Ty,
+    ) -> Result<(TokenStream, Ty), Error> {
+        let (root, owner) = (self.root, self.owner);
+        let ty = self.env.ty(name).unwrap_or(want);
+        let held = if self.is_param(name) {
             let id = ident(name);
-            return quote!(__ctx.#id);
-        }
-        own.get(name)
+            quote!(__ctx.#id)
+        } else if let Some((_, d)) = self.derived.iter().find(|(f, _)| f == name) {
+            if let Some((_, of)) = d.reserves() {
+                // A collection's number is stamped by the time a later segment checks.
+                let record = matches!(
+                    d,
+                    Derived::Offset { record: true, .. } | Derived::ByteLen { record: true, .. }
+                );
+                if !record && self.done.iter().any(|d| d == of) {
+                    let wrote = super::patch::wrote_ident(name);
+                    return Ok((quote!(#wrote), Ty::Int));
+                }
+                return Err(Error::Refused(format!(
+                    "{owner}: an expression reads `{name}`, which encode fills in only after \
+                     writing `{of}`, so nothing states it in time. Read a field that comes from \
+                     the value or a parameter"
+                )));
+            }
+            if matches!(d, Derived::Checksum { .. }) {
+                return Err(Error::Refused(format!(
+                    "{owner}: an expression reads the checksum `{name}`. Read a field the \
+                     checksum covers instead"
+                )));
+            }
+            if let Some(flag) = derived_flag(d, own) {
+                return Ok((flag, Ty::Bool));
+            }
+            return Ok((derived_value(d, own, name, root)?, Ty::Int));
+        } else {
+            own.get(name)
+        };
+        Ok(match ty {
+            Ty::Int => (quote!(#root::WireInt::to_i64(&#held)), Ty::Int),
+            Ty::Bool => (quote!(#root::__private::WireFlag::to_flag(&#held)), Ty::Bool),
+        })
     }
 
-    /// The number `by` states when its field is a parameter, as an `i64`. The holder writes the
-    /// parameter, so encode can only check a value against it, never set it.
-    pub(super) fn param_number(&self, by: &crate::By) -> Option<TokenStream> {
-        if !self.is_param(&by.field) {
-            return None;
-        }
+    /// A condition the value must satisfy: decode refuses a body that breaks it, and encode a
+    /// value that does.
+    fn valid(&mut self, own: Own, field: &str, holds: &Expr) -> Result<(), Error> {
+        let Prelude { err, some, .. } = self.root.prelude();
         let root = self.root;
-        let id = ident(&by.field);
-        let (scale, offset) = (i64::from(by.scale), i64::from(by.offset));
-        Some(quote! {
-            (#root::WireInt::to_i64(&__ctx.#id) * #scale + #offset)
+        let read = self.env.condition(self.owner, "#[valid]", holds)?;
+        self.parse_steps.extend(quote! {
+            if !#read {
+                return #err(#root::ParseError::Malformed { field: #field, at: __at });
+            }
+        });
+        let stated = condition(holds, &|name, want| self.written(own, name, want), root)?;
+        self.byte_steps.extend(quote! {
+            match #stated {
+                #some(__holds) => #root::EncodeError::agree(
+                    #field,
+                    ::core::primitive::i64::from(__holds),
+                    1,
+                )?,
+                _ => return #err(#root::EncodeError::Inexact { field: #field, value: 0 }),
+            }
+        });
+        Ok(())
+    }
+
+    /// Whether encode writes the field this segment's derivation `mine` works back to: the
+    /// first derivation of that field is `mine`. Otherwise encode checks the expression.
+    pub(super) fn writes(&self, mine: impl Fn(&Derived) -> bool) -> bool {
+        let Some((field, _)) = self.derived.iter().find(|(_, d)| mine(d)) else { return false };
+        self.derived.iter().find(|(f, _)| f == field).is_some_and(|(_, d)| mine(d))
+    }
+
+    /// Refuse a `value`, an `i64`, that differs from the number `e` states over the fields as
+    /// encode writes them: `Mismatch` naming `field`, or `Inexact` where `e` has no number.
+    pub(super) fn agree(
+        &self,
+        own: Own,
+        field: &str,
+        value: TokenStream,
+        e: &Expr,
+    ) -> Result<TokenStream, Error> {
+        let Prelude { i64, some, err, .. } = self.root.prelude();
+        let root = self.root;
+        let stated = number(e, &|name, want| self.written(own, name, want), root)?;
+        Ok(quote! {
+            {
+                let __value = (#value) as #i64;
+                match #stated {
+                    #some(__stated) => #root::EncodeError::agree(#field, __value, __stated)?,
+                    _ => return #err(#root::EncodeError::Inexact { field: #field, value: __value }),
+                }
+            }
         })
     }
 
@@ -410,7 +515,7 @@ impl Walk<'_> {
                 let lit = Literal::usize_unsuffixed(*n);
                 Ok(quote! { let __n = #lit; })
             }
-            Len::Field { by, cap, .. } => self.env.stated_n(owner, "#[len]", by, *cap),
+            Len::Field { by, cap, .. } => self.env.size_n(owner, "#[len]", by, *cap),
             other => Err(Error::Refused(format!(
                 "{owner}: {what} `{name}` has length {other:?}. \
                  Use a fixed byte count or an earlier field"

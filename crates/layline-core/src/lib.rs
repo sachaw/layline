@@ -42,6 +42,7 @@ mod message;
 mod row;
 mod segment;
 mod slot;
+mod value;
 mod var;
 mod view;
 mod word;
@@ -106,6 +107,11 @@ pub mod __private {
     pub use crate::field::{Decoded, Decodes, Fallibility, assert_layout};
     pub use crate::order::{Be, ByteOrder, Le};
     pub use crate::word::BitWord;
+
+    /// The arithmetic of attribute expressions.
+    pub mod value {
+        pub use crate::value::*;
+    }
 
     #[cfg(feature = "alloc")]
     pub use crate::text::{TextCodec, Utf8};

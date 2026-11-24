@@ -50,11 +50,22 @@ pub(super) fn validate_bits(msg: &MessageDef) -> Result<(), Invalid> {
                         governed.push((flag, mask, &field.name));
                     }
                     None => {
+                        let Presence::When(e) = when else {
+                            return Err(Invalid::field(
+                                &field.name,
+                                String::from(
+                                    "a bit-addressed message has no trailing bytes to test. \
+                                     Write `#[present]`, or name an earlier bit field",
+                                ),
+                            ));
+                        };
                         return Err(Invalid::field(
                             &field.name,
-                            String::from(
-                                "a bit-addressed message has no trailing bytes to test. \
-                                 Write `#[present]`, or name an earlier bit field",
+                            format!(
+                                "`{e}` is not a test of one earlier field, and a bit-addressed \
+                                 message sets its presence bits only from those. Write `f`, \
+                                 `!f`, `f & MASK` or `f & MASK == 0` with a literal mask, or \
+                                 `#[present]`"
                             ),
                         ));
                     }
@@ -66,7 +77,10 @@ pub(super) fn validate_bits(msg: &MessageDef) -> Result<(), Invalid> {
             }
             other => {
                 let what = segment_word(other);
-                let name = other.name().unwrap_or("?");
+                let name = match other {
+                    Segment::Valid { field, .. } => field.as_str(),
+                    _ => other.name().unwrap_or("?"),
+                };
                 return Err(Invalid::field(
                     name,
                     format!(
@@ -88,6 +102,7 @@ fn segment_word(seg: &Segment) -> &'static str {
         Segment::Placed { .. } => "a record at an offset",
         Segment::Switch { .. } => "a switch",
         Segment::Checksum { .. } => "a checksum",
+        Segment::Valid { .. } => "a condition",
     }
 }
 

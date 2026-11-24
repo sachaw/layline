@@ -55,10 +55,6 @@ fn solved_field(
     Ok(field)
 }
 
-pub(super) fn model_by(by: &Ref, scale: u32, offset: i32) -> layline_codegen::By {
-    layline_codegen::By::new(&by.name, scale, offset)
-}
-
 pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
     if let Some(order) = p.bits {
         return Ok(lower_bits(p, order));
@@ -131,21 +127,18 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     element: element.clone(),
                     collection: *collection,
                     count: match count {
-                        CountSpec::Field { by, scale, offset, cap } => {
-                            Count::Field { by: model_by(by, *scale, *offset), cap: *cap }
+                        CountSpec::Field { by, cap } => {
+                            Count::Field { by: by.expr.clone(), cap: *cap }
                         }
-                        CountSpec::Squared { by, scale, offset, cap } => {
-                            Count::Squared { by: model_by(by, *scale, *offset), cap: *cap }
-                        }
-                        CountSpec::Window { by, scale, offset, cap } => Count::Window(Len::Field {
-                            by: model_by(by, *scale, *offset),
+                        CountSpec::Window { by, cap } => Count::Window(Len::Field {
+                            by: by.expr.clone(),
                             cap: *cap,
                             align: None,
                         }),
-                        CountSpec::Strided { by, scale, offset, cap, stride } => Count::Strided {
-                            by: model_by(by, *scale, *offset),
+                        CountSpec::Strided { by, cap, stride } => Count::Strided {
+                            by: by.expr.clone(),
                             cap: *cap,
-                            stride: model_by(&stride.by, stride.scale, stride.offset),
+                            stride: stride.by.expr.clone(),
                         },
                         CountSpec::Fill { cap } => Count::Fill { cap: *cap },
                         CountSpec::Terminated { mask } => Count::Terminated { mask: *mask },
@@ -154,7 +147,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         }
                         CountSpec::Bytes(n) => Count::Window(Len::Bytes(*n)),
                     },
-                    at: at.as_ref().map(|r| r.name.clone()),
+                    at: at.as_ref().map(|r| r.expr.clone()),
                     doc: None,
                 });
             }
@@ -167,7 +160,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     stated: f.stated.map(|a| a.stated),
                     name: f.name.clone(),
                     kind: kind.clone(),
-                    at: at.name.clone(),
+                    at: at.expr.clone(),
                     absent: absent.as_ref().map(|g| match g {
                         PlacedAbsence::ZeroOffset => layline_codegen::Absence::ZeroOffset,
                         PlacedAbsence::ZeroLength(by) => layline_codegen::Absence::ZeroLength {
@@ -195,18 +188,16 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     stated: f.stated.map(|a| a.stated),
                     name: f.name.clone(),
                     on: match on {
-                        SwitchOn::Field(r) => Discriminant::Field(r.name.clone()),
+                        SwitchOn::Field(on) => Discriminant::Field(on.expr.clone()),
                         SwitchOn::BodyLength(_) => Discriminant::BodyLength,
                     },
                     choice: ty.clone(),
                     window: match window {
                         SwitchWindow::Open => None,
                         SwitchWindow::Fixed(n) => Some(Len::Bytes(*n)),
-                        SwitchWindow::Field { by, scale, offset, cap } => Some(Len::Field {
-                            by: model_by(by, *scale, *offset),
-                            cap: *cap,
-                            align: None,
-                        }),
+                        SwitchWindow::Field { by, cap } => {
+                            Some(Len::Field { by: by.expr.clone(), cap: *cap, align: None })
+                        }
                     },
                     doc: None,
                 });
@@ -217,8 +208,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     checks.push(var_codec_check(&f.name, ty, f.span, &p.root));
                 }
                 if let Some(when) = when
-                    && matches!(when.test, WhenTest::Flag)
-                    && let (outer, Some(_)) = layline_codegen::__derive::split_ref(&when.by.name)
+                    && let Some((by, t)) = when.tested()
+                    && t.mask.is_none()
+                    && let (outer, Some(_)) = layline_codegen::__derive::split_ref(&by.name)
                     && let Some(child) = p.fields.iter().find(|g| g.name == outer).and_then(|g| {
                         match bound(&g.body) {
                             Some(Kind::Nested { ty, .. }) => Some(ty.clone()),
@@ -229,7 +221,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     checks.push(flag_carrier_check(
                         &crate::attr::name(&p.ident),
                         &f.name,
-                        &when.by,
+                        by,
                         &child,
                         when.span,
                         &p.root,
@@ -258,6 +250,12 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
         }
     }
     flush(&mut segments, &mut block);
+    // A condition takes no bytes, so it goes after every field it may read.
+    segments.extend(
+        p.fields
+            .iter()
+            .filter_map(|f| Some(Segment::valid(&f.name, f.valid.as_ref()?.expr.clone()))),
+    );
 
     let mut msg = MessageDef::new(&crate::attr::name(&p.ident), segments)
         .with_endian(p.endian)
@@ -339,31 +337,31 @@ fn element_size_check(name: &str, e: &ElementSize, root: &Root) -> TokenStream {
 }
 
 fn referenced(p: &Parsed) -> Vec<&str> {
+    let mut values: Vec<&Value> = Vec::new();
     let mut names: Vec<&str> = Vec::new();
     for f in &p.fields {
         match &f.body {
             Body::Repeat { count, at, .. } => {
-                names.extend(count.by().map(|by| by.name.as_str()));
-                names.extend(count.stride().map(|by| by.name.as_str()));
-                if let Some(r) = at {
-                    names.push(&r.name);
-                }
+                values.extend(count.by());
+                values.extend(count.stride());
+                values.extend(at.as_ref());
             }
             Body::Placed { at, absent, .. } => {
-                names.push(&at.name);
+                values.push(at);
                 if let Some(PlacedAbsence::ZeroLength(by)) = absent {
                     names.push(&by.name);
                 }
             }
-            Body::Value { len_ref: Some(r), .. } => names.push(&r.name),
+            Body::Value { len_ref, .. } => values.extend(len_ref.as_ref()),
             Body::Switch { on, window, .. } => {
-                names.extend(on.field().map(|r| r.name.as_str()));
-                names.extend(window.field().map(|r| r.name.as_str()));
+                values.extend(on.field());
+                values.extend(window.field());
             }
-            Body::Opt { when: Some(when), .. } => names.push(&when.by.name),
+            Body::Opt { when: Some(when), .. } => values.push(&when.value),
             _ => {}
         }
     }
+    names.extend(values.into_iter().flat_map(|v| v.refs.iter().map(|r| r.name.as_str())));
     names
 }
 

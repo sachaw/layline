@@ -308,7 +308,7 @@ struct WmPacket {
     seq: Option<u16>,
     #[when(header.dest_bitmap)]
     dest: Option<u8>,
-    #[count(header.length_halfwords, scale = 2)]
+    #[count(header.length_halfwords * 2)]
     payload: Vec<u8>,
 }
 

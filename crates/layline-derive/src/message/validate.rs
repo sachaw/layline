@@ -4,6 +4,7 @@ use layline_codegen::{Kind, Len};
 
 use super::*;
 use crate::claim::Ref;
+use crate::value::Value;
 
 pub(super) fn invalid(p: &Parsed, why: &layline_codegen::Invalid) -> syn::Error {
     match why {
@@ -28,79 +29,55 @@ pub(super) fn reference_site<'a>(
         if let Some(r) = f.with.iter().find(|r| r.name == target) {
             return Some((r, i, "#[with]"));
         }
-        match &f.body {
-            Body::Repeat { count, at, .. } => {
-                if let Some(by) = count.by()
-                    && by.name == target
-                {
-                    return Some((by, i, count.spelling()));
-                }
-                if let Some(by) = count.stride()
-                    && by.name == target
-                {
-                    return Some((by, i, "#[stride]"));
-                }
-                if let Some(r) = at
-                    && r.name == target
-                {
-                    return Some((r, i, "#[seek]"));
-                }
+        let found = |v: Option<&'a Value>| v.and_then(|v| v.find(target));
+        let site = match &f.body {
+            Body::Repeat { count, at, .. } => found(count.by())
+                .map(|r| (r, count.spelling()))
+                .or_else(|| found(count.stride()).map(|r| (r, "#[stride]")))
+                .or_else(|| found(at.as_ref()).map(|r| (r, "#[seek]"))),
+            Body::Placed { at, absent, .. } => {
+                found(Some(at)).map(|r| (r, "#[seek]")).or_else(|| match absent {
+                    Some(PlacedAbsence::ZeroLength(by)) if by.name == target => {
+                        Some((by, "#[when]"))
+                    }
+                    _ => None,
+                })
             }
-            Body::Placed { at, .. } if at.name == target => {
-                return Some((at, i, "#[seek]"));
-            }
-            Body::Placed { absent: Some(PlacedAbsence::ZeroLength(by)), .. }
-                if by.name == target =>
-            {
-                return Some((by, i, "#[when]"));
-            }
-            Body::Value { len_ref: Some(r), .. } if r.name == target => {
-                return Some((r, i, "#[len]"));
-            }
-            Body::Switch { on, .. } if on.field().is_some_and(|r| r.name == target) => {
-                return Some((on.field().expect("checked"), i, "#[switch]"));
-            }
-            Body::Switch { window, .. } if window.field().is_some_and(|r| r.name == target) => {
-                return Some((window.field().expect("checked"), i, "#[len]"));
-            }
-            Body::Opt { when: Some(when), .. } if when.by.name == target => {
-                return Some((&when.by, i, "#[when]"));
-            }
-            _ => {}
+            Body::Value { len_ref, .. } => found(len_ref.as_ref()).map(|r| (r, "#[len]")),
+            Body::Switch { on, window, .. } => found(on.field())
+                .map(|r| (r, "#[switch]"))
+                .or_else(|| found(window.field()).map(|r| (r, "#[len]"))),
+            Body::Opt { when: Some(when), .. } => found(Some(&when.value)).map(|r| (r, "#[when]")),
+            _ => None,
+        };
+        if let Some((r, what)) = site.or_else(|| found(f.valid.as_ref()).map(|r| (r, "#[valid]"))) {
+            return Some((r, i, what));
         }
     }
     None
 }
 
+/// The segment whose number `target` is written as, and what number, if one writes it.
 fn other_claim<'a>(p: &'a Parsed, target: &str) -> Option<(&'a str, &'static str)> {
+    // A bare name is written. Other expressions may be too, but the model refuses those clashes.
+    let named = |v: Option<&Value>| v.and_then(Value::bare).is_some_and(|r| r.name == target);
     for f in &p.fields {
         let what = match &f.body {
-            Body::Repeat { count: CountSpec::Field { by, .. }, .. } if by.name == target => "count",
-            Body::Repeat { count: CountSpec::Window { by, .. }, .. } if by.name == target => {
+            Body::Repeat { count: CountSpec::Window { by, .. }, .. } if named(Some(by)) => {
                 "byte length"
             }
-            Body::Repeat { count: CountSpec::Strided { by, .. }, .. } if by.name == target => {
-                "count"
-            }
-            Body::Repeat { count: CountSpec::Strided { stride, .. }, .. }
-                if stride.by.name == target =>
-            {
-                "stride"
-            }
-            Body::Repeat { at: Some(r), .. } if r.name == target => "offset",
-            Body::Placed { at, .. } if at.name == target => "offset",
+            Body::Repeat { count, .. } if named(count.by()) => "count",
+            Body::Repeat { count, .. } if named(count.stride()) => "stride",
+            Body::Repeat { at, .. } if named(at.as_ref()) => "offset",
+            Body::Placed { at, .. } if named(Some(at)) => "offset",
             Body::Placed { absent: Some(PlacedAbsence::ZeroLength(by)), .. }
                 if by.name == target =>
             {
                 "byte length"
             }
-            Body::Value { len_ref: Some(r), .. } if r.name == target => "length prefix",
-            Body::Switch { on, .. } if on.field().is_some_and(|r| r.name == target) => {
-                "discriminant"
-            }
-            Body::Switch { window, .. } if window.field().is_some_and(|r| r.name == target) => {
-                "byte length"
-            }
+            Body::Value { len_ref, .. } if named(len_ref.as_ref()) => "length prefix",
+            Body::Switch { on, .. } if named(on.field()) => "discriminant",
+            Body::Switch { window, .. } if named(window.field()) => "byte length",
             _ => continue,
         };
         return Some((&f.name, what));
@@ -270,10 +247,9 @@ pub(super) fn check_coverage(p: &Parsed) -> syn::Result<()> {
                     format!("when `{}` is non-zero", by.name),
                     format!("Name `{}` itself", by.name),
                 ),
-                Body::Placed { at, .. } => (
-                    format!("when `{}` is non-zero", at.name),
-                    format!("Name `{}` itself", at.name),
-                ),
+                Body::Placed { at, .. } => {
+                    (format!("when `{at}` is non-zero"), format!("Name `{at}` itself"))
+                }
                 _ => (
                     String::from("when a flag says so"),
                     String::from("Name the flags word itself"),
@@ -381,39 +357,43 @@ pub(super) fn check_predicates(p: &Parsed) -> syn::Result<()> {
         let Body::Opt { when: Some(when), .. } = &f.body else {
             continue;
         };
+        // Only a test of one field writes it. Encode checks any other condition.
+        let Some((by, test)) = when.tested() else { continue };
 
-        if let Some((owner, what)) = other_claim(p, &when.by.name) {
+        if let Some((owner, what)) = other_claim(p, &by.name) {
             return Err(syn::Error::new(
-                when.by.span,
+                by.span,
                 format!(
                     "field `{}`: `{}` is already the {what} of `{owner}`, so it cannot also be a flags word. \
                      Use a separate field for the presence bits",
-                    f.name, when.by.name,
+                    f.name, by.name,
                 ),
             ));
         }
 
-        let WhenTest::Mask(mask) = when.test else {
+        let Some(mask) = test.mask else {
             if let Some(other) = p.fields.iter().find(|g| {
                 g.name != f.name
-                    && matches!(&g.body, Body::Opt { when: Some(w), .. } if w.by.name == when.by.name)
+                    && matches!(&g.body, Body::Opt { when: Some(w), .. }
+                        if w.tested().is_some_and(|(r, t)| r.name == by.name && t.mask.is_none()))
             }) {
                 return Err(syn::Error::new(
-                    when.by.span,
+                    by.span,
                     format!(
                         "field `{}`: `{}` is a `bool`, and `{}` also uses it. \
                          Make it an integer flags word and test one bit per field",
-                        f.name, when.by.name, other.name,
+                        f.name, by.name, other.name,
                     ),
                 ));
             }
             continue;
         };
+        let Some(mask) = mask.fold().map(|m| m as u64) else { continue };
 
         let Some(bits) = p
             .fields
             .iter()
-            .find(|g| g.name == when.by.name)
+            .find(|g| g.name == by.name)
             .and_then(|g| bound(&g.body))
             .and_then(Kind::bits)
         else {
@@ -427,7 +407,7 @@ pub(super) fn check_predicates(p: &Parsed) -> syn::Result<()> {
                      Use bits {}, or widen the field",
                     f.name,
                     63 - mask.leading_zeros(),
-                    when.by.name,
+                    by.name,
                     if bits == 0 { String::from("none") } else { format!("0..={}", bits - 1) },
                 ),
             ));

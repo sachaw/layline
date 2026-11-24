@@ -6,7 +6,6 @@ use syn::spanned::Spanned;
 
 use layline_codegen::{Collection, Kind, Len, Scalar};
 
-use super::lower::model_by;
 use super::*;
 use crate::claim::Ref;
 use crate::ty::{
@@ -116,16 +115,15 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
     }
 
     let (len, len_ref) = match (count, until, bytes) {
-        (Some((CountSpec::Window { by, scale, offset, cap }, _)), _, _) => {
-            (Len::Field { by: model_by(&by, scale, offset), cap, align: None }, Some(by))
+        (Some((CountSpec::Window { by, cap }, _)), _, _) => {
+            (Len::Field { by: by.expr.clone(), cap, align: None }, Some(by))
         }
         (Some((CountSpec::Field { by, .. }, cspan)), _, _) => {
             return Err(syn::Error::new(
                 cspan,
                 format!(
                     "field `{name}`: #[count] does not apply to a string. \
-                     Write `#[len({})]` for its size in bytes",
-                    by.name,
+                     Write `#[len({by})]` for its size in bytes",
                 ),
             ));
         }
@@ -145,16 +143,6 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
             ));
         }
         (Some((CountSpec::Fill { cap: None }, _)), _, _) => (Len::Fill, None),
-        (Some((CountSpec::Squared { by, .. }, cspan)), _, _) => {
-            return Err(syn::Error::new(
-                cspan,
-                format!(
-                    "field `{name}`: `#[count({0} * {0})]` does not apply to a string. \
-                     Write `#[len({0})]`",
-                    by.name,
-                ),
-            ));
-        }
         (Some((CountSpec::Strided { stride, .. }, _)), _, _) => {
             return Err(syn::Error::new(
                 stride.span,
@@ -179,7 +167,7 @@ pub(super) fn text_field(ty: &Type, name: &str, span: Span, a: TextAttrs<'_>) ->
 pub(super) struct VarAttrs<'a> {
     pub(super) count: Option<(CountSpec, Span)>,
     pub(super) bytes: Option<(usize, Span)>,
-    pub(super) at: Option<Ref>,
+    pub(super) at: Option<Value>,
     pub(super) elem: Option<&'a Type>,
 }
 
@@ -267,7 +255,7 @@ pub(super) struct MsgAttrs<'a> {
     pub(super) count: Option<(CountSpec, Span)>,
     pub(super) bits: Option<(u32, Span)>,
     pub(super) bytes: Option<(usize, Span)>,
-    pub(super) at: Option<Ref>,
+    pub(super) at: Option<Value>,
     pub(super) elem: Option<&'a Type>,
     /// `#[with(f, g)]`: one earlier field per parameter of the nested message.
     pub(super) with: Vec<Ref>,

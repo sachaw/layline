@@ -71,7 +71,7 @@ fn a_name_that_is_not_an_identifier_is_invalid() {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Field { by: layline_codegen::By::field("head.n!"), cap: None },
+                Count::Field { by: layline_codegen::Expr::name("head.n!"), cap: None },
                 None,
                 Collection::Vec,
             ),
@@ -165,7 +165,7 @@ fn a_parameter_joins_the_name_environment_beside_the_fields() {
             "data",
             Kind::Scalar(Scalar::U(8)),
             Count::Window(layline_codegen::Len::Field {
-                by: layline_codegen::By::field("stride"),
+                by: layline_codegen::Expr::name("stride"),
                 cap: None,
                 align: None,
             }),
@@ -219,7 +219,12 @@ fn a_parameter_the_wire_would_write_back_is_refused() {
         vec![param("off", Scalar::U(8))],
         vec![
             Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(8)))]),
-            Segment::placed("head", Kind::Nested { ty: "Head".into(), bytes: 2 }, "off", None),
+            Segment::placed(
+                "head",
+                Kind::Nested { ty: "Head".into(), bytes: 2 },
+                layline_codegen::Expr::name("off"),
+                None,
+            ),
         ],
     );
     refused(&placed, "`off` is a parameter, and encode cannot write a record offset into it");
@@ -238,9 +243,21 @@ fn a_when_can_test_a_parameter() {
         )
     };
     let tests = [
-        layline_codegen::Presence::Mask { field: "mask".into(), mask: 1 },
-        layline_codegen::Presence::MaskClear { field: "mask".into(), mask: 2 },
-        layline_codegen::Presence::Flag { field: "on".into() },
+        layline_codegen::Presence::When(layline_codegen::Expr::binary(
+            layline_codegen::Op::BitAnd,
+            layline_codegen::Expr::name("mask"),
+            layline_codegen::Expr::int(1),
+        )),
+        layline_codegen::Presence::When(layline_codegen::Expr::binary(
+            layline_codegen::Op::Eq,
+            layline_codegen::Expr::binary(
+                layline_codegen::Op::BitAnd,
+                layline_codegen::Expr::name("mask"),
+                layline_codegen::Expr::int(2),
+            ),
+            layline_codegen::Expr::int(0),
+        )),
+        layline_codegen::Presence::When(layline_codegen::Expr::name("on")),
     ];
     for when in tests {
         let m = stamp(when);

@@ -159,6 +159,7 @@ fn when_token<W: fmt::Write>(w: &mut W, when: Option<Presence<'_>>) -> fmt::Resu
         Some(Presence::Bit) => w.write_str("bit"),
         Some(Presence::Remaining) => w.write_str("remaining"),
         Some(Presence::Length { by }) => write!(w, "length,{by}"),
+        Some(Presence::When { expr }) => write!(w, "when,{expr}"),
     }
 }
 

@@ -145,7 +145,7 @@ fn a_byte_message_refuses_a_one_bit_bool() {
 
 #[test]
 fn an_alignment_pads_by_two_or_more() {
-    use layline_codegen::{By, Collection, Count, MessageDef, Segment};
+    use layline_codegen::{Collection, Count, Expr, MessageDef, Segment};
     let m = |align| {
         Item::Message(MessageDef::new(
             "Frame",
@@ -154,7 +154,7 @@ fn an_alignment_pads_by_two_or_more() {
                 Segment::repeat(
                     "data",
                     Kind::Scalar(Scalar::U(8)),
-                    Count::Window(Len::Field { by: By::field("n"), cap: None, align }),
+                    Count::Window(Len::Field { by: Expr::name("n"), cap: None, align }),
                     None,
                     Collection::Vec,
                 ),

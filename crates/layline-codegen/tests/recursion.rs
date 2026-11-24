@@ -10,7 +10,7 @@ mod support;
 use layline_codegen::Item;
 use layline_codegen::emit::{Module, generate};
 use layline_codegen::{
-    Arm, By, ChoiceDef, Collection, Count, Discriminant, Field, Kind, Len, Presence, Scalar,
+    Arm, ChoiceDef, Collection, Count, Discriminant, Expr, Field, Kind, Len, Presence, Scalar,
     Segment,
 };
 use support::msg;
@@ -34,7 +34,7 @@ fn sequence(field: &str, ty: &str, len: &str) -> Segment {
     Segment::repeat(
         field,
         Kind::Msg { ty: ty.into(), boxed: false, with: Vec::new() },
-        Count::Window(Len::Field { by: By::field(len), cap: None, align: None }),
+        Count::Window(Len::Field { by: Expr::name(len), cap: None, align: None }),
         None,
         Collection::Vec,
     )
@@ -74,7 +74,11 @@ fn one_avoidable_edge_makes_the_cycle_productive() {
             vec![
                 Segment::Block(vec![Field::new("flags", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "flags".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("flags"),
+                        Expr::int(0x01),
+                    )),
                     field: Field::new(
                         "a",
                         Kind::Msg { ty: "A".into(), boxed: true, with: Vec::new() },
@@ -96,7 +100,7 @@ fn a_catalogue_with_no_terminating_arm_is_refused() {
                 Segment::Switch {
                     stated: None,
                     name: "body".into(),
-                    on: Discriminant::Field("kind".into()),
+                    on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
                     window: None,
                     doc: None,
@@ -125,7 +129,7 @@ fn one_bounded_arm_is_enough_for_a_catalogue() {
                 Segment::Switch {
                     stated: None,
                     name: "body".into(),
-                    on: Discriminant::Field("kind".into()),
+                    on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
                     window: None,
                     doc: None,
@@ -157,7 +161,7 @@ fn an_open_catalogue_is_its_own_way_out() {
                 Segment::Switch {
                     stated: None,
                     name: "body".into(),
-                    on: Discriminant::Field("kind".into()),
+                    on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
                     window: None,
                     doc: None,
@@ -180,7 +184,11 @@ fn an_indirect_cycle_that_rust_cannot_size_is_refused() {
             vec![
                 Segment::Block(vec![Field::new("n", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "n".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(0x01),
+                    )),
                     // `Option<B>` stores `B` inline, so it does not break the size cycle.
                     field: Field::new(
                         "b",
@@ -194,7 +202,11 @@ fn an_indirect_cycle_that_rust_cannot_size_is_refused() {
             vec![
                 Segment::Block(vec![Field::new("n", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "n".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(0x01),
+                    )),
                     field: Field::new(
                         "a",
                         Kind::Msg { ty: "A".into(), boxed: false, with: Vec::new() },
@@ -215,7 +227,11 @@ fn one_box_on_the_cycle_is_enough() {
             vec![
                 Segment::Block(vec![Field::new("n", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "n".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(0x01),
+                    )),
                     field: Field::new(
                         "b",
                         Kind::Msg { ty: "B".into(), boxed: true, with: Vec::new() },
@@ -228,7 +244,11 @@ fn one_box_on_the_cycle_is_enough() {
             vec![
                 Segment::Block(vec![Field::new("n", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "n".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(0x01),
+                    )),
                     field: Field::new(
                         "a",
                         Kind::Msg { ty: "A".into(), boxed: false, with: Vec::new() },
@@ -265,7 +285,11 @@ fn a_cycle_in_the_open_endedness_constants_is_resolved_rather_than_refused() {
             vec![
                 Segment::Block(vec![Field::new("n", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "n".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(0x01),
+                    )),
                     field: Field::new(
                         "b",
                         Kind::Msg { ty: "B".into(), boxed: true, with: Vec::new() },
@@ -278,7 +302,11 @@ fn a_cycle_in_the_open_endedness_constants_is_resolved_rather_than_refused() {
             vec![
                 Segment::Block(vec![Field::new("n", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Opt {
-                    when: Presence::Mask { field: "n".into(), mask: 0x01 },
+                    when: Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(0x01),
+                    )),
                     field: Field::new(
                         "a",
                         Kind::Msg { ty: "A".into(), boxed: true, with: Vec::new() },
@@ -309,7 +337,7 @@ fn a_true_that_did_not_come_from_the_cycle_survives_it() {
                 Segment::Switch {
                     stated: None,
                     name: "body".into(),
-                    on: Discriminant::Field("kind".into()),
+                    on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
                     window: None,
                     doc: None,
@@ -349,7 +377,11 @@ fn a_direct_self_reference_settles_to_false() {
         vec![
             Segment::Block(vec![Field::new("flags", Kind::Scalar(Scalar::U(8)))]),
             Segment::Opt {
-                when: Presence::Mask { field: "flags".into(), mask: 0x80 },
+                when: Presence::When(Expr::binary(
+                    layline_codegen::Op::BitAnd,
+                    Expr::name("flags"),
+                    Expr::int(0x80),
+                )),
                 field: Field::new(
                     "next",
                     Kind::Msg { ty: "Link".into(), boxed: true, with: Vec::new() },
@@ -378,7 +410,7 @@ fn a_field_may_not_be_both_a_byte_length_and_a_count() {
                 Segment::repeat(
                     "pad",
                     Kind::Scalar(Scalar::U(8)),
-                    Count::Field { by: By::field("n"), cap: None },
+                    Count::Field { by: Expr::name("n"), cap: None },
                     None,
                     Collection::Vec,
                 ),

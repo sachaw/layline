@@ -98,7 +98,7 @@ fn a_scaled_count_is_back_patched_through_its_affine_form() {
     #[derive(Debug, Clone, PartialEq, Message)]
     struct Scaled {
         pairs: u16,
-        #[count(pairs, scale = 2, offset = -1)]
+        #[count(pairs * 2 - 1)]
         #[bytes(4)]
         items: Vec<Item>,
     }

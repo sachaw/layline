@@ -9,7 +9,7 @@ fn a_count_must_name_an_earlier_field() {
         vec![Segment::repeat(
             "xs",
             Kind::Scalar(Scalar::U(8)),
-            Count::Field { by: By::field("missing"), cap: None },
+            Count::Field { by: Expr::name("missing"), cap: None },
             None,
             Collection::Vec,
         )],
@@ -114,12 +114,12 @@ fn a_switch_may_discriminate_on_a_discovered_value() {
                 kind: Kind::Var { ty: "layline_core::num::Uleb128".into() },
                 doc: None,
             },
-            switch("body", Discriminant::Field("tag".into()), "TlvBody"),
+            switch("body", Discriminant::Field(Expr::name("tag")), "TlvBody"),
         ],
     );
     assert_eq!(validate_message(&m), Ok(()));
 
-    let late = msg("Bad", vec![switch("body", Discriminant::Field("tag".into()), "TlvBody")]);
+    let late = msg("Bad", vec![switch("body", Discriminant::Field(Expr::name("tag")), "TlvBody")]);
     assert!(matches!(
         validate_message(&late),
         Err(Invalid::UnknownReference(f)) if f == "tag"
@@ -155,8 +155,8 @@ fn offset_directory() {
             Segment::repeat(
                 "entries",
                 Kind::Nested { ty: "TableEntry".into(), bytes: 132 },
-                Count::Field { by: By::field("entry_count"), cap: None },
-                Some("entry_table_offset"),
+                Count::Field { by: Expr::name("entry_count"), cap: None },
+                Some(layline_codegen::Expr::name("entry_table_offset")),
                 Collection::Vec,
             ),
         ],
@@ -169,7 +169,7 @@ fn offset_directory() {
             "t",
             Kind::Scalar(Scalar::I(32)),
             Count::Fill { cap: None },
-            Some("nowhere"),
+            Some(layline_codegen::Expr::name("nowhere")),
             Collection::Vec,
         )],
     );
@@ -188,7 +188,7 @@ fn one_record_at_a_stated_offset() {
         stated: None,
         name: name.into(),
         kind,
-        at: at.into(),
+        at: layline_codegen::Expr::name(at),
         absent: optional.then_some(Absence::ZeroOffset),
         doc: None,
     };
@@ -251,7 +251,7 @@ fn a_placed_record_may_be_gated_on_the_length_that_measures_it() {
                     stated: None,
                     name: "table".into(),
                     kind: Kind::Msg { ty: "Table".into(), boxed: false, with: Vec::new() },
-                    at: "table_at".into(),
+                    at: layline_codegen::Expr::name("table_at"),
                     absent,
                     doc: None,
                 },
@@ -276,7 +276,7 @@ fn a_placed_record_may_be_gated_on_the_length_that_measures_it() {
 /// A placed run with a fixed byte window would render the same row as a placed record.
 #[test]
 fn a_run_the_wire_places_may_not_state_a_literal_window() {
-    let run = |at: Option<String>| {
+    let run = |at: Option<layline_codegen::Expr>| {
         msg(
             "Ambiguous",
             vec![
@@ -296,7 +296,7 @@ fn a_run_the_wire_places_may_not_state_a_literal_window() {
     assert_eq!(validate_message(&run(None)), Ok(()));
     assert_eq!(run(None).segments[1].fixed_bits(), Some(128));
 
-    assert!(validate_message(&run(Some("off".into()))).is_err());
+    assert!(validate_message(&run(Some(layline_codegen::Expr::name("off")))).is_err());
 }
 
 #[test]

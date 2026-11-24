@@ -99,7 +99,7 @@ pub struct Packet {
 
 #[test]
 fn message_when_compares_a_constant() {
-    refused(
+    checked(
         r#"use layline::Message;
 
 #[derive(Message)]
@@ -108,13 +108,12 @@ pub struct InfoBlock {
     #[when(content_len >= 0x30)]
     pub emulation_memory_bytes: Option<u64>,
 }"#,
-        "field `emulation_memory_bytes`: `#[when(content_len>=0x30)]` is not supported",
     );
 }
 
 #[test]
 fn message_when_equality() {
-    refused(
+    checked(
         r#"use layline::Message;
 
 #[derive(Message)]
@@ -123,7 +122,6 @@ pub struct Packet {
     #[when(flags == 3)]
     pub timestamp: Option<u32>,
 }"#,
-        "field `timestamp`: `#[when(flags==3)]` is not supported",
     );
 }
 
@@ -248,7 +246,7 @@ pub struct Header {
 
 #[test]
 fn message_when_positive_on_a_data_field() {
-    refused(
+    checked(
         r#"use layline::Message;
 
 #[derive(Message)]
@@ -259,13 +257,12 @@ pub struct Entry {
     #[when(date > 0)]
     pub created: Option<u32>,
 }"#,
-        "field `created`: `#[when(date > 0)]` works only with `#[seek]`",
     );
 }
 
 #[test]
 fn message_when_positive_spelled_as_not_equal() {
-    refused(
+    expands_with(
         r#"use layline::{Layout, Message};
 
 #[derive(Debug, Clone, PartialEq, Layout)]
@@ -283,7 +280,7 @@ pub struct Header {
     #[bytes(2)]
     pub table: Option<Table>,
 }"#,
-        "field `table`: `#[when(table_size!=0)]` is not supported",
+        quote::quote!(::layline::table::Presence::Length { by: "table_size" }),
     );
 }
 
@@ -449,4 +446,10 @@ pub struct Node {
 }"#,
         "`short` is a `bool`, and `b` also uses it",
     );
+}
+
+/// Asserts the derives accept `src`, and encode checks a condition it cannot set.
+#[track_caller]
+fn checked(src: &str) {
+    expands_with(src, quote::quote!(::layline::EncodeError::agree));
 }

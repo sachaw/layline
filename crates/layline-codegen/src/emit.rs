@@ -219,7 +219,7 @@ mod tests {
     use super::*;
     use crate::walk::message_parts;
     use crate::{
-        Arm, By, ChoiceDef, Collection, Count, CoverTo, Coverage, Discriminant, Endian, Field,
+        Arm, ChoiceDef, Collection, Count, CoverTo, Coverage, Discriminant, Endian, Expr, Field,
         Kind, MessageDef, Presence, Scalar, Segment,
     };
 
@@ -427,7 +427,7 @@ mod tests {
                         collection: Collection::Vec,
                         name: "items".into(),
                         element: Kind::Scalar(Scalar::U(8)),
-                        count: Count::Field { by: By::field("crc"), cap: None },
+                        count: Count::Field { by: Expr::name("crc"), cap: None },
                         at: None,
                         doc: None,
                     },
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn a_bool_presence_flag_governs_exactly_one_field() {
         let opt = |name: &str, kind| Segment::Opt {
-            when: Presence::Flag { field: "head.on".into() },
+            when: Presence::When(Expr::name("head.on")),
             field: Field::new(name, kind),
         };
         let msg = |extra: Segment| MessageDef {
@@ -483,7 +483,7 @@ mod tests {
                 collection: Collection::Vec,
                 name: "items".into(),
                 element: Kind::Scalar(Scalar::U(8)),
-                count: Count::Field { by: By::field("head.on"), cap: None },
+                count: Count::Field { by: Expr::name("head.on"), cap: None },
                 at: None,
                 doc: None,
             }),
@@ -521,7 +521,7 @@ mod tests {
                         Segment::Switch {
                             stated: None,
                             name: "body".into(),
-                            on: Discriminant::Field("kind".into()),
+                            on: Discriminant::Field(Expr::name("kind")),
                             choice: "Body".into(),
                             window: None,
                             doc: None,

@@ -82,7 +82,7 @@ fn switch_with_a_fixed_footprint() {
                 field("bitmap", Kind::Scalar(Scalar::U(16))),
                 field("counter", Kind::Scalar(Scalar::U(8))),
             ]),
-            switch_in("args", Discriminant::Field("command".into()), "Args", 8),
+            switch_in("args", Discriminant::Field(Expr::name("command")), "Args", 8),
             Segment::Block(vec![
                 Field::new("payload", Kind::Scalar(Scalar::U(32))).with_stated(Stated::byte(12)),
             ]),
@@ -95,7 +95,7 @@ fn switch_with_a_fixed_footprint() {
         "Loose",
         vec![
             Segment::Block(vec![field("command", Kind::Scalar(Scalar::U(8)))]),
-            switch("args", Discriminant::Field("command".into()), "Args"),
+            switch("args", Discriminant::Field(Expr::name("command")), "Args"),
             Segment::Block(vec![
                 Field::new("payload", Kind::Scalar(Scalar::U(32))).with_stated(Stated::byte(12)),
             ]),
@@ -125,9 +125,9 @@ fn switch_on_body_length_with_a_footprint_is_refused() {
 fn switch_in_a_window_the_wire_states() {
     let window = |field: &str| Segment::Switch {
         name: "value".into(),
-        on: Discriminant::Field("tag".into()),
+        on: Discriminant::Field(Expr::name("tag")),
         choice: "Value".into(),
-        window: Some(Len::Field { by: By::field(field), cap: None, align: None }),
+        window: Some(Len::Field { by: Expr::name(field), cap: None, align: None }),
         doc: None,
         stated: None,
     };
@@ -170,7 +170,7 @@ fn switch_in_a_window_the_wire_states() {
                 name: "value".into(),
                 on: Discriminant::BodyLength,
                 choice: "Value".into(),
-                window: Some(Len::Field { by: By::field("len"), cap: None, align: None }),
+                window: Some(Len::Field { by: Expr::name("len"), cap: None, align: None }),
                 doc: None,
                 stated: None,
             },
@@ -184,7 +184,7 @@ fn switch_in_a_window_the_wire_states() {
             Segment::Block(vec![field("tag", Kind::Scalar(Scalar::U(8)))]),
             Segment::Switch {
                 name: "value".into(),
-                on: Discriminant::Field("tag".into()),
+                on: Discriminant::Field(Expr::name("tag")),
                 choice: "Value".into(),
                 window: Some(Len::Fill),
                 doc: None,
@@ -201,7 +201,7 @@ fn switch_with_a_zero_footprint_is_refused() {
         "Empty",
         vec![
             Segment::Block(vec![field("command", Kind::Scalar(Scalar::U(8)))]),
-            switch_in("args", Discriminant::Field("command".into()), "Args", 0),
+            switch_in("args", Discriminant::Field(Expr::name("command")), "Args", 0),
         ],
     );
     assert!(validate_message(&m).is_err());
@@ -209,7 +209,7 @@ fn switch_with_a_zero_footprint_is_refused() {
 
 #[test]
 fn a_stride_must_name_an_earlier_number() {
-    let strided = |stride: By| {
+    let strided = |stride: layline_codegen::Expr| {
         msg(
             "Bad",
             vec![
@@ -220,7 +220,7 @@ fn a_stride_must_name_an_earlier_number() {
                 Segment::repeat(
                     "xs",
                     Kind::Scalar(Scalar::U(16)),
-                    Count::Strided { by: By::field("n"), cap: None, stride },
+                    Count::Strided { by: Expr::name("n"), cap: None, stride },
                     None,
                     Collection::Vec,
                 ),
@@ -229,14 +229,14 @@ fn a_stride_must_name_an_earlier_number() {
     };
 
     assert!(matches!(
-        validate_message(&strided(By::field("missing"))),
+        validate_message(&strided(Expr::name("missing"))),
         Err(Invalid::UnknownReference(f)) if f == "missing"
     ));
     assert!(matches!(
-        validate_message(&strided(By::field("label"))),
+        validate_message(&strided(Expr::name("label"))),
         Err(Invalid::NonIntegerReference(f)) if f == "label"
     ));
-    assert!(validate_message(&strided(By::field("n"))).is_err());
+    assert!(validate_message(&strided(Expr::name("n"))).is_err());
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn a_strided_run_of_self_delimiting_elements_is_rejected() {
             Segment::repeat(
                 "v",
                 Kind::Var { ty: "Uleb128".into() },
-                Count::Strided { by: By::field("n"), cap: None, stride: By::field("w") },
+                Count::Strided { by: Expr::name("n"), cap: None, stride: Expr::name("w") },
                 None,
                 Collection::Vec,
             ),

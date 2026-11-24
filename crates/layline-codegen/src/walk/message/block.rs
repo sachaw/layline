@@ -94,25 +94,25 @@ impl Walk<'_> {
                     .map(|(inner, d)| {
                         let id = ident(inner);
                         if let Some(present) = derived_flag(d, own) {
-                            return quote! {
+                            return Ok(quote! {
                                 __h.#id = #root::__private::WireFlag::from_flag(#present);
-                            };
+                            });
                         }
                         let dotted = format!("{}.{inner}", f.name);
-                        let n = derived_value(d, own, &dotted, root);
+                        let n = derived_value(d, own, &dotted, root)?;
                         let (get, get_mut) = nested_accessors(owner, &f.name, inner);
                         let into =
                             Target::Nested { get: quote!(#get(&__h)), child: &child, name: inner };
                         let fits = fits(into, &quote!(__v), &dotted, root);
-                        quote! {
+                        Ok(quote! {
                             {
                                 let __v = #n;
                                 #fits
                                 *#get_mut(&mut __h) = #root::WireInt::from_i64(__v);
                             }
-                        }
+                        })
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>, Error>>()?;
                 // A later stamp writes into the child in place.
                 let binding = if inside.iter().any(|(_, d)| d.reserves().is_some()) {
                     quote!(let mut #local)
@@ -216,14 +216,14 @@ impl Walk<'_> {
                 self.env.bind_nested(&f.name, quote!(#sub_var.#fname));
             }
         }
-        let inits = fields.iter().map(|f| {
+        let inits = fields.iter().map(|f| -> Result<TokenStream, Error> {
             let fname = ident(&f.name);
             let ty = kind_ty(&f.kind, root);
             if let Some((_, local, held_after)) = locals.iter().find(|(n, ..)| *n == f.name) {
                 let take = if *held_after { quote!(.clone()) } else { quote!() };
-                return quote! { #fname: #local #take, };
+                return Ok(quote! { #fname: #local #take, });
             }
-            match self.derived.iter().find(|(df, _)| df == &f.name).map(|(_, d)| d) {
+            Ok(match self.derived.iter().find(|(df, _)| df == &f.name).map(|(_, d)| d) {
                 Some(d) => match derived_flag(d, own) {
                     Some(present) => quote! {
                         #fname: <#ty as #root::__private::WireFlag>::from_flag(#present),
@@ -234,7 +234,7 @@ impl Walk<'_> {
                         quote! { #fname: <#ty as #root::WireInt>::from_i64(#held), }
                     }
                     None => {
-                        let n = derived_value(d, own, &f.name, root);
+                        let n = derived_value(d, own, &f.name, root)?;
                         let fits = fits(Target::Field(&ty, 0), &n, &f.name, root);
                         quote! {
                             #fname: {
@@ -249,8 +249,9 @@ impl Walk<'_> {
                     let held = own.get(&f.name);
                     quote! { #fname: #held #clone, }
                 }
-            }
+            })
         });
+        let inits = inits.collect::<Result<Vec<_>, Error>>()?;
         let mark = if reserve.is_empty() {
             quote!()
         } else {

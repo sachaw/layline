@@ -5,16 +5,18 @@ use alloc::vec::Vec;
 
 use super::Derive;
 
-use super::{Endian, Segment};
+use super::{Endian, Expr, Segment};
 
 /// What a switch selects on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Discriminant {
-    /// The value of an earlier field.
+    /// The value of an expression over earlier fields and parameters, such as `kind` or
+    /// `kind & 0x0f`.
     ///
-    /// `outer.inner` names a field of a nested layout.
-    Field(String),
+    /// If it is invertible in the one field it reads, encode writes that field from the arm.
+    /// Otherwise encode checks the arm against it.
+    Field(Expr),
     /// The number of bytes left in the body.
     BodyLength,
 }

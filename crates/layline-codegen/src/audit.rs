@@ -3,8 +3,9 @@
 use layline_core::{audit, table};
 
 use crate::model::positioned;
+use crate::walk::row::By;
 use crate::walk::{collection_ty, field_rows, row};
-use crate::{By, Kind, LayoutDef, Param, Scalar};
+use crate::{Kind, LayoutDef, Param, Scalar};
 
 /// The records for a fixed layout: `L`, its `F` rows, the `V` verdict, and its `T` rows.
 pub(crate) fn layout(l: &LayoutDef) -> String {
@@ -160,6 +161,7 @@ fn presence_view(when: &row::Presence) -> table::Presence<'_> {
         row::Presence::Bit => table::Presence::Bit,
         row::Presence::Remaining => table::Presence::Remaining,
         row::Presence::Length { by } => table::Presence::Length { by },
+        row::Presence::When { expr } => table::Presence::When { expr },
     }
 }
 
@@ -208,9 +210,9 @@ fn span_view(span: &row::Span) -> table::Span<'_> {
     }
 }
 
-fn discriminant_view(on: &crate::Discriminant) -> table::Discriminant<'_> {
+fn discriminant_view(on: &row::On) -> table::Discriminant<'_> {
     match on {
-        crate::Discriminant::Field(field) => table::Discriminant::Field(field),
-        crate::Discriminant::BodyLength => table::Discriminant::BodyLength,
+        row::On::Field(field) => table::Discriminant::Field(field),
+        row::On::BodyLength => table::Discriminant::BodyLength,
     }
 }

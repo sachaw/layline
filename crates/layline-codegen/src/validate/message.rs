@@ -6,7 +6,8 @@ use alloc::vec::Vec;
 
 use super::bits::validate_bits;
 use super::coverage::{Places, check_value, coverage, stampable};
-use super::names::{Known, Reads, Seen, read_only, resolve, stated_with};
+use super::expr;
+use super::names::{Known, Seen, read_only, stated_with};
 use super::{Invalid, field_names, ident, kind_paths, type_path};
 use crate::{
     Absence, ChoiceDef, Collection, Count, Discriminant, Kind, Len, MessageDef, Param, Presence,
@@ -206,7 +207,9 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
     let optional: Places<'a> = segments.iter().filter_map(Segment::placed_optionally).collect();
     let mut pos: Cursor = Some(0);
     for seg in segments {
-        if let Some(who) = open_ended {
+        if let Some(who) = open_ended
+            && !matches!(seg, Segment::Valid { .. })
+        {
             return Err(Invalid::AfterOpenEnd(format!(
                 "`{who}` reads to the end of the body, so nothing can follow it"
             )));
@@ -265,7 +268,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 match kind {
                     Kind::Var { .. } | Kind::Msg { .. } => {}
                     Kind::Text { len, .. } => match len {
-                        Len::Field { by, .. } => resolve(seen, &by.field, Reads::Number)?,
+                        Len::Field { by, .. } => expr::number(seen, by)?,
                         Len::Bytes(_) | Len::Until { .. } => {}
                         Len::Fill => open_ended = Some("text(fill)"),
                     },
@@ -286,9 +289,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 kind_paths(name, element)?;
                 variable_element(name, element)?;
                 match count {
-                    Count::Field { by, .. } | Count::Squared { by, .. } => {
-                        resolve(seen, &by.field, Reads::Number)?;
-                    }
+                    Count::Field { by, .. } => expr::number(seen, by)?,
                     Count::Window(Len::Until { .. }) => {
                         if element.bits() != Some(8) {
                             return Err(Invalid::Other(format!(
@@ -313,10 +314,11 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                         }
                     }
                     Count::Strided { by, stride, .. } => {
-                        resolve(seen, &by.field, Reads::Number)?;
-                        resolve(seen, &stride.field, Reads::Number)?;
-                        if stride.field == by.field {
-                            let field = &by.field;
+                        expr::number(seen, by)?;
+                        expr::number(seen, stride)?;
+                        if let Some(field) = by.as_name()
+                            && stride.as_name() == Some(field)
+                        {
                             return Err(Invalid::Other(format!(
                                 "collection `{name}`: `{field}` is both the count and the \
                                  stride. Use a separate field for the stride"
@@ -333,7 +335,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                         }
                     }
                     Count::Window(len) => match len {
-                        Len::Field { by, .. } => resolve(seen, &by.field, Reads::Number)?,
+                        Len::Field { by, .. } => expr::number(seen, by)?,
                         Len::Bytes(n) if at.is_some() => {
                             return Err(Invalid::Other(format!(
                                 "collection `{name}`: an offset and a fixed {n} bytes give no \
@@ -351,21 +353,22 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     },
                     Count::Fill { .. } => open_ended = Some("repeat(fill)"),
                 }
-                if let Some(field) = at {
-                    resolve(seen, field, Reads::Number)?;
-                    read_only(seen, field, "a collection offset")?;
+                if let Some(at) = at {
+                    expr::number(seen, at)?;
+                    read_only(seen, at, "a collection offset")?;
                 }
                 stated_with(seen, element)?;
             }
             Segment::Placed { name, kind, at, absent, .. } => {
                 kind_paths(name, kind)?;
-                resolve(seen, at, Reads::Number)?;
+                expr::number(seen, at)?;
                 read_only(seen, at, "a record offset")?;
                 stated_with(seen, kind)?;
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
-                    resolve(seen, by, Reads::Number)?;
-                    read_only(seen, by, "a record length")?;
-                    if by == at {
+                    let len = crate::Expr::name(by);
+                    expr::number(seen, &len)?;
+                    read_only(seen, &len, "a record length")?;
+                    if at.as_name() == Some(by) {
                         return Err(Invalid::field(
                             name,
                             format!(
@@ -396,8 +399,8 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
             }
             Segment::Switch { name, on, choice, window, .. } => {
                 type_path(name, "the catalogue", choice)?;
-                if let Discriminant::Field(field) = on {
-                    resolve(seen, field, Reads::Number)?;
+                if let Discriminant::Field(on) = on {
+                    expr::number(seen, on)?;
                 }
                 match window {
                     None => {}
@@ -425,12 +428,11 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                                 name,
                                 format!(
                                     "a switch on the body length cannot also take its size \
-                                     from `{}`. Switch on a field, or remove the window",
-                                    by.field,
+                                     from `{by}`. Switch on a field, or remove the window",
                                 ),
                             ));
                         }
-                        resolve(seen, &by.field, Reads::Number)?;
+                        expr::number(seen, by)?;
                     }
                     Some(other) => {
                         return Err(Invalid::field(
@@ -448,21 +450,8 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 stated_with(seen, &field.kind)?;
                 match when {
                     Presence::Remaining => {}
-                    Presence::Mask { field: flag, mask }
-                    | Presence::MaskClear { field: flag, mask } => {
-                        resolve(seen, flag, Reads::Number)?;
-                        if *mask == 0 {
-                            return Err(Invalid::field(
-                                &field.name,
-                                format!(
-                                    "the mask tests no bits of `{flag}`, so the field is never \
-                                     present. Write the bit that marks it present",
-                                ),
-                            ));
-                        }
-                    }
-                    Presence::Flag { field: flag } | Presence::FlagClear { field: flag } => {
-                        resolve(seen, flag, Reads::Flag)?;
+                    Presence::When(e) => {
+                        expr::presence(seen, e).map_err(|why| in_field(&field.name, why))?
                     }
                     Presence::Bit => {
                         return Err(Invalid::field(
@@ -475,8 +464,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     }
                 }
                 match &field.kind {
-                    Kind::Text { len: Len::Field { by, .. }, .. } => {
-                        let src = &by.field;
+                    Kind::Text { len: Len::Field { by: src, .. }, .. } => {
                         return Err(Invalid::field(
                             &field.name,
                             format!(
@@ -497,6 +485,9 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     }
                     _ => {}
                 }
+            }
+            Segment::Valid { field, holds } => {
+                expr::condition(seen, holds).map_err(|why| in_field(field, why))?;
             }
             Segment::Checksum { name, repr, algorithm, over, .. } => {
                 check_value(name, repr, algorithm)?;
@@ -520,5 +511,13 @@ fn variable_element(name: &str, element: &Kind) -> Result<(), Invalid> {
             "collection `{name}`: text elements of {other:?} length have no end. \
              Give each a terminator or a fixed length",
         ))),
+    }
+}
+
+/// An expression's refusal, about `field` unless it already names a field or a reference.
+fn in_field(field: &str, why: Invalid) -> Invalid {
+    match why {
+        Invalid::Other(why) => Invalid::field(field, why),
+        other => other,
     }
 }

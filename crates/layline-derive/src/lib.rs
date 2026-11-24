@@ -17,6 +17,7 @@ mod refusals;
 mod root;
 mod stub;
 mod ty;
+mod value;
 mod width;
 
 fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
@@ -120,7 +121,7 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
     Layout,
     attributes(
         layout, bits, codec, bytes, at, overlay, magic, checksum, range, count, len, stride, fill,
-        seek, text, until, var, message, switch, when, align
+        seek, text, until, var, message, switch, when, align, valid
     )
 )]
 pub fn derive_layout(input: TokenStream) -> TokenStream {
@@ -248,14 +249,61 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// `encode` and `encode_into` return `Result<_, EncodeError>` when the message declares something
 /// a value can break, or holds a type that does, and otherwise the bytes and
 /// `Result<(), Overflow>`. What a value can break: a field narrower than its type, a `#[range]`, a
-/// cap, a count, length, offset or discriminant field too narrow for what it states, a `scale` it
-/// cannot state exactly, a terminator or mask inside the value, and a parameter it disagrees with.
+/// cap, a count, length, offset or discriminant field too narrow for what it states, an
+/// expression it cannot state exactly or disagrees with, a terminator or mask inside the value,
+/// and a parameter it disagrees with.
 /// The error names the field, the declaration and the value. A message held through `Box` or
 /// `Vec` counts as refusing unless it is this one, since it may hold this one in turn.
 /// `Message::ENCODE_FALLIBLE` says which; the trait's own methods always return `EncodeError`. In a byte-mode
 /// message a `bool` is one strict byte, as in a `bytes = N` layout. A struct with no fields,
 /// `struct Ready {}` or `struct Ready;`, is a message of no bytes, such as a frame whose selector
 /// alone says what happened.
+///
+/// # Expressions
+///
+/// Every attribute that takes a value, `#[count]`, `#[len]`, `#[stride]`, `#[seek]`,
+/// `#[switch]`, `#[when]` and `#[valid]`, takes one expression in one language. Its operands are
+/// integer literals (`12`, `0x0f`, `0b1010`, `1_000`), constants (a `SCREAMING_CASE` name or a
+/// path with `::`), earlier fields (`n`, or `hdr.n` in an earlier nested layout), parameters, and
+/// parenthesised expressions. Its operators bind as Rust's do, loosest first:
+///
+/// | Operators | Operands |
+/// |---|---|
+/// | `\|\|`, then `&&` | conditions |
+/// | `==` `!=` `<` `<=` `>` `>=`, not chained | integers, or two `bool`s for `==` and `!=` |
+/// | `\|`, then `^`, then `&` | integers |
+/// | `<<` `>>`, then `+` `-`, then `*` `/` `%` | integers |
+/// | unary `!`, `-` | a `bool`; an integer |
+///
+/// A condition is a `bool`, or the result of `&`, `|` or `^`, which holds when any bit is set.
+/// `!` takes a `bool`: on an integer, Rust would flip its bits rather than test them. A number
+/// must read at least one field or parameter; a fixed size is the type's, as `[T; N]` or
+/// `#[bytes(N)]`. Evaluation is in `i64` and total: an operation that overflows, divides by zero
+/// or shifts by a count outside `0..64` has no value, and decode refuses the bytes with
+/// `ParseError::Malformed`, naming the first field the expression reads, rather than wrapping.
+/// `<<` multiplies by a power of two, so a set bit shifted out overflows. `/` and `%` round
+/// toward zero, and `&&` and `||` short-circuit.
+///
+/// What encode does with an expression is decided when the type is built, by one rule: **what
+/// encode can work backwards.**
+///
+/// - An expression that reads exactly one field, once, through steps that each have an inverse,
+///   is written: encode works the number back to that field. The steps are `+ k`, `- k`,
+///   `k - f`, `* k` (exactly), `/ k`, `<< k` (exactly), `>> k`, unary `-`, and `f * f` (an exact
+///   root), where `k` reads only literals, constants and parameters. So `#[count(n * 2 - 1)]`
+///   writes `n = (len + 1) / 2`. Where no value of the field gives the number, or decode would
+///   read back a different one, encode refuses with `EncodeError::Inexact`; a value the field is
+///   too narrow for is `EncodeError::Unfit`, and one past a `cap` is `EncodeError::OverCap`.
+/// - A condition that tests one field is written too: `f` for a `bool`, `f & MASK` for bits,
+///   with a literal or constant mask, and `!` or `== 0` for their absence. Encode sets or clears
+///   them from whether the field is `Some`, keeping the field's other bits.
+/// - Any other expression is checked. Every field it reads holds a value encode already has: the
+///   caller's, a parameter's, or one another attribute writes, read as encode writes it. Encode
+///   returns `EncodeError::Mismatch` where the value disagrees with the expression, naming the
+///   field the attribute is on. An expression that reads a field encode fills in only after a
+///   later segment, such as a `#[seek]` record's offset, is refused when the type is built.
+///
+/// Where two attributes would write one field, the first writes it and the second is checked.
 ///
 /// # Container attributes
 ///
@@ -278,12 +326,10 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// A `Vec<T>` or `Box<[T]>` field takes one of these:
 ///
-/// - `#[count(f)]`: `f` elements. `f` is an earlier field, or `hdr.f` in an earlier nested layout.
-/// - `#[count(f * f)]`: `f` squared elements.
-/// - `#[count(f, scale = S, offset = O, cap = N)]`: `f * S + O` elements. Decode rejects more
-///   than `N`.
-/// - `#[len(f)]`: `f` bytes. Takes the same keys. Also sizes a `#[text]` string or a `#[switch]`
-///   body.
+/// - `#[count(e)]`, `#[count(e, cap = N)]`: as many elements as the expression `e` gives, such
+///   as `n`, `hdr.n`, `n * 2 - 1` or `rows * cols`. Decode rejects more than `N`.
+/// - `#[len(e)]`, `#[len(e, cap = N)]`: as many bytes as `e` gives. Also sizes a `#[text]` string
+///   or a `#[switch]` body.
 /// - `#[fill]`, `#[fill(cap = N)]`: whole elements until the message ends.
 /// - `#[until(b)]`: bytes up to the terminator `b`. Decode consumes it and encode appends it.
 /// - `#[until(mask = M)]`: elements up to and including the first whose first byte has the `M`
@@ -291,9 +337,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// # Field attributes
 ///
-/// - `#[stride(f)]`, `#[stride(f, scale = S, offset = O)]`: the byte size of one element. Use with
-///   `#[count]`.
-/// - `#[seek(f)]`: read at the byte offset in `f`, counted from the start of the message. An
+/// - `#[stride(e)]`: the byte size of one element. Use with `#[count]`.
+/// - `#[seek(e)]`: read at the byte offset `e` gives, counted from the start of the message. An
 ///   `Option<T>` at offset zero is `None`.
 /// - `#[at(byte = N)]`: the byte offset where the field starts.
 /// - `#[bytes(N)]`: the size of a nested layout, one element, a `#[switch]` body, or a NUL-padded
@@ -304,15 +349,15 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[message]`: a nested `Message`, boxed or not.
 /// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's `needs`: integers,
 ///   `bool`s, fields of a nested layout (`hdr.f`) or parameters. Use with `#[message]`.
-/// - `#[switch(f)]`: an enum whose variant `f` selects. `#[switch(..)]` selects by the remaining
-///   length.
-/// - `#[when(flags & MASK)]`, `#[when(flag)]`: an `Option<T>` present when the bits are set.
-///   Encode sets them for `Some` and clears them for `None`. `flags` may be a parameter.
-/// - `#[when(flags & MASK == 0)]`, `#[when(!flag)]`: an `Option<T>` present when the bits are
-///   clear, as with a flag that says a default applies. Encode clears them for `Some` and sets
-///   them for `None`. `!(flags & MASK)` is refused: on an integer, `!` flips the bits.
-/// - `#[when(n > 0)]`: an `Option<T>` present when `n` is non-zero. Use with `#[seek]`. `n` is the
-///   record's exact byte length: decode refuses a record of any other length, and encode writes
+/// - `#[switch(e)]`: an enum whose variant the value of `e` selects. `#[switch(..)]` selects by
+///   the remaining length.
+/// - `#[when(c)]`: an `Option<T>` present when the condition `c` holds. `#[when(flags & MASK)]`,
+///   `#[when(flag)]`, `#[when(flags & MASK == 0)]` and `#[when(!flag)]` are written: encode sets or
+///   clears the bits from `Some`. Encode checks any other condition, such as
+///   `#[when(has_ext && kind != 3)]`, against `Some`. `!(flags & MASK)` is refused: on an
+///   integer, `!` flips the bits.
+/// - `#[when(n > 0)]` or `#[when(n != 0)]` with `#[seek]`: a record present when `n`, its exact
+///   byte length, is non-zero: decode refuses a record of any other length, and encode writes
 ///   the length. With `#[align(N)]`, `n` does not count the padding up to a multiple of `N`
 ///   bytes, and the record may end anywhere from `n` to that bound, as a block that states its
 ///   own size, padding included, does. For a number that only marks presence, use `#[seek]`
@@ -329,6 +374,10 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   encode computes it.
 /// - `#[range(lo..=hi)]`: the allowed values. Decode rejects others, and encode refuses them with
 ///   `EncodeError::OutOfRange`, checking a derived length or offset once it is known.
+/// - `#[valid(c)]`: a condition the whole value must satisfy, such as
+///   `#[valid(rtp.payload_type == PDW)]`. It writes nothing, so it is always checked: decode
+///   refuses a body that breaks it with `ParseError::Malformed`, and encode a value that does
+///   with `EncodeError::Mismatch`, naming this field. It is checked after every field is read.
 ///
 /// # Borrowed fields
 ///
@@ -397,7 +446,7 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
     Message,
     attributes(
         message, count, len, stride, fill, seek, at, codec, bits, bytes, text, until, var, switch,
-        when, with, present, checksum, magic, value, other, range, align
+        when, with, present, checksum, magic, value, other, range, align, valid
     )
 )]
 pub fn derive_message(input: TokenStream) -> TokenStream {

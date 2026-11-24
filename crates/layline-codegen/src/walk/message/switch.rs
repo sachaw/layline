@@ -6,10 +6,12 @@ use quote::quote;
 use super::Check;
 use super::body::{Bind, Item, Own, Walk};
 use super::cursor::windowed;
+use super::eval::number;
 use super::recursion::bounded_check;
 use super::table::Row;
+use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{doc_attr, path, row};
+use crate::walk::{Derived, doc_attr, path, row};
 use crate::{Discriminant, Error, Len, Root, Segment};
 
 /// Assert that every arm of the union `ty` is exactly `bytes` bytes.
@@ -50,10 +52,10 @@ impl Walk<'_> {
         self.public_fields.extend(quote! { #d pub #ident: #cty, });
         self.binds.push(Bind { name: ident.clone(), ty: quote!(#cty), value: quote!(#ident) });
         let span = match window {
-            None => row::Span::Chosen { on: on.clone() },
-            Some(Len::Bytes(n)) => row::Span::ChosenIn { on: on.clone(), bits: *n as u64 * 8 },
+            None => row::Span::Chosen { on: row::On::of(on) },
+            Some(Len::Bytes(n)) => row::Span::ChosenIn { on: row::On::of(on), bits: *n as u64 * 8 },
             Some(Len::Field { by, .. }) => {
-                row::Span::ChosenWithin { on: on.clone(), by: by.clone() }
+                row::Span::ChosenWithin { on: row::On::of(on), by: row::By::of(by) }
             }
             Some(other) => {
                 return Err(Error::Refused(format!(
@@ -65,7 +67,7 @@ impl Walk<'_> {
         self.rows.push(Row::new(field, span).decoded_by(Some(choice)));
 
         let disc = match on {
-            Discriminant::Field(f) => self.env.get(owner, "#[switch]", f)?,
+            Discriminant::Field(on) => self.env.number(owner, "#[switch]", on)?,
             Discriminant::BodyLength => match window {
                 None => quote!(((__body.len() - __at) as #i64)),
                 Some(Len::Bytes(n)) => {
@@ -110,33 +112,38 @@ impl Walk<'_> {
             }
             _ => quote!(),
         };
+        let Prelude { some, err, .. } = self.root.prelude();
+        // The discriminant the fields state, which the arm must agree with unless encode writes
+        // it from the arm.
+        let mut agree = TokenStream::new();
         let stated = match on {
-            Discriminant::Field(f) => {
-                let n = self.held(f, own);
-                quote!(#root::WireInt::to_i64(&#n))
+            Discriminant::Field(by) => {
+                let selects =
+                    |d: &Derived| matches!(d, Derived::Discriminant { of, .. } if of == field);
+                if !self.writes(selects) {
+                    let check = self.agree(own, field, quote!(__d), by)?;
+                    agree.extend(quote! {
+                        if let #some(__d) = #root::Choice::discriminant(&#held) {
+                            #check
+                        }
+                    });
+                }
+                let n = number(by, &|name, want| self.written(own, name, want), root)?;
+                quote! {
+                    match #n {
+                        #some(__n) => __n,
+                        _ => return #err(#root::EncodeError::Inexact { field: #field, value: 0 }),
+                    }
+                }
             }
             Discriminant::BodyLength => quote!((out.len() - __chosen) as #i64),
         };
-        // A parameter the holder writes: the arm and its window must agree with it.
-        let mut agree = TokenStream::new();
-        if let Discriminant::Field(f) = on
-            && self.is_param(f)
-        {
-            let n = self.held(f, own);
-            agree.extend(quote! {
-                if let ::core::option::Option::Some(__d) = #root::Choice::discriminant(&#held) {
-                    #root::EncodeError::agree(#field, __d, #root::WireInt::to_i64(&#n))?;
-                }
-            });
+        if let Some(Len::Field { by, .. }) = window {
+            let sizes = |d: &Derived| matches!(d, Derived::ArmLen { of, .. } if of == field);
+            if !self.writes(sizes) {
+                agree.extend(self.agree(own, field, quote!(out.len() - __chosen), by)?);
+            }
         }
-        if let Some(Len::Field { by, .. }) = window
-            && let Some(stated) = self.param_number(by)
-        {
-            agree.extend(quote! {
-                #root::EncodeError::agree(#field, (out.len() - __chosen) as #i64, #stated)?;
-            });
-        }
-        let err = self.root.prelude().err;
         self.byte_steps.extend(quote! {
             let __chosen = out.len();
             #root::Choice::encode_into(&#held, out)?;

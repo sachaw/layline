@@ -4,13 +4,13 @@ use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 
 use super::body::{Bind, Item, Own, Walk};
-use super::cursor::{cap_guard, consumed_nothing, take, windowed};
-use super::patch::{StampAt, affine_inverse, stamp_slot};
+use super::cursor::{consumed_nothing, take, windowed};
+use super::eval::blamed;
 use super::table::{Row, deferred_type, span_of_count};
 use super::value::{WithCtx, discovered_read, value_write};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{SlotOf, doc_attr, kind_ty, path, scalar_ty};
+use crate::walk::{Derived, SlotOf, doc_attr, kind_ty, path, scalar_ty};
 use crate::{Collection, Count, Error, Kind, Len, Root, Scalar, Segment};
 
 /// How one element is read and written, and how far it moves the cursor.
@@ -190,20 +190,15 @@ impl Walk<'_> {
             Step::Discovered { .. } => None,
         };
         let mut row = Row::new(coll, span_of_count(count, each)).decoded_by(deferred_type(element));
-        if let Some(field) = at {
-            row = row.seek(field);
+        if let Some(at) = at {
+            row = row.seek(at);
         }
         self.rows.push(row);
 
         let mut stamp = TokenStream::new();
-        if let Some(field) = at {
+        if let Some(at) = at {
             let here = self.here();
-            stamp = stamp_slot(
-                &self.slots,
-                StampAt { owner, coll, of: SlotOf::Position, field, record: false },
-                &here,
-                root,
-            )?;
+            stamp = self.stamp_or_agree(own, coll, (SlotOf::Position, false), at, here, None)?;
         }
         let read_n = |n: TokenStream| {
             let one = step.read_one(true, root);
@@ -221,20 +216,8 @@ impl Walk<'_> {
 
         match count {
             Count::Field { by, cap } => {
-                let n = self.env.stated_n(owner, "#[count]", by, *cap)?;
+                let n = self.env.size_n(owner, "#[count]", by, *cap)?;
                 self.parse_steps.extend(read_n(n));
-            }
-            Count::Squared { by, cap } => {
-                let field = by.field.as_str();
-                let order = self.env.stated(owner, "#[count]", by)?;
-                let cap_check = cap_guard(*cap, field, root);
-                self.parse_steps.extend(read_n(quote! {
-                    let __side = #order;
-                    let __n = __side
-                        .checked_mul(__side)
-                        .ok_or(#root::ParseError::Malformed { field: #field, at: __at })?;
-                    #cap_check
-                }));
             }
             Count::Strided { by, cap, stride } => {
                 let Step::Fixed { read, .. } = &step else {
@@ -244,9 +227,9 @@ impl Walk<'_> {
                     )));
                 };
                 let elem_len = element_width(element, root);
-                let n = self.env.stated_n(owner, "#[count]", by, *cap)?;
-                let sfield = stride.field.as_str();
-                let stride = self.env.stated(owner, "#[stride]", stride)?;
+                let n = self.env.size_n(owner, "#[count]", by, *cap)?;
+                let sfield = blamed(stride, coll);
+                let stride = self.env.size(owner, "#[stride]", stride)?;
                 self.parse_steps.extend(quote! {
                     #n
                     let __stride = #stride;
@@ -404,48 +387,32 @@ impl Walk<'_> {
         }
         let i64 = quote!(::core::primitive::i64);
         let (before, after) = match count {
-            // The holder writes a parameter, so encode checks the elements against it.
-            Count::Window(Len::Field { by, .. }) if self.is_param(&by.field) => {
-                let stated = self.param_number(by).expect("a parameter");
-                (
-                    quote! { let __span_start = out.len(); },
-                    quote! {
-                        #root::EncodeError::agree(#coll, (out.len() - __span_start) as #i64, #stated)?;
-                    },
-                )
-            }
-            Count::Field { by, .. } | Count::Strided { by, .. } if self.is_param(&by.field) => {
-                let stated = self.param_number(by).expect("a parameter");
-                (
-                    quote! { #root::EncodeError::agree(#coll, (#held).len() as #i64, #stated)?; },
-                    quote!(),
-                )
-            }
-            Count::Squared { by, .. } if self.is_param(&by.field) => {
-                let stated = self.param_number(by).expect("a parameter");
-                (
-                    quote! {
-                        let __side = #stated;
-                        #root::EncodeError::agree(#coll, (#held).len() as #i64, __side * __side)?;
-                    },
-                    quote!(),
-                )
-            }
             Count::Window(Len::Field { by, cap, .. }) => (
                 quote! { let __span_start = out.len(); },
-                stamp_slot(
-                    &self.slots,
-                    StampAt { owner, coll, of: SlotOf::Length, field: &by.field, record: false },
-                    &affine_inverse(
-                        quote!(out.len() - __span_start),
-                        (by.scale, by.offset),
-                        cap.map(|cap| (cap, coll.as_str())),
-                        &by.field,
-                        root,
-                    ),
-                    root,
+                self.stamp_or_agree(
+                    own,
+                    coll,
+                    (SlotOf::Length, false),
+                    by,
+                    quote!(out.len() - __span_start),
+                    *cap,
                 )?,
             ),
+            Count::Field { by, .. } | Count::Strided { by, .. } => {
+                let mut checks = TokenStream::new();
+                let counts = |d: &Derived| matches!(d, Derived::Count { of, .. } if of == coll);
+                if !self.writes(counts) {
+                    checks.extend(self.agree(own, coll, quote!((#held).len()), by)?);
+                }
+                if let Count::Strided { stride, .. } = count {
+                    let widths = |d: &Derived| matches!(d, Derived::Stride { elem, by } if elem == element && by == stride);
+                    if !self.writes(widths) {
+                        let width = element_width(element, root);
+                        checks.extend(self.agree(own, coll, width, stride)?);
+                    }
+                }
+                (checks, quote!())
+            }
             Count::Window(Len::Bytes(n)) => {
                 let lit = Literal::i64_unsuffixed(*n as i64);
                 (
@@ -541,13 +508,13 @@ impl Walk<'_> {
         });
 
         let mut row = Row::new(coll, span_of_count(count, Some(8)));
-        if let Some(field) = at {
-            row = row.seek(field);
+        if let Some(at) = at {
+            row = row.seek(at);
         }
         self.rows.push(row);
 
         let n = match count {
-            Count::Field { by, cap } => self.env.stated_n(owner, "#[count]", by, *cap)?,
+            Count::Field { by, cap } => self.env.size_n(owner, "#[count]", by, *cap)?,
             Count::Window(len @ (Len::Field { .. } | Len::Bytes(_))) => {
                 self.window_len(len, "collection", coll)?
             }
@@ -595,32 +562,28 @@ impl Walk<'_> {
         });
 
         let mut stamp = TokenStream::new();
-        if let Some(field) = at {
+        if let Some(at) = at {
             let here = self.here();
-            stamp = stamp_slot(
-                &self.slots,
-                StampAt { owner, coll, of: SlotOf::Position, field, record: false },
-                &here,
-                root,
-            )?;
+            stamp = self.stamp_or_agree(own, coll, (SlotOf::Position, false), at, here, None)?;
         }
         let held = own.get(coll);
         let (before, after) = match count {
             Count::Window(Len::Field { by, cap, .. }) => (
                 quote! { let __span_start = out.len(); },
-                stamp_slot(
-                    &self.slots,
-                    StampAt { owner, coll, of: SlotOf::Length, field: &by.field, record: false },
-                    &affine_inverse(
-                        quote!(out.len() - __span_start),
-                        (by.scale, by.offset),
-                        cap.map(|cap| (cap, coll.as_str())),
-                        &by.field,
-                        root,
-                    ),
-                    root,
+                self.stamp_or_agree(
+                    own,
+                    coll,
+                    (SlotOf::Length, false),
+                    by,
+                    quote!(out.len() - __span_start),
+                    *cap,
                 )?,
             ),
+            Count::Field { by, .. }
+                if !self.writes(|d| matches!(d, Derived::Count { of, .. } if of == coll)) =>
+            {
+                (self.agree(own, coll, quote!(#held.len()), by)?, quote!())
+            }
             Count::Window(Len::Bytes(n)) if *collection == Collection::Borrowed => {
                 let lit = Literal::i64_unsuffixed(*n as i64);
                 let i64 = quote!(::core::primitive::i64);

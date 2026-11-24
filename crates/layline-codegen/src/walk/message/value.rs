@@ -105,8 +105,8 @@ pub(super) fn value_read(
     match kind {
         Kind::Text { len: Len::Field { by, cap, .. }, codec } => {
             let decode = text_decode(codec, field, root);
-            let n = env.stated_n(owner, "#[count]", by, *cap)?;
-            let by = by.field.as_str();
+            let n = env.size_n(owner, "#[len]", by, *cap)?;
+            let by = super::eval::blamed(by, field);
             Ok(quote! {
                 #n
                 let __end = __at
@@ -164,7 +164,7 @@ fn value_write_derived(
         )));
     };
     let p = path(ty);
-    let n = derived_value(d, own, field, root);
+    let n = derived_value(d, own, field, root)?;
     let fits = fits(Target::Field(&quote!(#p), 0), &n, field, root);
     Ok(quote! {
         {
@@ -285,23 +285,18 @@ impl Walk<'_> {
                 self.root,
             )?,
         };
-        // A parameter the holder writes sizes the text: encode checks the text against it.
+        // Text whose length encode does not write: encode checks the text against it.
         let write = match kind {
-            Kind::Text { len: Len::Field { by, .. }, .. } => match self.param_number(by) {
-                Some(stated) => {
-                    let root = self.root;
-                    quote! {
-                        let __text_start = out.len();
-                        #write
-                        #root::EncodeError::agree(
-                            #field,
-                            (out.len() - __text_start) as ::core::primitive::i64,
-                            #stated,
-                        )?;
-                    }
+            Kind::Text { len: Len::Field { by, .. }, .. }
+                if !self.writes(|d| matches!(d, Derived::TextLen { of, .. } if of == field)) =>
+            {
+                let check = self.agree(own, field, quote!(out.len() - __text_start), by)?;
+                quote! {
+                    let __text_start = out.len();
+                    #write
+                    #check
                 }
-                None => write,
-            },
+            }
             _ => write,
         };
         self.byte_steps.extend(write);

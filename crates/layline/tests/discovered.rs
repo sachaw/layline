@@ -229,7 +229,7 @@ fn len_on_a_string_takes_the_affine_form_and_a_cap() {
     struct Record {
         words: u8,
         #[text(codecs::Ascii)]
-        #[len(words, scale = 2, cap = 4)]
+        #[len(words * 2, cap = 4)]
         name: String,
     }
 
@@ -422,7 +422,7 @@ fn a_hostile_varint_count_saturates_instead_of_wrapping() {
     struct Hostile {
         #[var]
         n: Uleb128,
-        #[count(n, offset = 2)]
+        #[count(n + 2)]
         items: Vec<u8>,
     }
 

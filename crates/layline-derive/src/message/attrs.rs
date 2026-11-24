@@ -8,6 +8,7 @@ use super::container::MESSAGE_ATTRS;
 use super::*;
 use crate::attr::bare;
 use crate::claim::{Ref, parse_checksum};
+use crate::value::{Args, Value, args};
 
 fn field_ref(input: syn::parse::ParseStream<'_>) -> syn::Result<Ref> {
     let first: syn::Ident = input.parse()?;
@@ -39,17 +40,6 @@ fn too_deep(span: Span, so_far: &str) -> syn::Error {
              Name a field of this struct, or a field of one of its nested layouts"
         ),
     )
-}
-
-fn field_expr_ref(f: &syn::ExprField) -> Option<Ref> {
-    let syn::Expr::Path(base) = &*f.base else {
-        return None;
-    };
-    let outer = base.path.get_ident()?;
-    let syn::Member::Named(inner) = &f.member else {
-        return None;
-    };
-    Some(Ref { name: format!("{outer}.{inner}"), span: outer.span() })
 }
 
 fn set_kind(
@@ -94,6 +84,7 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         with: None,
         range: None,
         align: None,
+        valid: None,
     };
 
     let owner = format!("field `{name}`");
@@ -158,6 +149,24 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
             crate::attr::once_attr(&mut a.range, attr, &owner, || {
                 crate::claim::range_attr(attr, f.ident.as_ref().expect("named"))
             })?;
+        } else if path.is_ident("valid") {
+            crate::attr::once_attr(&mut a.valid, attr, &owner, || {
+                let Args { expr: Some(tokens), keys } = args(attr)? else {
+                    return Err(syn::Error::new(
+                        aspan,
+                        format!(
+                            "field `{name}`: #[valid] takes a condition, such as `#[valid(kind == 1)]`"
+                        ),
+                    ));
+                };
+                if let Some((key, _)) = keys.first() {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("field `{name}`: #[valid] takes no keys"),
+                    ));
+                }
+                Value::parse(&tokens, name, "#[valid]")
+            })?;
         } else if path.is_ident("align") {
             crate::attr::once_attr(&mut a.align, attr, &owner, || parse_align(attr, name))?;
         } else if path.is_ident("magic") {
@@ -183,12 +192,10 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         return Err(syn::Error::new(
             at.span,
             format!(
-                "field `{name}`: `#[at({} = {})]` conflicts with `#[seek({})]`, which reads the position from `{}`. \
+                "field `{name}`: `#[at({} = {})]` conflicts with `#[seek({seek})]`, which reads the position from `{seek}`. \
                  Remove `#[at]`",
                 at.stated.unit.name(),
                 at.stated.pos,
-                seek.name,
-                seek.name,
             ),
         ));
     }
@@ -297,162 +304,98 @@ pub(super) fn reject_second(
     Ok(())
 }
 
+/// The expression of a value-taking attribute, refusing one that reads no field or parameter:
+/// a fixed number is the type's to state.
+fn expression(
+    attr: &syn::Attribute,
+    expr: Option<proc_macro2::TokenStream>,
+    name: &str,
+    what: &str,
+    fixed: &str,
+) -> syn::Result<Value> {
+    let open = what.trim_end_matches(']');
+    let Some(tokens) = expr else {
+        return Err(syn::Error::new(
+            attr.meta.span(),
+            format!("field `{name}`: {what} needs an expression. Write `{open}(n)`, {fixed}"),
+        ));
+    };
+    let value = Value::parse(&tokens, name, what)?;
+    if value.refs.is_empty() {
+        return Err(syn::Error::new(
+            value.span,
+            format!(
+                "field `{name}`: {what} reads no field or parameter, so `{value}` is a fixed \
+                 number. Write `{open}(n)`, {fixed}"
+            ),
+        ));
+    }
+    Ok(value)
+}
+
+/// Refuses the `scale` and `offset` keys, which the expression now holds.
+fn moved_key(key: &syn::Ident, name: &str, what: &str, by: Option<&Value>) -> syn::Error {
+    let open = what.trim_end_matches(']');
+    let by = by.map_or_else(|| String::from("n"), ToString::to_string);
+    let example = if key == "scale" { format!("{by} * 2") } else { format!("{by} - 4") };
+    syn::Error::new(
+        key.span(),
+        format!(
+            "field `{name}`: `{key}` is part of the expression now. Write `{open}({example})]`"
+        ),
+    )
+}
+
 fn parse_count(attr: &syn::Attribute, name: &str, bytes: bool) -> syn::Result<CountSpec> {
     let what = if bytes { "#[len]" } else { "#[count]" };
     let unit = if bytes { "byte length" } else { "count" };
-    let mut by: Option<Ref> = None;
-    let mut scale = 1u32;
-    let mut offset = 0i32;
+    let Args { expr, keys } = args(attr)?;
+    let by = expression(
+        attr,
+        expr,
+        name,
+        what,
+        &format!("where `n` is an earlier field holding the {unit}"),
+    )?;
     let mut cap: Option<usize> = None;
-    let mut scale_span = attr.meta.span();
-    let mut square = false;
-    let name_of = name;
-
-    attr.parse_nested_meta(|meta| {
-        if meta.path.is_ident("scale") {
-            scale_span = meta.path.span();
-            scale = meta.value()?.parse::<LitInt>()?.base10_parse()?;
-            Ok(())
-        } else if meta.path.is_ident("offset") {
-            let v = meta.value()?;
-            let neg = v.parse::<syn::Token![-]>().is_ok();
-            let n: i32 = v.parse::<LitInt>()?.base10_parse()?;
-            offset = if neg { -n } else { n };
-            Ok(())
-        } else if meta.path.is_ident("cap") {
-            cap = Some(meta.value()?.parse::<LitInt>()?.base10_parse()?);
-            Ok(())
-        } else if meta.input.peek(syn::Token![=]) {
-            Err(meta.error(format!("field `{name}`: expected `scale`, `offset`, or `cap`")))
-        } else if by.is_some() {
-            Err(meta.error(format!(
-                "field `{name}`: {what} takes one field name. \
-                 Other arguments are `scale = S`, `offset = O` and `cap = N`",
-            )))
+    for (key, value) in keys {
+        if key == "cap" {
+            let lit: LitInt = syn::parse2(value)?;
+            cap = Some(lit.base10_parse()?);
+        } else if key == "scale" || key == "offset" {
+            return Err(moved_key(&key, name, what, Some(&by)));
         } else {
-            let ident = meta.path.get_ident().ok_or_else(|| {
-                meta.error(format!(
-                    "field `{name}`: {what} takes a field name"
-                ))
-            })?;
-            let mut name = crate::attr::name(ident);
-            dotted_tail(meta.input, &mut name)?;
-            if meta.input.peek(syn::Token![*]) {
-                meta.input.parse::<syn::Token![*]>()?;
-                let other: syn::Ident = meta.input.parse()?;
-                let mut second = crate::attr::name(&other);
-                dotted_tail(meta.input, &mut second)?;
-                if second != name {
-                    return Err(syn::Error::new(
-                        other.span(),
-                        format!(
-                            "field `{name_owner}`: `{open}{name} * {second})]` names two different fields. \
-                             Only a square is supported, such as `{open}{name} * {name})]`",
-                            name_owner = name_of,
-                            open = format_args!("{}(", what.trim_end_matches(']')),
-                        ),
-                    ));
-                }
-                square = true;
-            }
-            by = Some(Ref { name, span: ident.span() });
-            Ok(())
+            return Err(syn::Error::new(
+                key.span(),
+                format!("field `{name}`: expected `cap` after the expression"),
+            ));
         }
-    })?;
-
-    let by = by.ok_or_else(|| {
-        syn::Error::new(
-            attr.meta.span(),
-            format!(
-                "field `{name}`: {what} needs a field name. \
-                 Write `{}(n)`, where `n` is an earlier field holding the {unit}",
-                what.trim_end_matches(']'),
-            ),
-        )
-    })?;
-    if scale == 0 {
-        return Err(syn::Error::new(
-            scale_span,
-            format!(
-                "field `{name}`: `scale = 0` makes the {unit} a constant `{offset}`. \
-                 Use a scale above zero, or a fixed-size array",
-            ),
-        ));
     }
-    if square && bytes {
-        return Err(syn::Error::new(
-            attr.meta.span(),
-            format!(
-                "field `{name}`: `#[len]` cannot be a square. \
-                 Use `#[count(n * n)]` to count elements"
-            ),
-        ));
-    }
-    Ok(match (bytes, square) {
-        (true, _) => CountSpec::Window { by, scale, offset, cap },
-        (false, true) => CountSpec::Squared { by, scale, offset, cap },
-        (false, false) => CountSpec::Field { by, scale, offset, cap },
-    })
+    Ok(if bytes { CountSpec::Window { by, cap } } else { CountSpec::Field { by, cap } })
 }
 
 fn parse_stride(attr: &syn::Attribute, name: &str) -> syn::Result<StrideSpec> {
-    let mut by: Option<Ref> = None;
-    let mut scale = 1u32;
-    let mut offset = 0i32;
-    let mut scale_span = attr.meta.span();
-
-    attr.parse_nested_meta(|meta| {
-        if meta.path.is_ident("scale") {
-            scale_span = meta.path.span();
-            scale = meta.value()?.parse::<LitInt>()?.base10_parse()?;
-            Ok(())
-        } else if meta.path.is_ident("offset") {
-            let v = meta.value()?;
-            let neg = v.parse::<syn::Token![-]>().is_ok();
-            let n: i32 = v.parse::<LitInt>()?.base10_parse()?;
-            offset = if neg { -n } else { n };
-            Ok(())
-        } else if meta.path.is_ident("cap") {
-            Err(meta.error(format!(
-                "field `{name}`: #[stride] takes no `cap`. Put `cap` on `#[count]`"
-            )))
-        } else if meta.input.peek(syn::Token![=]) {
-            Err(meta.error(format!("field `{name}`: expected `scale` or `offset`")))
-        } else if by.is_some() {
-            Err(meta.error(format!(
-                "field `{name}`: #[stride] takes one field name. \
-                 Other arguments are `scale = S` and `offset = O`"
-            )))
+    let Args { expr, keys } = args(attr)?;
+    let by = expression(
+        attr,
+        expr,
+        name,
+        "#[stride]",
+        "where `s` is an earlier field holding the element size in bytes",
+    )?;
+    if let Some((key, _)) = keys.first() {
+        return Err(if key == "cap" {
+            syn::Error::new(
+                key.span(),
+                format!("field `{name}`: #[stride] takes no `cap`. Put `cap` on `#[count]`"),
+            )
+        } else if key == "scale" || key == "offset" {
+            moved_key(key, name, "#[stride]", Some(&by))
         } else {
-            let ident = meta.path.get_ident().ok_or_else(|| {
-                meta.error(format!("field `{name}`: #[stride] takes a field name"))
-            })?;
-            let mut name = crate::attr::name(ident);
-            dotted_tail(meta.input, &mut name)?;
-            by = Some(Ref { name, span: ident.span() });
-            Ok(())
-        }
-    })?;
-
-    let by = by.ok_or_else(|| {
-        syn::Error::new(
-            attr.meta.span(),
-            format!(
-                "field `{name}`: #[stride] needs a field name. \
-                 Write `#[stride(s)]`, where `s` is an earlier field holding the element size in bytes"
-            ),
-        )
-    })?;
-    if scale == 0 {
-        return Err(syn::Error::new(
-            scale_span,
-            format!(
-                "field `{name}`: `scale = 0` makes the stride a constant `{offset}`. \
-                 Use `#[bytes(N)]` instead of `#[stride]`",
-            ),
-        ));
+            syn::Error::new(key.span(), format!("field `{name}`: #[stride] takes no keys"))
+        });
     }
-    Ok(StrideSpec { by, scale, offset, span: attr.meta.span() })
+    Ok(StrideSpec { by, span: attr.meta.span() })
 }
 
 fn parse_fill(attr: &syn::Attribute, name: &str) -> syn::Result<Option<usize>> {
@@ -500,170 +443,82 @@ fn parse_with(attr: &syn::Attribute, name: &str) -> syn::Result<Vec<Ref>> {
 }
 
 fn parse_switch(attr: &syn::Attribute, name: &str) -> syn::Result<SwitchOn> {
-    if let Ok(by) = attr.parse_args_with(field_ref) {
-        return Ok(SwitchOn::Field(by));
-    }
     if attr.parse_args::<syn::Token![..]>().is_ok() {
         return Ok(SwitchOn::BodyLength(attr.meta.span()));
     }
-    Err(syn::Error::new(
-        attr.meta.span(),
-        format!(
-            "field `{name}`: #[switch] takes a field name or `..`. \
-             Write `#[switch(n)]`, or `#[switch(..)]` to switch on the bytes remaining"
-        ),
-    ))
+    let shape = || {
+        syn::Error::new(
+            attr.meta.span(),
+            format!(
+                "field `{name}`: #[switch] takes a field name or `..`. \
+                 Write `#[switch(n)]`, or `#[switch(..)]` to switch on the bytes remaining"
+            ),
+        )
+    };
+    let Args { expr, keys } = args(attr)?;
+    if !keys.is_empty() {
+        return Err(shape());
+    }
+    let value = Value::parse(&expr.ok_or_else(shape)?, name, "#[switch]")?;
+    if value.refs.is_empty() {
+        return Err(shape());
+    }
+    Ok(SwitchOn::Field(value))
 }
 
 pub(super) fn parse_when(attr: &syn::Attribute, name: &str) -> syn::Result<WhenSpec> {
+    use layline_codegen::{Expr, Op};
     let span = attr.meta.span();
-    let expr: syn::Expr = attr.parse_args().map_err(|_| when_shape(span, name))?;
-
-    if let syn::Expr::Unary(u) = &expr
-        && matches!(u.op, syn::UnOp::Not(_))
+    let Args { expr: Some(tokens), keys } = args(attr)? else {
+        return Err(when_shape(span, name));
+    };
+    if !keys.is_empty() {
+        return Err(when_shape(span, name));
+    }
+    let value = Value::parse(&tokens, name, "#[when]")?;
+    // `!` on bits reads as Rust's bitwise not.
+    let mut negated = &value.expr;
+    while let Expr::Not(inner) = negated {
+        if let Expr::Binary(op, ..) = &**inner
+            && !op.compares()
+            && !op.joins()
+        {
+            let hint = if *op == Op::BitAnd {
+                format!("Write `#[when({inner} == 0)]`")
+            } else {
+                String::from("Write `#[when(!flag)]` with an earlier `bool`")
+            };
+            return Err(syn::Error::new(
+                span,
+                format!(
+                    "field `{name}`: `!` on an integer flips its bits, so it does not test them. \
+                     {hint}"
+                ),
+            ));
+        }
+        negated = inner;
+    }
+    if let Some(t) = value.expr.test()
+        && let Some(0) = t.mask.and_then(Expr::fold)
     {
-        if let Some(by) = flag_ref(&u.expr)? {
-            return Ok(WhenSpec { by, test: WhenTest::Flag, clear: true, span });
-        }
-        let mut inner = &*u.expr;
-        while let syn::Expr::Paren(p) = inner {
-            inner = &p.expr;
-        }
-        let hint = match inner {
-            syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::BitAnd(_)) => {
-                let (by, mask) = mask_test(b, span, name)?;
-                format!("Write `#[when({} & {mask:#x} == 0)]`", by.name)
-            }
-            _ => String::from("Write `#[when(!flag)]` with an earlier `bool`"),
-        };
         return Err(syn::Error::new(
             span,
             format!(
-                "field `{name}`: `!` on an integer flips its bits, so it does not test them. {hint}"
-            ),
-        ));
-    }
-    if let Some(by) = flag_ref(&expr)? {
-        return Ok(WhenSpec { by, test: WhenTest::Flag, clear: false, span });
-    }
-
-    let syn::Expr::Binary(b) = &expr else {
-        return Err(when_shape(span, name));
-    };
-    if matches!(b.op, syn::BinOp::Gt(_)) && is_zero(&b.right) {
-        let Some(by) = binary_ref(b)? else {
-            return Err(when_shape(span, name));
-        };
-        return Ok(WhenSpec { by, test: WhenTest::Positive, clear: false, span });
-    }
-    if let (syn::BinOp::Eq(_) | syn::BinOp::Ne(_), syn::Expr::Binary(masked)) = (&b.op, &*b.left)
-        && matches!(masked.op, syn::BinOp::BitAnd(_))
-        && is_zero(&b.right)
-    {
-        let (by, mask) = mask_test(masked, span, name)?;
-        let clear = matches!(b.op, syn::BinOp::Eq(_));
-        return Ok(WhenSpec { by, test: WhenTest::Mask(mask), clear, span });
-    }
-    if matches!(
-        b.op,
-        syn::BinOp::Eq(_)
-            | syn::BinOp::Ne(_)
-            | syn::BinOp::Lt(_)
-            | syn::BinOp::Le(_)
-            | syn::BinOp::Gt(_)
-            | syn::BinOp::Ge(_)
-    ) {
-        let whole = crate::attr::spelled(&expr);
-        let left = &b.left;
-        let left = crate::attr::spelled(left);
-        let why = if is_zero(&b.right) {
-            format!(
-                "is not supported. Write `#[when({left} > 0)]`, or `#[when({left} & 0x01 == 0)]` \
-                 for bits that mean absent"
-            )
-        } else {
-            format!(
-                "is not supported. \
-                 Write `#[when({left} & 0x01)]` with the bits that mean present"
-            )
-        };
-        return Err(syn::Error::new(span, format!("field `{name}`: `#[when({whole})]` {why}")));
-    }
-    if !matches!(b.op, syn::BinOp::BitAnd(_)) {
-        return Err(when_shape(span, name));
-    }
-    let (by, mask) = mask_test(b, span, name)?;
-    Ok(WhenSpec { by, test: WhenTest::Mask(mask), clear: false, span })
-}
-
-/// `flag` or `head.flag`, a `bool` the field's presence reads.
-fn flag_ref(expr: &syn::Expr) -> syn::Result<Option<Ref>> {
-    match expr {
-        syn::Expr::Path(p) => {
-            Ok(p.path.get_ident().map(|i| Ref { name: crate::attr::name(i), span: i.span() }))
-        }
-        syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Field(_)) => {
-            let base = &f.base;
-            Err(too_deep(f.member.span(), &crate::attr::spelled(base)))
-        }
-        syn::Expr::Field(f) => Ok(field_expr_ref(f)),
-        _ => Ok(None),
-    }
-}
-
-/// `field & MASK`, with a nonzero integer mask.
-fn mask_test(b: &syn::ExprBinary, span: Span, name: &str) -> syn::Result<(Ref, u64)> {
-    let Some(by) = binary_ref(b)? else {
-        return Err(when_shape(span, name));
-    };
-    let syn::Expr::Lit(lit) = &*b.right else {
-        return Err(when_shape(span, name));
-    };
-    let syn::Lit::Int(int) = &lit.lit else {
-        return Err(when_shape(span, name));
-    };
-    let mask: u64 = int.base10_parse()?;
-    if mask == 0 {
-        return Err(syn::Error::new(
-            int.span(),
-            format!(
                 "field `{name}`: `#[when({} & 0)]` masks no bits. \
                  Name the bit that makes the field present",
-                by.name,
+                t.field,
             ),
         ));
     }
-    Ok((by, mask))
-}
-
-fn binary_ref(b: &syn::ExprBinary) -> syn::Result<Option<Ref>> {
-    Ok(match &*b.left {
-        syn::Expr::Path(p) => {
-            p.path.get_ident().map(|i| Ref { name: crate::attr::name(i), span: i.span() })
-        }
-        syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Field(_)) => {
-            let base = &f.base;
-            return Err(too_deep(f.member.span(), &crate::attr::spelled(base)));
-        }
-        syn::Expr::Field(f) => field_expr_ref(f),
-        _ => None,
-    })
-}
-
-fn is_zero(e: &syn::Expr) -> bool {
-    matches!(
-        e,
-        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(i), .. })
-            if i.base10_parse::<u128>().is_ok_and(|v| v == 0)
-    )
+    Ok(WhenSpec { value, span })
 }
 
 fn when_shape(span: Span, name: &str) -> syn::Error {
     syn::Error::new(
         span,
         format!(
-            "field `{name}`: expected `#[when(field & MASK)]` or `#[when(field & MASK == 0)]`, \
-             or `#[when(field)]` or `#[when(!field)]` where `field` is an earlier `bool`"
+            "field `{name}`: expected a condition, such as `#[when(flags & MASK)]`, \
+             `#[when(flag)]` for an earlier `bool`, or `#[when(kind == 3 && len > 0)]`"
         ),
     )
 }
@@ -672,15 +527,23 @@ fn parse_at(attr: &syn::Attribute, name: &str) -> syn::Result<crate::claim::At> 
     crate::claim::at_attr(attr, name, layline_codegen::StatedUnit::Byte)
 }
 
-fn parse_seek(attr: &syn::Attribute, name: &str) -> syn::Result<Ref> {
-    if let Ok(by) = attr.parse_args_with(field_ref) {
-        return Ok(by);
+fn parse_seek(attr: &syn::Attribute, name: &str) -> syn::Result<Value> {
+    let shape = || {
+        syn::Error::new(
+            attr.meta.span(),
+            format!(
+                "field `{name}`: `#[seek(..)]` takes a field name, or an expression over one. \
+                 Write `#[seek(off)]`, where `off` is an earlier field holding the byte offset"
+            ),
+        )
+    };
+    let Args { expr, keys } = args(attr)?;
+    if !keys.is_empty() {
+        return Err(shape());
     }
-    Err(syn::Error::new(
-        attr.meta.span(),
-        format!(
-            "field `{name}`: `#[seek(..)]` takes a field name. \
-             Write `#[seek(off)]`, where `off` is an earlier field holding the byte offset"
-        ),
-    ))
+    let value = Value::parse(&expr.ok_or_else(shape)?, name, "#[seek]")?;
+    if value.refs.is_empty() {
+        return Err(shape());
+    }
+    Ok(value)
 }

@@ -88,7 +88,7 @@ fn one_bit_field_is_on_the_wire_under_one_test() {
     );
     refused(
         &bits_message("#[when(version > 0)] #[bits(4)] pub extra: Option<u8>,"),
-        "`#[when(version > 0)]` works only on a `#[seek]` record",
+        "`version > 0` is not a test of one earlier field",
     );
     refused(
         &bits_message("#[when(version & 0)] #[bits(4)] pub extra: Option<u8>,"),

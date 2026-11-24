@@ -23,6 +23,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
 
     let stated = a.at;
     let align = a.align;
+    let valid = a.valid.take();
     let walk_span = walked_by(&a)
         .map(|(_, s)| s)
         .or_else(|| when.as_ref().map(|w| w.span))
@@ -42,7 +43,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
         (None, Some(inner)) if a.seek.is_some() => {
             let Some(r) = &a.seek else { unreachable!("just matched") };
-            let named = (r.name.clone(), r.span);
+            let named = (r.to_string(), r.span);
             match field_body(inner, &name, span, a)? {
                 Body::Placed { kind, at, assert, .. } => {
                     Body::Placed { kind, at, absent: Some(PlacedAbsence::ZeroOffset), assert }
@@ -73,7 +74,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
             }
             if let Body::Fixed { kind, claims } = field_body(inner, &name, span, a)? {
                 let body = Body::Opt { when: None, kind, claims };
-                return Ok(MsgField { name, span, walk_span, body, stated, with, align });
+                return Ok(MsgField { name, span, walk_span, body, stated, with, align, valid });
             }
             return Err(syn::Error::new(
                 span,
@@ -94,7 +95,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
         (None, None) => field_body(&f.ty, &name, span, a)?,
     };
-    Ok(MsgField { name, span, walk_span, body, stated, with, align })
+    Ok(MsgField { name, span, walk_span, body, stated, with, align, valid })
 }
 
 fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
@@ -111,9 +112,8 @@ fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
             return Err(syn::Error::new(
                 r.span,
                 format!(
-                    "field `{name}`: an optional string cannot take its length from `{}`, \
+                    "field `{name}`: an optional string cannot take its length from `{r}`, \
                      which is always present. Write `#[until(0)]` or `#[bytes(N)]`",
-                    r.name,
                 ),
             ));
         }
@@ -144,49 +144,39 @@ fn optional(name: &str, when: WhenSpec, body: Body) -> syn::Result<Body> {
                 ),
             ));
         }
-        Body::Placed { kind, at, assert, .. } => match when.test {
-            WhenTest::Positive if when.by.name == at.name => {
+        Body::Placed { kind, at, assert, .. } => match when.positive() {
+            Some(len) if at.bare().is_some_and(|a| a.name == len.name) => {
                 return Err(syn::Error::new(
                     when.span,
                     format!(
                         "field `{name}`: `#[when({0} > 0)]` repeats what `#[seek({0})]` already implies. \
                          Remove `#[when]`, or name the record's length field",
-                        at.name,
+                        len.name,
                     ),
                 ));
             }
-            WhenTest::Positive => {
+            Some(len) => {
+                let len = Ref::same(len);
                 return Ok(Body::Placed {
                     kind,
                     at,
-                    absent: Some(PlacedAbsence::ZeroLength(when.by)),
+                    absent: Some(PlacedAbsence::ZeroLength(len)),
                     assert,
                 });
             }
-            WhenTest::Mask(_) | WhenTest::Flag => {
+            None => {
                 let test = when.spelled();
                 return Err(syn::Error::new(
                     when.span,
                     format!(
-                        "field `{name}`: `#[when({})]` and `#[seek({})]` both decide whether the record is present. \
+                        "field `{name}`: `#[when({test})]` and `#[seek({at})]` both decide whether the record is present. \
                          Remove `#[when]`, or write `#[when(len > 0)]` with the record's length field",
-                        test, at.name,
                     ),
                 ));
             }
         },
         Body::Opt { .. } => unreachable!("`#[when]` is taken before the body is decided"),
     };
-    if matches!(when.test, WhenTest::Positive) {
-        return Err(syn::Error::new(
-            when.span,
-            format!(
-                "field `{name}`: `#[when({0} > 0)]` works only with `#[seek]`. \
-                 Write `#[when(flags & 0x01)]` with the bit that means present",
-                when.by.name,
-            ),
-        ));
-    }
     Ok(Body::Opt { when: Some(when), kind, claims })
 }
 
@@ -213,6 +203,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
         kind,
         at: _,
         align: _,
+        valid: _,
     } = a;
     let at = seek;
 
@@ -445,9 +436,8 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
                 return Err(syn::Error::new(
                     lspan,
                     format!(
-                        "field `{name}`: #[len({})] and #[bytes({n})] both set the union's size. \
+                        "field `{name}`: #[len({by})] and #[bytes({n})] both set the union's size. \
                          Remove one",
-                        by.name,
                     ),
                 ));
             }
@@ -457,15 +447,12 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
                 return Err(syn::Error::new(
                     lspan,
                     format!(
-                        "field `{name}`: #[switch(..)] reads the remaining length, and #[len({})] sets it. \
-                         Remove #[len({0})], or write #[switch(n)]",
-                        by.name,
+                        "field `{name}`: #[switch(..)] reads the remaining length, and #[len({by})] sets it. \
+                         Remove #[len({by})], or write #[switch(n)]",
                     ),
                 ));
             }
-            (Some((CountSpec::Window { by, scale, offset, cap }, _)), None) => {
-                SwitchWindow::Field { by, scale, offset, cap }
-            }
+            (Some((CountSpec::Window { by, cap }, _)), None) => SwitchWindow::Field { by, cap },
             (Some(_), _) => unreachable!("a count that is not a byte length was refused above"),
         };
         return Ok(Body::Switch { on, ty: crate::attr::spelled(ty), window });
@@ -683,18 +670,20 @@ fn with_stride(
 ) -> syn::Result<CountSpec> {
     let Some(stride) = stride else { return Ok(count) };
     match count {
-        CountSpec::Field { by, scale, offset, cap } => {
-            if by.name == stride.by.name {
+        CountSpec::Field { by, cap } => {
+            if let (Some(n), Some(s)) = (by.bare(), stride.by.bare())
+                && n.name == s.name
+            {
                 return Err(syn::Error::new(
-                    stride.by.span,
+                    s.span,
                     format!(
                         "field `{name}`: `{}` cannot be both the count and the stride. \
                          Use a separate field for each",
-                        by.name,
+                        n.name,
                     ),
                 ));
             }
-            Ok(CountSpec::Strided { by, scale, offset, cap, stride })
+            Ok(CountSpec::Strided { by, cap, stride })
         }
         CountSpec::Window { .. } => {
             let mut err = syn::Error::new(

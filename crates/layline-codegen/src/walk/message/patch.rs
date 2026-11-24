@@ -3,14 +3,15 @@
 use proc_macro2::{Ident, Literal, TokenStream};
 use quote::{format_ident, quote};
 
-use super::body::Own;
+use super::body::{Own, Walk};
 use super::checksum::written_check;
+use super::eval::solve;
 use super::repeat::element_width;
 use super::text::text_wire_len;
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, SlotOf, path};
-use crate::{Error, Kind, Root, Segment};
+use crate::{Error, Expr, Kind, Root, Segment};
 
 /// The `bool` a derived flag holds. Presence is the only derivation that is not a number.
 pub(super) fn derived_flag(d: &Derived, own: Own) -> Option<TokenStream> {
@@ -25,75 +26,52 @@ pub(super) fn derived_flag(d: &Derived, own: Own) -> Option<TokenStream> {
 
 /// The number encode writes into a derived field, as an `i64` expression.
 ///
-/// `field` names it in errors. A [`Presence`](Derived::Presence) is a flag: use [`derived_flag`].
-pub(super) fn derived_value(d: &Derived, own: Own, field: &str, root: &Root) -> TokenStream {
+/// `field` names it, and is the one field the derivation's expression is worked back to. A
+/// [`Presence`](Derived::Presence) is a flag: use [`derived_flag`].
+pub(super) fn derived_value(
+    d: &Derived,
+    own: Own,
+    field: &str,
+    root: &Root,
+) -> Result<TokenStream, Error> {
     let Prelude { some, none, .. } = root.prelude();
-    match d {
-        Derived::Count { of, scale, offset, cap } => {
+    Ok(match d {
+        Derived::Count { of, by, cap } => {
             let coll = own.get(of);
-            let cap = cap.map(|cap| (cap, of.as_str()));
-            affine_inverse(quote!(#coll.len()), (*scale, *offset), cap, field, root)
+            inverted(by, quote!(#coll.len()), cap.map(|cap| (cap, of.as_str())), field, root)?
         }
-        Derived::Squared { of, scale, offset, cap } => {
-            let coll = own.get(of);
-            let capped = cap.map(|cap| {
-                let lit = Literal::usize_unsuffixed(cap);
-                quote! { #root::EncodeError::cap(#of, __len, #lit)?; }
-            });
-            let Prelude { i64, err, .. } = root.prelude();
-            let order = quote! {
-                {
-                    let __len = #coll.len();
-                    #capped
-                    let __side = __len.isqrt();
-                    if __side * __side != __len {
-                        return #err(#root::EncodeError::Inexact {
-                            field: #field,
-                            value: __len as #i64,
-                        });
-                    }
-                    __side
-                }
-            };
-            affine_inverse(order, (*scale, *offset), None, field, root)
-        }
-        Derived::TextLen { of, codec, scale, offset, cap } => {
+        Derived::TextLen { of, codec, by, cap } => {
             let text = own.get(of);
             let n = text_wire_len(codec, quote!(#text.as_str()), root);
-            let cap = cap.map(|cap| (cap, of.as_str()));
-            affine_inverse(n, (*scale, *offset), cap, field, root)
+            inverted(by, n, cap.map(|cap| (cap, of.as_str())), field, root)?
         }
         Derived::Offset { .. } | Derived::ByteLen { .. } => reserved(),
-        Derived::Stride { elem, scale, offset } => {
-            affine_inverse(element_width(elem, root), (*scale, *offset), None, field, root)
-        }
-        Derived::ArmLen { of, scale, offset, cap } => {
+        Derived::Stride { elem, by } => inverted(by, element_width(elem, root), None, field, root)?,
+        Derived::ArmLen { of, by, cap } => {
             let arm = arm_ident(of);
-            let cap = cap.map(|cap| (cap, of.as_str()));
-            affine_inverse(quote!(#arm), (*scale, *offset), cap, field, root)
+            inverted(by, quote!(#arm), cap.map(|cap| (cap, of.as_str())), field, root)?
         }
-        Derived::Discriminant { of, field } => {
+        Derived::Discriminant { of, field: held_field, by } => {
             let body = own.get(of);
-            let held = own.get(field);
+            let held = own.get(held_field);
+            let chosen = inverted(by, quote!(__d), None, field, root)?;
             quote! {
                 match #root::Choice::discriminant(&#body) {
-                    #some(__d) => __d,
+                    #some(__d) => #chosen,
                     #none => #root::WireInt::to_i64(&#held),
                 }
             }
         }
         Derived::Flags { field, bits } => {
             let held = own.get(field);
-            let governed =
-                Literal::i64_unsuffixed(bits.iter().fold(0u64, |all, (m, ..)| all | m) as i64);
-            let set = bits.iter().map(|(mask, of, set)| {
+            let masks: Vec<TokenStream> = bits.iter().map(|(m, ..)| mask_tokens(m, root)).collect();
+            let set = bits.iter().zip(&masks).map(|((_, of, set), mask)| {
                 let opt = own.get(of);
-                let mask = Literal::i64_unsuffixed(*mask as i64);
                 let marked = if *set { quote!(#opt.is_some()) } else { quote!(#opt.is_none()) };
                 quote!(| (if #marked { #mask } else { 0 }))
             });
             quote! {
-                (#root::WireInt::to_i64(&#held) & !#governed) #(#set)*
+                (#root::WireInt::to_i64(&#held) & !(0 #(| #masks)*)) #(#set)*
             }
         }
         Derived::Presence { of, .. } => {
@@ -105,7 +83,91 @@ pub(super) fn derived_value(d: &Derived, own: Own, field: &str, root: &Root) -> 
                 #root::WireInt::to_i64(&#value)
             }
         }
+    })
+}
+
+/// A presence mask, a literal or a constant, as an `i64`.
+fn mask_tokens(mask: &Expr, root: &Root) -> TokenStream {
+    match (mask.fold(), mask) {
+        (Some(n), _) => {
+            let n = Literal::i64_unsuffixed(n);
+            quote!(#n)
+        }
+        (None, Expr::Const(c)) => {
+            let p = path(c);
+            quote!(#root::WireInt::to_i64(&#p))
+        }
+        _ => unreachable!("a presence test's mask is a literal or a constant"),
     }
+}
+
+/// The value of `field` where `by` equals the number `source`, as an `i64`.
+///
+/// Encode refuses where decode could not read it back: no exact solution, or a `source` above the
+/// `cap` the collection or text named with it declares.
+pub(super) fn inverted(
+    by: &Expr,
+    source: TokenStream,
+    cap: Option<(usize, &str)>,
+    field: &str,
+    root: &Root,
+) -> Result<TokenStream, Error> {
+    let Some(inv) = by.inverse(&|name| name == field) else {
+        return Err(Error::Internal(format!("`{by}` is not invertible in `{field}`")));
+    };
+    let capped = cap.map(|(cap, of)| {
+        let lit = Literal::usize_unsuffixed(cap);
+        quote! { #root::EncodeError::cap(#of, __source, #lit)?; }
+    });
+    let solved = solve(by, &inv, quote!(__source), field, root)?;
+    Ok(quote! {{
+        let __source = #source;
+        #capped
+        #solved
+    }})
+}
+
+impl Walk<'_> {
+    /// Write the number `value` into the field `by` works back to, in the slot reserved for
+    /// segment `coll`, or, where this segment does not write that field, check `by` against it.
+    ///
+    /// `cap` is the collection's, which a stamped length must not pass.
+    pub(super) fn stamp_or_agree(
+        &self,
+        own: Own,
+        coll: &str,
+        (of, record): (SlotOf, bool),
+        by: &Expr,
+        value: TokenStream,
+        cap: Option<usize>,
+    ) -> Result<TokenStream, Error> {
+        let mine = |d: &Derived| match (of, d) {
+            (SlotOf::Position, Derived::Offset { of, .. })
+            | (SlotOf::Length, Derived::ByteLen { of, .. }) => of == coll,
+            _ => false,
+        };
+        let into = self.derived.iter().find(|(_, d)| mine(d)).map(|(f, _)| f.as_str());
+        let Some(into) = into.filter(|_| self.writes(mine)) else {
+            return self.agree(own, coll, value, by);
+        };
+        let n = inverted(by, value, cap.map(|cap| (cap, coll)), into, self.root)?;
+        let at = StampAt { owner: self.owner, coll, of, field: into, record };
+        if record {
+            return stamp_slot(&self.slots, at, &n, self.root);
+        }
+        // A collection stamps at the top of encode, so a later check can read the number.
+        let wrote = wrote_ident(into);
+        let stamp = stamp_slot(&self.slots, at, &quote!(#wrote), self.root)?;
+        Ok(quote! {
+            let #wrote = #n;
+            #stamp
+        })
+    }
+}
+
+/// The local holding the number encode stamped into the reserved field `field`.
+pub(super) fn wrote_ident(field: &str) -> Ident {
+    format_ident!("__wrote_{}", field.replace('.', "_"))
 }
 
 /// The placeholder a reserved field holds until [`stamp_slot`] overwrites it.
@@ -309,7 +371,7 @@ pub(super) fn nested_probe(
     ty: &str,
     outer: &str,
     inner: &str,
-    d: &Derived,
+    number: bool,
     root: &Root,
 ) -> Result<TokenStream, Error> {
     let p: syn::Path = syn::parse_str(ty).map_err(|_| {
@@ -320,7 +382,7 @@ pub(super) fn nested_probe(
     let missing = format!(
         "`{owner}`: `{outer}.{inner}` names no field of nested layout `{ty}`. Check the spelling"
     );
-    let number = if matches!(d, Derived::Presence { .. }) {
+    let number = if !number {
         quote!()
     } else {
         quote! {
@@ -349,41 +411,6 @@ pub(super) fn nested_accessors(owner: &str, outer: &str, inner: &str) -> (Ident,
         format_ident!("__layline_{}_{}_{}", owner, outer, inner),
         format_ident!("__layline_{}_{}_{}_mut", owner, outer, inner),
     )
-}
-
-/// The value of `field` where `field * scale + offset` equals `source`.
-///
-/// Encode refuses where decode could not read it back: no whole solution, or above the `cap` the
-/// collection or text named with it declares.
-pub(super) fn affine_inverse(
-    source: TokenStream,
-    (scale, offset): (u32, i32),
-    cap: Option<(usize, &str)>,
-    field: &str,
-    root: &Root,
-) -> TokenStream {
-    let Prelude { i64, err, .. } = root.prelude();
-    let capped = cap.map(|(cap, of)| {
-        let lit = Literal::usize_unsuffixed(cap);
-        quote! { #root::EncodeError::cap(#of, __source, #lit)?; }
-    });
-    let (s, o) = (i64::from(scale), i64::from(offset));
-    let stated = match (scale, offset) {
-        (1, 0) => quote!(__source as #i64),
-        (1, _) => quote!(__source as #i64 - #o),
-        _ => quote! {{
-            let __n = __source as #i64 - #o;
-            if __n % #s != 0 {
-                return #err(#root::EncodeError::Inexact { field: #field, value: __source as #i64 });
-            }
-            __n / #s
-        }},
-    };
-    quote! {{
-        let __source = #source;
-        #capped
-        #stated
-    }}
 }
 
 /// The field a number is written into.

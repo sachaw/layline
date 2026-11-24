@@ -5,12 +5,13 @@ use quote::{format_ident, quote};
 
 use super::body::{Bind, Item, Own, Walk, needs_clone};
 use super::cursor::read_layout;
+use super::eval::condition;
 use super::refuse::held_refusal;
 use super::table::{Row, deferred_type, span_of_kind};
 use super::value::{value_read, value_write};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{block_field, emit_message_field, hidden_block, kind_ty, row};
+use crate::walk::{Derived, block_field, emit_message_field, hidden_block, kind_ty, row};
 use crate::{Error, Kind, Presence, Segment};
 
 impl Walk<'_> {
@@ -31,20 +32,7 @@ impl Walk<'_> {
         self.binds.push(Bind { name: ident.clone(), ty: opt_ty, value: quote!(#ident) });
 
         let present = match when {
-            Presence::Mask { field: flag, mask } | Presence::MaskClear { field: flag, mask } => {
-                let read = self.env.get(owner, "#[when]", flag)?;
-                let bit = Literal::i64_unsuffixed(*mask as i64);
-                if matches!(when, Presence::Mask { .. }) {
-                    quote!(((#read) & #bit) != 0)
-                } else {
-                    quote!(((#read) & #bit) == 0)
-                }
-            }
-            Presence::Flag { field: flag } => self.env.get_flag(owner, "#[when]", flag)?,
-            Presence::FlagClear { field: flag } => {
-                let read = self.env.get_flag(owner, "#[when]", flag)?;
-                quote!(!(#read))
-            }
+            Presence::When(e) => self.env.condition(owner, "#[when]", e)?,
             Presence::Remaining => {
                 let need = Literal::usize_unsuffixed(f.kind.width() as usize / 8);
                 quote!(__body.len().saturating_sub(__at) >= #need)
@@ -59,11 +47,10 @@ impl Walk<'_> {
         };
         let mut row = Row::new(&f.name, span_of_kind(&f.kind))
             .decoded_by(deferred_type(&f.kind))
-            .when(match when.tests() {
-                Some((flag, mask, true)) => row::Presence::Flag { field: flag.into(), mask },
-                Some((flag, mask, false)) => row::Presence::Clear { field: flag.into(), mask },
-                None if matches!(when, Presence::Remaining) => row::Presence::Remaining,
-                None => row::Presence::Bit,
+            .when(match when {
+                Presence::When(e) => row::Presence::of(e),
+                Presence::Remaining => row::Presence::Remaining,
+                Presence::Bit => row::Presence::Bit,
             });
 
         let fixed = !matches!(f.kind, Kind::Var { .. } | Kind::Msg { .. } | Kind::Text { .. });
@@ -110,18 +97,35 @@ impl Walk<'_> {
             };
         });
         let held = own.by_ref(&f.name);
-        // The holder writes a parameter, so encode checks the field against it.
-        if let Some((flag, ..)) = when.tests()
-            && self.is_param(flag)
-        {
+        // A condition encode does not set from the field, it checks against it.
+        if let Presence::When(e) = when {
             let name = f.name.as_str();
-            self.byte_steps.extend(quote! {
-                #root::EncodeError::agree(
-                    #name,
-                    ::core::primitive::i64::from((#held).is_some()),
-                    ::core::primitive::i64::from(#present),
-                )?;
-            });
+            let sets = |d: &Derived| match d {
+                Derived::Flags { bits, .. } => bits.iter().any(|(_, of, _)| of == name),
+                Derived::Presence { of, .. } => of == name,
+                _ => false,
+            };
+            if !self.writes(sets) {
+                let root = self.root;
+                let stated = condition(e, &|n, want| self.written(own, n, want), root)?;
+                self.byte_steps.extend(quote! {
+                    {
+                        let __value = ::core::primitive::i64::from((#held).is_some());
+                        match #stated {
+                            #some(__stated) => #root::EncodeError::agree(
+                                #name,
+                                __value,
+                                ::core::primitive::i64::from(__stated),
+                            )?,
+                            _ => {
+                                return ::core::result::Result::Err(
+                                    #root::EncodeError::Inexact { field: #name, value: __value },
+                                );
+                            }
+                        }
+                    }
+                });
+            }
         }
         self.byte_steps.extend(quote! {
             if let #some(__v) = #held {

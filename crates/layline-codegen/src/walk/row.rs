@@ -3,7 +3,7 @@
 use layline_core::Extent;
 
 use crate::model::positioned;
-use crate::{By, Container, CoverFrom, CoverTo, Coverage, Discriminant, Field, Kind, Scalar};
+use crate::{Container, CoverFrom, CoverTo, Coverage, Discriminant, Expr, Field, Kind, Op, Scalar};
 
 /// One row of a layout's `FIELDS` table.
 ///
@@ -60,9 +60,26 @@ pub(crate) enum Span {
     Until { terminator: u8 },
     Terminated { mask: u8 },
     Fill { cap: Option<u64> },
-    Chosen { on: Discriminant },
-    ChosenIn { on: Discriminant, bits: u64 },
-    ChosenWithin { on: Discriminant, by: By },
+    Chosen { on: On },
+    ChosenIn { on: On, bits: u64 },
+    ChosenWithin { on: On, by: By },
+}
+
+/// What selects a switch's arm, as `layline_core::table::Discriminant`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum On {
+    /// A field's name, or an expression's compact spelling.
+    Field(String),
+    BodyLength,
+}
+
+impl On {
+    pub(crate) fn of(on: &Discriminant) -> Self {
+        match on {
+            Discriminant::Field(e) => On::Field(spelled(e)),
+            Discriminant::BodyLength => On::BodyLength,
+        }
+    }
 }
 
 /// What makes an optional row present.
@@ -74,6 +91,81 @@ pub(crate) enum Presence {
     Bit,
     Remaining,
     Length { by: String },
+    When { expr: String },
+}
+
+impl Presence {
+    /// The row of a presence condition: one field's bits where it tests them, else the condition.
+    pub(crate) fn of(when: &Expr) -> Self {
+        let test = when.test().and_then(|t| {
+            let mask = match t.mask {
+                None => 1,
+                Some(m) => m.fold()? as u64,
+            };
+            Some((String::from(t.field), mask, t.set))
+        });
+        match test {
+            Some((field, mask, true)) => Presence::Flag { field, mask },
+            Some((field, mask, false)) => Presence::Clear { field, mask },
+            None => Presence::When { expr: format!("{when:#}") },
+        }
+    }
+}
+
+/// A number a row's size is read from: `field * scale + offset`, as `layline_core::table::By`.
+///
+/// Any other expression is held in `field` in its compact spelling, unscaled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct By {
+    pub field: String,
+    pub scale: u32,
+    pub offset: i32,
+}
+
+impl By {
+    pub(crate) fn of(e: &Expr) -> Self {
+        affine(e).unwrap_or_else(|| By { field: spelled(e), scale: 1, offset: 0 })
+    }
+}
+
+/// `e` as `field * scale + offset`, with a positive scale, if it is one.
+fn affine(e: &Expr) -> Option<By> {
+    let lit = |e: &Expr| match e {
+        Expr::Int(n) => Some(*n),
+        _ => None,
+    };
+    let scaled = |e: &Expr| -> Option<(String, u32)> {
+        match e {
+            Expr::Name(n) => Some((n.clone(), 1)),
+            Expr::Binary(Op::Mul, a, b) => {
+                let (n, k) = match (&**a, &**b) {
+                    (Expr::Name(n), k) | (k, Expr::Name(n)) => (n, lit(k)?),
+                    _ => return None,
+                };
+                Some((n.clone(), u32::try_from(k).ok().filter(|k| *k > 0)?))
+            }
+            _ => None,
+        }
+    };
+    let (base, offset) = match e {
+        Expr::Binary(Op::Add, a, b) => match (lit(a), lit(b)) {
+            (_, Some(o)) => (&**a, o),
+            (Some(o), _) => (&**b, o),
+            _ => return None,
+        },
+        Expr::Binary(Op::Sub, a, b) => (&**a, lit(b)?.checked_neg()?),
+        other => (other, 0),
+    };
+    let (field, scale) = scaled(base)?;
+    Some(By { field, scale, offset: i32::try_from(offset).ok()? })
+}
+
+/// A name as itself, and any other expression in its compact spelling.
+pub(crate) fn spelled(e: &Expr) -> String {
+    match e {
+        Expr::Name(n) => n.clone(),
+        other => format!("{other:#}"),
+    }
 }
 
 /// The bytes a checksum row covers.

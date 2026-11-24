@@ -38,12 +38,17 @@ fn a_bit_addressed_message_refuses_every_other_segment_kind() {
         Segment::repeat(
             "items",
             Kind::Scalar(Scalar::U(8)),
-            Count::Field { by: By::field("version"), cap: None },
+            Count::Field { by: Expr::name("version"), cap: None },
             None,
             Collection::Vec,
         ),
-        Segment::placed("record", Kind::Nested { ty: "Entry".into(), bytes: 4 }, "version", None),
-        switch("body", Discriminant::Field("version".into()), "Body"),
+        Segment::placed(
+            "record",
+            Kind::Nested { ty: "Entry".into(), bytes: 4 },
+            layline_codegen::Expr::name("version"),
+            None,
+        ),
+        switch("body", Discriminant::Field(Expr::name("version")), "Body"),
         Segment::checksum("crc", Scalar::U(8), "Lrc8", layline_codegen::Coverage::whole()),
     ];
     for seg in cases {
@@ -98,13 +103,17 @@ fn a_bit_addressed_message_takes_a_value_of_discovered_extent_and_a_field_behind
     assert_eq!(validate_message(&var), Ok(()));
 
     let masked = bits_msg(vec![Segment::opt(
-        Presence::Mask { field: "version".into(), mask: 0x4 },
+        Presence::When(Expr::binary(
+            layline_codegen::Op::BitAnd,
+            Expr::name("version"),
+            Expr::int(0x4),
+        )),
         field("origin", Kind::Scalar(Scalar::U(12))),
     )]);
     assert_eq!(validate_message(&masked), Ok(()));
 
     let flagged = bits_msg(vec![Segment::opt(
-        Presence::Flag { field: "urgent".into() },
+        Presence::When(Expr::name("urgent")),
         field("origin", Kind::Scalar(Scalar::U(12))),
     )]);
     assert_eq!(validate_message(&flagged), Ok(()));
@@ -115,44 +124,77 @@ fn a_bit_addressed_message_refuses_a_flag_it_cannot_write_the_presence_bits_back
     let optional = field("origin", Kind::Scalar(Scalar::U(12)));
     let cases: Vec<(Vec<Segment>, &str)> = vec![
         (
-            vec![Segment::opt(Presence::Mask { field: "later".into(), mask: 1 }, optional.clone())],
+            vec![Segment::opt(
+                Presence::When(Expr::binary(
+                    layline_codegen::Op::BitAnd,
+                    Expr::name("later"),
+                    Expr::int(1),
+                )),
+                optional.clone(),
+            )],
             "is not a field this message reads before",
         ),
         (
             vec![
                 Segment::opt(Presence::Bit, field("absent", Kind::Scalar(Scalar::U(4)))),
-                Segment::opt(Presence::Mask { field: "absent".into(), mask: 1 }, optional.clone()),
+                Segment::opt(
+                    Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("absent"),
+                        Expr::int(1),
+                    )),
+                    optional.clone(),
+                ),
             ],
             "itself sometimes absent",
         ),
         (
             vec![
                 Segment::value("n", Kind::Var { ty: "ExpGolomb".into() }),
-                Segment::opt(Presence::Mask { field: "n".into(), mask: 1 }, optional.clone()),
+                Segment::opt(
+                    Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("n"),
+                        Expr::int(1),
+                    )),
+                    optional.clone(),
+                ),
             ],
             "reads its width off the wire",
         ),
         (
             vec![Segment::opt(
-                Presence::Mask { field: "version".into(), mask: 0x10 },
+                Presence::When(Expr::binary(
+                    layline_codegen::Op::BitAnd,
+                    Expr::name("version"),
+                    Expr::int(0x10),
+                )),
                 optional.clone(),
             )],
             "reaches bit 4 of `version`, which is 4 bits wide",
         ),
         (
             vec![Segment::opt(
-                Presence::Mask { field: "version".into(), mask: 0 },
+                Presence::When(Expr::binary(
+                    layline_codegen::Op::BitAnd,
+                    Expr::name("version"),
+                    Expr::int(0),
+                )),
                 optional.clone(),
             )],
             "masks no bits",
         ),
         (
-            vec![Segment::opt(Presence::Flag { field: "version".into() }, optional.clone())],
+            vec![Segment::opt(Presence::When(Expr::name("version")), optional.clone())],
             "a bare test reads a `bool`",
         ),
         (
             vec![Segment::opt(
-                Presence::Mask { field: "urgent".into(), mask: 1 },
+                Presence::When(Expr::binary(
+                    layline_codegen::Op::BitAnd,
+                    Expr::name("urgent"),
+                    Expr::int(1),
+                )),
                 optional.clone(),
             )],
             "a mask tests the bits of an integer",
@@ -160,11 +202,19 @@ fn a_bit_addressed_message_refuses_a_flag_it_cannot_write_the_presence_bits_back
         (
             vec![
                 Segment::opt(
-                    Presence::Mask { field: "version".into(), mask: 0x3 },
+                    Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("version"),
+                        Expr::int(0x3),
+                    )),
                     field("first", Kind::Scalar(Scalar::U(2))),
                 ),
                 Segment::opt(
-                    Presence::Mask { field: "version".into(), mask: 0x2 },
+                    Presence::When(Expr::binary(
+                        layline_codegen::Op::BitAnd,
+                        Expr::name("version"),
+                        Expr::int(0x2),
+                    )),
                     optional.clone(),
                 ),
             ],

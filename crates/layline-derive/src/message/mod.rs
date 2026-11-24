@@ -17,6 +17,7 @@ use syn::{Data, DeriveInput, Fields, Type};
 use layline_codegen::{BitOrder, Collection, Coverage, Endian, Kind, Param, Root, Scalar};
 
 use crate::claim::{ChecksumSpec, Ref};
+use crate::value::Value;
 use bits::bit_field;
 use container::{MessageAttr, container_attr};
 use field::msg_field;
@@ -82,6 +83,8 @@ struct MsgField {
     with: Vec<Ref>,
     /// `#[align(N)]`.
     align: Option<(u64, Span)>,
+    /// `#[valid(..)]`: a condition the value must satisfy.
+    valid: Option<Value>,
 }
 
 enum Body {
@@ -91,13 +94,13 @@ enum Body {
     Value {
         kind: Kind,
         /// The `#[len(n)]` for a length-prefixed string.
-        len_ref: Option<Ref>,
+        len_ref: Option<Value>,
     },
     Repeat {
         element: Kind,
         count: CountSpec,
-        /// `#[seek(field)]`: where the elements start.
-        at: Option<Ref>,
+        /// `#[seek(off)]`: where the elements start.
+        at: Option<Value>,
         /// Checks `#[bytes(N)]` against a nested element's size.
         assert: Option<Box<ElementSize>>,
         collection: Collection,
@@ -105,8 +108,8 @@ enum Body {
     /// `#[seek(f)]`: one record at the byte offset in an earlier field.
     Placed {
         kind: Kind,
-        /// The field with the byte offset.
-        at: Ref,
+        /// The byte offset.
+        at: Value,
         /// `Some` on an `Option<T>`: the field that is zero when the record is absent.
         absent: Option<PlacedAbsence>,
         /// Checks `#[bytes(N)]` against a nested layout's size.
@@ -169,48 +172,36 @@ enum PlacedAbsence {
 }
 
 struct WhenSpec {
-    by: Ref,
-    test: WhenTest,
-    /// `!flag` or `field & MASK == 0`: present when the bits are clear.
-    clear: bool,
+    /// The condition.
+    value: Value,
     /// The whole attribute's span.
     span: Span,
 }
 
-enum WhenTest {
-    /// `field & MASK`.
-    Mask(u64),
-    /// `field`, a `bool`.
-    Flag,
-    /// `field > 0`, where the field is the record's length.
-    Positive,
-}
-
 impl WhenSpec {
-    /// The test as `#[when(..)]` spells it.
+    /// The condition as `#[when(..)]` spells it.
     fn spelled(&self) -> String {
-        let by = &self.by.name;
-        match (&self.test, self.clear) {
-            (WhenTest::Mask(mask), false) => format!("{by} & {mask:#x}"),
-            (WhenTest::Mask(mask), true) => format!("{by} & {mask:#x} == 0"),
-            (WhenTest::Flag, false) => by.clone(),
-            (WhenTest::Flag, true) => format!("!{by}"),
-            (WhenTest::Positive, _) => format!("{by} > 0"),
-        }
+        self.value.to_string()
     }
 
     fn presence(&self) -> layline_codegen::Presence {
-        let field = self.by.name.clone();
-        match self.test {
-            WhenTest::Mask(mask) if self.clear => {
-                layline_codegen::Presence::MaskClear { field, mask }
+        layline_codegen::Presence::When(self.value.expr.clone())
+    }
+
+    /// The one field this condition tests, if encode sets it from the field's presence.
+    fn tested(&self) -> Option<(&Ref, layline_codegen::Test<'_>)> {
+        let t = self.value.expr.test()?;
+        Some((self.value.find(t.field)?, t))
+    }
+
+    /// `n > 0` or `n != 0`: the field `n`, the length of a `#[seek]` record.
+    fn positive(&self) -> Option<&Ref> {
+        use layline_codegen::{Expr, Op};
+        match &self.value.expr {
+            Expr::Binary(Op::Gt | Op::Ne, a, b) if **b == Expr::Int(0) => {
+                self.value.find(a.as_name()?)
             }
-            WhenTest::Mask(mask) => layline_codegen::Presence::Mask { field, mask },
-            WhenTest::Flag if self.clear => layline_codegen::Presence::FlagClear { field },
-            WhenTest::Flag => layline_codegen::Presence::Flag { field },
-            WhenTest::Positive => {
-                unreachable!("`> 0` outside a placed record is refused at the field")
-            }
+            _ => None,
         }
     }
 }
@@ -221,12 +212,12 @@ enum SwitchWindow {
     Open,
     /// `#[bytes(N)]`.
     Fixed(usize),
-    /// `#[len(g)]`: read from an earlier field.
-    Field { by: Ref, scale: u32, offset: i32, cap: Option<usize> },
+    /// `#[len(g)]`: read from earlier fields.
+    Field { by: Value, cap: Option<usize> },
 }
 
 impl SwitchWindow {
-    fn field(&self) -> Option<&Ref> {
+    fn field(&self) -> Option<&Value> {
         match self {
             Self::Field { by, .. } => Some(by),
             Self::Open | Self::Fixed(_) => None,
@@ -235,14 +226,14 @@ impl SwitchWindow {
 }
 
 enum SwitchOn {
-    /// An earlier field, by name.
-    Field(Ref),
+    /// An expression over earlier fields.
+    Field(Value),
     /// `#[switch(..)]`: the number of bytes remaining.
     BodyLength(Span),
 }
 
 impl SwitchOn {
-    fn field(&self) -> Option<&Ref> {
+    fn field(&self) -> Option<&Value> {
         match self {
             Self::Field(r) => Some(r),
             Self::BodyLength(_) => None,
@@ -274,31 +265,19 @@ fn sometimes_absent(body: &Body) -> bool {
 }
 
 enum CountSpec {
+    /// `#[count(n)]`: as many elements as the expression gives.
     Field {
-        by: Ref,
-        scale: u32,
-        offset: i32,
+        by: Value,
         cap: Option<usize>,
     },
-    /// `#[count(n * n)]`: `n * n` elements.
-    Squared {
-        by: Ref,
-        scale: u32,
-        offset: i32,
-        cap: Option<usize>,
-    },
-    /// `#[len(n)]`: the collection spans `n` bytes.
+    /// `#[len(n)]`: the collection spans as many bytes as the expression gives.
     Window {
-        by: Ref,
-        scale: u32,
-        offset: i32,
+        by: Value,
         cap: Option<usize>,
     },
     /// `#[count(n)] #[stride(s)]`: `n` elements, `s` bytes apart.
     Strided {
-        by: Ref,
-        scale: u32,
-        offset: i32,
+        by: Value,
         cap: Option<usize>,
         stride: StrideSpec,
     },
@@ -320,7 +299,7 @@ enum CountSpec {
 impl CountSpec {
     fn spelling(&self) -> &'static str {
         match self {
-            Self::Field { .. } | Self::Squared { .. } | Self::Strided { .. } => "#[count]",
+            Self::Field { .. } | Self::Strided { .. } => "#[count]",
             Self::Window { .. } => "#[len]",
             Self::Fill { .. } => "#[fill]",
             Self::Terminated { .. } | Self::Until { .. } => "#[until]",
@@ -332,7 +311,6 @@ impl CountSpec {
         !matches!(
             self,
             Self::Field { .. }
-                | Self::Squared { .. }
                 | Self::Window { .. }
                 | Self::Strided { .. }
                 | Self::Terminated { .. }
@@ -341,19 +319,16 @@ impl CountSpec {
         )
     }
 
-    fn by(&self) -> Option<&Ref> {
+    fn by(&self) -> Option<&Value> {
         match self {
-            Self::Field { by, .. }
-            | Self::Squared { by, .. }
-            | Self::Window { by, .. }
-            | Self::Strided { by, .. } => Some(by),
+            Self::Field { by, .. } | Self::Window { by, .. } | Self::Strided { by, .. } => Some(by),
             Self::Fill { .. } | Self::Terminated { .. } | Self::Until { .. } | Self::Bytes(_) => {
                 None
             }
         }
     }
 
-    fn stride(&self) -> Option<&Ref> {
+    fn stride(&self) -> Option<&Value> {
         match self {
             Self::Strided { stride, .. } => Some(&stride.by),
             _ => None,
@@ -362,9 +337,7 @@ impl CountSpec {
 }
 
 struct StrideSpec {
-    by: Ref,
-    scale: u32,
-    offset: i32,
+    by: Value,
     span: Span,
 }
 
@@ -534,7 +507,7 @@ struct FieldAttrs {
     /// `#[stride(s)]`, used with `#[count]`.
     stride: Option<StrideSpec>,
     at: Option<crate::claim::At>,
-    seek: Option<Ref>,
+    seek: Option<Value>,
     bits: Option<(u32, Span)>,
     bytes: Option<(usize, Span)>,
     until: Option<(UntilSpec, Span)>,
@@ -545,6 +518,8 @@ struct FieldAttrs {
     magic: Option<crate::claim::Magic>,
     /// `#[align(N)]`: padding after the field that its length does not count.
     align: Option<(u64, Span)>,
+    /// `#[valid(..)]`: a condition the value must satisfy.
+    valid: Option<Value>,
 }
 
 enum KindWord {

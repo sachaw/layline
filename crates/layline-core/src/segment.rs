@@ -1,4 +1,8 @@
 //! Segment tables for messages.
+//!
+//! A row names the field a number is read from. Where an attribute computes the number from an
+//! expression that is not one field scaled and offset, the row holds the expression instead, in
+//! its compact spelling, such as `ext_len*4-(13+markings_len)`.
 use crate::field::FieldDef;
 use crate::row::row;
 
@@ -17,7 +21,7 @@ pub enum Start<'a> {
     },
     /// At a byte offset read from an earlier field, counted from the start of the body.
     Seek {
-        /// The field holding the offset.
+        /// The field holding the offset, or the expression giving it.
         by: &'a str,
     },
 }
@@ -34,9 +38,11 @@ impl Start<'_> {
 }
 
 /// A field a size is read from, with a scale and offset applied.
+///
+/// A size from any other expression is [`By::expr`]: the expression in `field`, unscaled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct By<'a> {
-    /// The field holding the number.
+    /// The field holding the number, or the expression giving it.
     pub field: &'a str,
     /// Multiplier.
     pub scale: u32,
@@ -50,13 +56,19 @@ impl<'a> By<'a> {
     pub const fn field(field: &'a str) -> Self {
         Self { field, scale: 1, offset: 0 }
     }
+
+    /// The value of an expression, in its compact spelling.
+    #[must_use]
+    pub const fn expr(expr: &'a str) -> Self {
+        Self::field(expr)
+    }
 }
 
 /// What selects a switch arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Discriminant<'a> {
-    /// An earlier field's value.
+    /// An earlier field's value, or an expression's.
     Field(&'a str),
     /// The number of bytes given to the switch.
     BodyLength,
@@ -192,6 +204,11 @@ pub enum Presence<'a> {
     Length {
         /// The byte length field.
         by: &'a str,
+    },
+    /// Present when a condition over earlier fields holds, other than one field's bits.
+    When {
+        /// The condition, in its compact spelling, such as `has_ext&&kind!=3`.
+        expr: &'a str,
     },
 }
 

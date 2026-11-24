@@ -5,13 +5,14 @@ use quote::quote;
 
 use super::body::{Bind, Item, Own, Walk};
 use super::cursor::{seek_to, windowed, windowed_padded, write_padding};
-use super::patch::{StampAt, stamp_slot};
+use super::eval::blamed;
+
 use super::repeat::element_step;
 use super::table::{Row, deferred_type, span_of_kind};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{SlotOf, doc_attr, kind_ty, row};
-use crate::{Absence, By, Error, Segment};
+use crate::{Absence, Error, Expr, Segment};
 
 impl Walk<'_> {
     pub(super) fn placed(
@@ -54,20 +55,22 @@ impl Walk<'_> {
                 let #ident = __e;
             },
             Some(absent) => {
-                let start = self.env.get(owner, "#[at]", at)?;
-                let seek = seek_to(&start, at, root);
+                let start = self.env.number(owner, "#[seek]", at)?;
+                let seek = seek_to(&quote!(__start), blamed(at, field), root);
                 let (test, read) = match absent {
-                    Absence::ZeroOffset => (start, read),
+                    Absence::ZeroOffset => (quote!(__start), read),
                     Absence::ZeroLength { by, align } => {
-                        let n = self.env.stated_n(owner, "#[when]", &By::field(by), None)?;
+                        let len = Expr::name(by);
+                        let n = self.env.size_n(owner, "#[when]", &len, None)?;
                         let window = match align {
                             Some(align) => windowed_padded(by, *align, read, root),
                             None => windowed(by, true, read, root),
                         };
-                        (self.env.get(owner, "#[when]", by)?, quote!(#n #window))
+                        (self.env.number(owner, "#[when]", &len)?, quote!(#n #window))
                     }
                 };
                 quote! {
+                    let __start = #start;
                     let #ident = if (#test) != 0 {
                         #seek
                         #read
@@ -81,15 +84,14 @@ impl Walk<'_> {
         self.parse_steps.extend(parse);
 
         let here = self.here();
-        let stamp = |of: SlotOf, into: &str, value: &TokenStream| {
-            let at = StampAt { owner, coll: field, of, field: into, record: true };
-            stamp_slot(&self.slots, at, value, root)
+        let stamp = |of: SlotOf, by: &Expr, value: TokenStream| {
+            self.stamp_or_agree(own, field, (of, true), by, value, None)
         };
         let write_one = step.write_one();
         let held = own.get(field);
         match absent {
             None => {
-                let stamp = stamp(SlotOf::Position, at, &here)?;
+                let stamp = stamp(SlotOf::Position, at, here)?;
                 self.byte_steps.extend(quote! {
                     #stamp
                     let __e = &#held;
@@ -97,8 +99,8 @@ impl Walk<'_> {
                 });
             }
             Some(Absence::ZeroOffset) => {
-                let present = stamp(SlotOf::Position, at, &here)?;
-                let absent = stamp(SlotOf::Position, at, &quote!(0i64))?;
+                let present = stamp(SlotOf::Position, at, here)?;
+                let absent = stamp(SlotOf::Position, at, quote!(0i64))?;
                 self.byte_steps.extend(quote! {
                     match &#held {
                         #some(__e) => {
@@ -119,11 +121,12 @@ impl Walk<'_> {
                         #pad
                     }
                 });
-                let at_present = stamp(SlotOf::Position, at, &here)?;
-                let at_absent = stamp(SlotOf::Position, at, &quote!(0i64))?;
+                let len = Expr::name(by);
+                let at_present = stamp(SlotOf::Position, at, here.clone())?;
+                let at_absent = stamp(SlotOf::Position, at, quote!(0i64))?;
                 let len_present =
-                    stamp(SlotOf::Length, by, &quote!((out.len() - __span_start) as #i64))?;
-                let len_absent = stamp(SlotOf::Length, by, &quote!(0i64))?;
+                    stamp(SlotOf::Length, &len, quote!((out.len() - __span_start) as #i64))?;
+                let len_absent = stamp(SlotOf::Length, &len, quote!(0i64))?;
                 self.byte_steps.extend(quote! {
                     match &#held {
                         #some(__e) => {

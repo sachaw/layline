@@ -4,9 +4,10 @@ use proc_macro2::{Ident, Literal, TokenStream};
 use quote::quote;
 
 use crate::root::Prelude;
+use crate::walk::row::{By, spelled};
 use crate::walk::tokens::ident;
 use crate::walk::{field_rows, row};
-use crate::{By, Container, Count, Discriminant, Endian, Field, Kind, Len, Root};
+use crate::{Container, Count, Endian, Expr, Field, Kind, Len, Op, Root};
 
 /// The rows so far, and where the next one starts.
 pub(super) struct Rows {
@@ -105,9 +106,9 @@ impl<'a> Row<'a> {
         Self { name, start: None, span, when: None, decoded_by: None, table: None, covers: None }
     }
 
-    /// Start the row at the offset in field `by`.
-    pub(super) fn seek(self, by: &str) -> Self {
-        Self { start: Some(row::Start::Seek { by: String::from(by) }), ..self }
+    /// Start the row at the offset `by` gives.
+    pub(super) fn seek(self, by: &Expr) -> Self {
+        Self { start: Some(row::Start::Seek { by: spelled(by) }), ..self }
     }
 
     /// Make the row present only `when`.
@@ -174,6 +175,7 @@ fn when_tokens(when: &row::Presence, root: &Root) -> TokenStream {
         row::Presence::Bit => quote!(#root::table::Presence::Bit),
         row::Presence::Remaining => quote!(#root::table::Presence::Remaining),
         row::Presence::Length { by } => quote!(#root::table::Presence::Length { by: #by }),
+        row::Presence::When { expr } => quote!(#root::table::Presence::When { expr: #expr }),
     }
 }
 
@@ -250,10 +252,10 @@ fn span_tokens(span: &row::Span, root: &Root) -> TokenStream {
     }
 }
 
-fn discriminant_tokens(on: &Discriminant, root: &Root) -> TokenStream {
+fn discriminant_tokens(on: &row::On, root: &Root) -> TokenStream {
     match on {
-        Discriminant::Field(f) => quote!(#root::table::Discriminant::Field(#f)),
-        Discriminant::BodyLength => quote!(#root::table::Discriminant::BodyLength),
+        row::On::Field(on) => quote!(#root::table::Discriminant::Field(#on)),
+        row::On::BodyLength => quote!(#root::table::Discriminant::BodyLength),
     }
 }
 
@@ -281,7 +283,7 @@ fn opt_u64(value: Option<u64>, root: &Root) -> TokenStream {
 fn span_of_len(len: &Len) -> row::Span {
     match len {
         Len::Bytes(n) => row::Span::Fixed(*n as u64 * 8),
-        Len::Field { by, .. } => row::Span::Window { by: by.clone() },
+        Len::Field { by, .. } => row::Span::Window { by: By::of(by) },
         Len::Until { terminator } => row::Span::Until { terminator: *terminator },
         Len::Fill => row::Span::Fill { cap: None },
     }
@@ -299,10 +301,12 @@ pub(super) fn span_of_kind(kind: &Kind) -> row::Span {
 /// The span of a collection counted by `count`, with elements `each` bits wide if fixed.
 pub(super) fn span_of_count(count: &Count, each: Option<u64>) -> row::Span {
     match count {
-        Count::Field { by, .. } => row::Span::Counted { by: by.clone(), each },
-        Count::Squared { by, .. } => row::Span::Squared { by: by.clone(), each },
+        Count::Field { by: Expr::Binary(Op::Mul, a, b), .. } if a == b => {
+            row::Span::Squared { by: By::of(a), each }
+        }
+        Count::Field { by, .. } => row::Span::Counted { by: By::of(by), each },
         Count::Strided { by, stride, .. } => {
-            row::Span::Strided { by: by.clone(), stride: stride.clone() }
+            row::Span::Strided { by: By::of(by), stride: By::of(stride) }
         }
         Count::Window(len) => span_of_len(len),
         Count::Terminated { mask } => row::Span::Terminated { mask: *mask },

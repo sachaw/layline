@@ -62,8 +62,9 @@ pub(super) fn resolve(seen: &Seen<'_>, field: &str, reads: Reads) -> Result<(), 
     }
 }
 
-/// Refuses a parameter where encode would write the value back.
-pub(super) fn read_only(seen: &Seen<'_>, field: &str, what: &str) -> Result<(), Invalid> {
+/// Refuses an offset that is a bare parameter, where encode would write the value back.
+pub(super) fn read_only(seen: &Seen<'_>, at: &crate::Expr, what: &str) -> Result<(), Invalid> {
+    let Some(field) = at.as_name() else { return Ok(()) };
     let (outer, _) = split_ref(field);
     if !seen.iter().any(|k| k.name == outer && k.param) {
         return Ok(());

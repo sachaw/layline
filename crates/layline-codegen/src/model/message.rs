@@ -6,37 +6,34 @@ use alloc::vec::Vec;
 
 use super::Derive;
 
-use super::{BitOrder, By, Coverage, Discriminant, Endian, Field, Kind, Len, Scalar, Stated};
+use super::{BitOrder, Coverage, Discriminant, Endian, Expr, Field, Kind, Len, Scalar, Stated};
 
 /// How many elements a collection has.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Count {
-    /// Read from an earlier integer field: `count = field * scale + offset`.
+    /// Given by an [`Expr`] over earlier fields and parameters, such as `n`, `n * 2 - 1` or
+    /// `order * order`.
+    ///
+    /// If the expression is invertible in the one field it reads, encode writes that field from
+    /// the collection's length. Otherwise encode checks the length against it.
     Field {
-        /// The count field.
-        by: By,
+        /// The number of elements.
+        by: Expr,
         /// The largest count allowed.
         cap: Option<usize>,
     },
-    /// The square of an earlier field's value. Encode derives the field from the length.
-    Squared {
-        /// The field holding the square root.
-        by: By,
-        /// The largest count allowed, after squaring.
-        cap: Option<usize>,
-    },
-    /// A count from one field and each element's byte size from another.
+    /// A count, and each element's byte size from a second expression.
     ///
     /// Decode reads each element from the start of its stride. A stride shorter than the element
     /// is [`ParseError::Malformed`](layline_core::ParseError).
     Strided {
-        /// The count field.
-        by: By,
+        /// The number of elements.
+        by: Expr,
         /// The largest count allowed.
         cap: Option<usize>,
-        /// The field holding each element's size in bytes.
-        stride: By,
+        /// Each element's size in bytes.
+        stride: Expr,
     },
     /// As many elements as fit a byte length.
     ///
@@ -60,37 +57,16 @@ pub enum Count {
 }
 
 /// When an optional field is present.
-///
-/// Encode sets the presence from whether the field is `Some`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Presence {
-    /// When `field & mask != 0`.
-    Mask {
-        /// The flags field.
-        field: String,
-        /// The bits that mark the field present.
-        mask: u64,
-    },
-    /// When the `bool` `field` is `true`.
-    Flag {
-        /// The `bool` field.
-        field: String,
-    },
-    /// When `field & mask == 0`: the bits mark the field absent, as a "use the default" flag does.
+    /// When a condition over earlier fields and parameters holds.
     ///
-    /// Encode clears the bits for `Some` and sets them for `None`.
-    MaskClear {
-        /// The flags field.
-        field: String,
-        /// The bits that mark the field absent.
-        mask: u64,
-    },
-    /// When the `bool` `field` is `false`. Encode writes `false` for `Some` and `true` for `None`.
-    FlagClear {
-        /// The `bool` field.
-        field: String,
-    },
+    /// A test of one field, `f` for a `bool` or `f & MASK` for bits, with `!` or `== 0` for
+    /// their absence, is one encode sets from whether the field is `Some`: it sets the masked
+    /// bits and leaves the rest of the flags field alone. Encode checks any other condition
+    /// against whether the field is `Some`.
+    When(Expr),
     /// When an unnamed bit just before the field is set. Bit-addressed messages only.
     Bit,
     /// When the body has bytes left. Must be the last field.
@@ -98,21 +74,27 @@ pub enum Presence {
 }
 
 impl Presence {
-    /// For a test of an earlier field: its name, the bits tested, and whether set bits mean
-    /// present. A `bool` is its single bit.
+    /// `When`, from an expression.
+    #[must_use]
+    pub fn when(condition: Expr) -> Self {
+        Presence::When(condition)
+    }
+
+    /// For a test of one earlier field: its name, the bits tested, and whether set bits mean
+    /// present. A `bool` is its single bit. A mask must be a literal.
     pub(crate) fn tests(&self) -> Option<(&str, u64, bool)> {
-        match self {
-            Presence::Mask { field, mask } => Some((field, *mask, true)),
-            Presence::MaskClear { field, mask } => Some((field, *mask, false)),
-            Presence::Flag { field } => Some((field, 1, true)),
-            Presence::FlagClear { field } => Some((field, 1, false)),
-            Presence::Bit | Presence::Remaining => None,
-        }
+        let Presence::When(e) = self else { return None };
+        let t = e.test()?;
+        let mask = match t.mask {
+            None => 1,
+            Some(m) => m.fold()? as u64,
+        };
+        Some((t.field, mask, t.set))
     }
 
     /// Whether the test reads a `bool`, rather than bits of an integer.
     pub(crate) fn reads_flag(&self) -> bool {
-        matches!(self, Presence::Flag { .. } | Presence::FlagClear { .. })
+        matches!(self, Presence::When(e) if e.test().is_some_and(|t| t.mask.is_none()))
     }
 }
 
@@ -120,7 +102,7 @@ impl Presence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Absence {
-    /// An offset of zero, in the field [`Segment::Placed::at`].
+    /// An offset of zero: [`Segment::Placed::at`] gives 0.
     ZeroOffset,
     /// A length of zero.
     ZeroLength {
@@ -191,8 +173,8 @@ pub enum Segment {
         element: Kind,
         /// How many elements there are.
         count: Count,
-        /// The earlier field holding the byte offset of the elements. Encode writes it.
-        at: Option<String>,
+        /// The byte offset of the elements. Encode writes the field it reads, if it is invertible.
+        at: Option<Expr>,
         /// The Rust type.
         collection: Collection,
     },
@@ -208,8 +190,8 @@ pub enum Segment {
         stated: Option<Stated>,
         /// The record: a [`Kind::Nested`] or a [`Kind::Msg`].
         kind: Kind,
-        /// The earlier field holding the offset. Encode writes it.
-        at: String,
+        /// The byte offset. Encode writes the field it reads, if it is invertible.
+        at: Expr,
         /// What makes the record absent, for an `Option<T>` field.
         absent: Option<Absence>,
     },
@@ -264,9 +246,27 @@ pub enum Segment {
         /// The bytes it covers.
         over: Coverage,
     },
+    /// A condition the value must satisfy, over earlier fields and parameters: an [`Expr`] that
+    /// encode cannot write back, so it checks it.
+    ///
+    /// It takes no bytes. Decode refuses a body that breaks it with
+    /// [`ParseError::Malformed`](layline_core::ParseError), and encode refuses such a value with
+    /// [`EncodeError::Mismatch`](layline_core::EncodeError), both naming `field`.
+    Valid {
+        /// The field that declares the condition, as errors name it.
+        field: String,
+        /// The condition.
+        holds: Expr,
+    },
 }
 
 impl Segment {
+    /// A [`Segment::Valid`].
+    #[must_use]
+    pub fn valid(field: &str, holds: Expr) -> Self {
+        Segment::Valid { field: String::from(field), holds }
+    }
+
     /// A [`Segment::Block`].
     #[must_use]
     pub fn block(fields: Vec<Field>) -> Self {
@@ -281,13 +281,13 @@ impl Segment {
 
     /// A [`Segment::Repeat`].
     ///
-    /// `at` names the offset field, or is `None` to read the elements in place.
+    /// `at` gives the byte offset, or is `None` to read the elements in place.
     #[must_use]
     pub fn repeat(
         name: &str,
         element: Kind,
         count: Count,
-        at: Option<&str>,
+        at: Option<Expr>,
         collection: Collection,
     ) -> Self {
         Segment::Repeat {
@@ -296,22 +296,15 @@ impl Segment {
             stated: None,
             element,
             count,
-            at: at.map(String::from),
+            at,
             collection,
         }
     }
 
-    /// A [`Segment::Placed`] at the offset in field `at`. Optional when `absent` is set.
+    /// A [`Segment::Placed`] at the byte offset `at`. Optional when `absent` is set.
     #[must_use]
-    pub fn placed(name: &str, kind: Kind, at: &str, absent: Option<Absence>) -> Self {
-        Segment::Placed {
-            name: String::from(name),
-            doc: None,
-            stated: None,
-            kind,
-            at: String::from(at),
-            absent,
-        }
+    pub fn placed(name: &str, kind: Kind, at: Expr, absent: Option<Absence>) -> Self {
+        Segment::Placed { name: String::from(name), doc: None, stated: None, kind, at, absent }
     }
 
     /// A [`Segment::Switch`] on `on`, with arms from the choice type `choice`.
@@ -357,6 +350,7 @@ impl Segment {
             | Segment::Placed { doc, .. }
             | Segment::Switch { doc, .. }
             | Segment::Checksum { doc, .. } => *doc = Some(String::from(text)),
+            Segment::Valid { .. } => {}
         }
         self
     }
@@ -372,6 +366,7 @@ impl Segment {
             | Segment::Placed { stated, .. }
             | Segment::Switch { stated, .. }
             | Segment::Checksum { stated, .. } => *stated = Some(at),
+            Segment::Valid { .. } => {}
         }
         self
     }
@@ -389,7 +384,7 @@ impl Segment {
             | Segment::Checksum { name, .. } => vec![name.as_str()],
             Segment::Placed { name, absent: None, .. } => vec![name.as_str()],
             Segment::Placed { absent: Some(_), .. } => Vec::new(),
-            Segment::Opt { .. } => Vec::new(),
+            Segment::Opt { .. } | Segment::Valid { .. } => Vec::new(),
         }
     }
 
@@ -415,11 +410,11 @@ impl Segment {
         }
     }
 
-    /// The field name, or `None` for a [`Block`](Segment::Block).
+    /// The field name, or `None` for a [`Block`](Segment::Block) or [`Valid`](Segment::Valid).
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         match self {
-            Segment::Block(_) => None,
+            Segment::Block(_) | Segment::Valid { .. } => None,
             Segment::Opt { field, .. } => Some(&field.name),
             Segment::Value { name, .. }
             | Segment::Repeat { name, .. }
@@ -433,7 +428,7 @@ impl Segment {
     #[must_use]
     pub fn stated(&self) -> Option<Stated> {
         match self {
-            Segment::Block(_) => None,
+            Segment::Block(_) | Segment::Valid { .. } => None,
             Segment::Opt { field, .. } => field.stated,
             Segment::Value { stated, .. }
             | Segment::Repeat { stated, .. }
@@ -449,6 +444,7 @@ impl Segment {
         match self {
             Segment::Block(fields) => fields.iter().map(|f| f.kind.bits()).sum(),
             Segment::Checksum { repr, .. } => Some(repr.bits()),
+            Segment::Valid { .. } => Some(0),
             Segment::Value { kind, .. } => kind.bits(),
             Segment::Repeat { count, at, .. } => match (count, at) {
                 (Count::Window(Len::Bytes(n)), None) => Some(*n as u64 * 8),
@@ -471,6 +467,7 @@ impl Segment {
                 matches!(kind, Kind::Text { len: Len::Fill, .. })
             }
             Segment::Block(_)
+            | Segment::Valid { .. }
             | Segment::Checksum { .. }
             | Segment::Switch { .. }
             | Segment::Placed { .. } => false,

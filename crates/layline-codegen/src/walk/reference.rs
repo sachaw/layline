@@ -81,7 +81,7 @@ pub(crate) fn defers_open_end(segments: &[Segment]) -> Option<Reference<'_>> {
 #[cfg(all(test, feature = "emit"))]
 mod tests {
     use super::*;
-    use crate::{By, Scalar};
+    use crate::{Expr, Scalar};
 
     #[test]
     fn a_windowed_repeat_defers_to_nothing() {
@@ -90,7 +90,7 @@ mod tests {
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),
-                Count::Window(Len::Field { by: By::field("len"), cap: None, align: None }),
+                Count::Window(Len::Field { by: Expr::name("len"), cap: None, align: None }),
                 None,
                 crate::Collection::Vec,
             ),

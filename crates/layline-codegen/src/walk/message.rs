@@ -7,6 +7,7 @@ mod checksum;
 mod choice;
 mod cursor;
 mod env;
+mod eval;
 mod opt;
 mod patch;
 mod placed;

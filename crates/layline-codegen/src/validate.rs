@@ -3,6 +3,7 @@
 mod bits;
 mod catalogue;
 mod coverage;
+mod expr;
 mod layout;
 mod message;
 mod names;
@@ -36,7 +37,7 @@ pub enum Invalid {
     UnknownReference(String),
     /// A count, length, offset or switch refers to a field that is not an integer.
     NonIntegerReference(String),
-    /// A [`Presence::Flag`](crate::Presence::Flag) refers to a field that is not a `bool`.
+    /// A condition reads a field as a flag, and the field is not a `bool`.
     NotAFlagReference(String),
     /// A dotted reference, as written, reaches into a field that is not a nested layout.
     NotANestedLayout(String),

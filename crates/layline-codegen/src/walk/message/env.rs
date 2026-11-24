@@ -4,11 +4,11 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::cursor::cap_guard;
+use super::eval::{blamed, condition, number};
 use super::patch::nested_accessors;
-use crate::model::split_ref;
-use crate::root::Prelude;
+use crate::model::{Ty, split_ref};
 use crate::walk::tokens::ident;
-use crate::{By, Error, Root};
+use crate::{Error, Expr, Root};
 
 /// Every name bound so far, in wire order.
 pub(super) struct Env {
@@ -66,27 +66,68 @@ impl Env {
         }
     }
 
-    /// `usize::try_from(field * scale + offset)?`: `Malformed` if it does not fit a `usize`.
-    pub(super) fn stated(&self, msg: &str, what: &str, by: &By) -> Result<TokenStream, Error> {
-        let (root, field) = (&self.root, by.field.as_str());
-        let Prelude { usize, .. } = root.prelude();
-        let raw = affine(self.get(msg, what, field)?, by, root);
-        Ok(quote! {
-            #usize::try_from(#raw)
-                .map_err(|_| #root::ParseError::Malformed { field: #field, at: __at })?
-        })
+    /// The type `name` reads as, if it is bound: `None` for a field of a nested layout, whose type
+    /// only the compiler knows.
+    pub(super) fn ty(&self, name: &str) -> Option<Ty> {
+        match (self.bound(split_ref(name).0)?, split_ref(name).1) {
+            (Bound::Number(_), None) => Some(Ty::Int),
+            (Bound::Flag(_), None) => Some(Ty::Bool),
+            _ => None,
+        }
     }
 
-    /// `let __n = ..;`: read a count or length from a field, and check its cap.
-    pub(super) fn stated_n(
+    /// How `name` reads in decode, for [`eval`](super::eval): an integer as an `i64`, a `bool`
+    /// as itself. `what` is the attribute named in a refusal.
+    pub(super) fn read(
         &self,
         msg: &str,
         what: &str,
-        by: &By,
+        name: &str,
+        want: Ty,
+    ) -> Result<(TokenStream, Ty), Error> {
+        match self.ty(name).unwrap_or(want) {
+            Ty::Int => Ok((self.get(msg, what, name)?, Ty::Int)),
+            Ty::Bool => Ok((self.get_flag(msg, what, name)?, Ty::Bool)),
+        }
+    }
+
+    /// `e` as an `i64` read off the wire, or `Malformed` naming the first field it reads.
+    pub(super) fn number(&self, msg: &str, what: &str, e: &Expr) -> Result<TokenStream, Error> {
+        let root = &self.root;
+        let n = number(e, &|name, want| self.read(msg, what, name, want), root)?;
+        let field = blamed(e, msg);
+        Ok(quote!(#n.ok_or(#root::ParseError::Malformed { field: #field, at: __at })?))
+    }
+
+    /// `e` as a `bool` read off the wire, or `Malformed` naming the first field it reads.
+    pub(super) fn condition(&self, msg: &str, what: &str, e: &Expr) -> Result<TokenStream, Error> {
+        let root = &self.root;
+        let c = condition(e, &|name, want| self.read(msg, what, name, want), root)?;
+        let field = blamed(e, msg);
+        Ok(quote!(#c.ok_or(#root::ParseError::Malformed { field: #field, at: __at })?))
+    }
+
+    /// `e` as a `usize`: `Malformed` if it is undefined or negative.
+    pub(super) fn size(&self, msg: &str, what: &str, e: &Expr) -> Result<TokenStream, Error> {
+        let root = &self.root;
+        let n = number(e, &|name, want| self.read(msg, what, name, want), root)?;
+        let field = blamed(e, msg);
+        Ok(quote! {
+            #root::__private::value::size(#n)
+                .ok_or(#root::ParseError::Malformed { field: #field, at: __at })?
+        })
+    }
+
+    /// `let __n = ..;`: read a count or length, and check its cap.
+    pub(super) fn size_n(
+        &self,
+        msg: &str,
+        what: &str,
+        e: &Expr,
         cap: Option<usize>,
     ) -> Result<TokenStream, Error> {
-        let n = self.stated(msg, what, by)?;
-        let cap = cap_guard(cap, &by.field, &self.root);
+        let n = self.size(msg, what, e)?;
+        let cap = cap_guard(cap, blamed(e, msg), &self.root);
         Ok(quote! {
             let __n = #n;
             #cap
@@ -161,20 +202,5 @@ impl Env {
                  Name an earlier field of this message"
             ))),
         }
-    }
-}
-
-/// `value * scale + offset` in checked `i64`, because the value comes from untrusted input.
-///
-/// The expression ends in `?`, so it is a plain `i64` where used.
-fn affine(value: TokenStream, by: &By, root: &Root) -> TokenStream {
-    let (s, o) = (i64::from(by.scale), i64::from(by.offset));
-    let field = by.field.as_str();
-    let malformed = quote!(.ok_or(#root::ParseError::Malformed { field: #field, at: __at })?);
-    match (by.scale, by.offset) {
-        (1, 0) => value,
-        (1, _) => quote!((#value).checked_add(#o)#malformed),
-        (_, 0) => quote!((#value).checked_mul(#s)#malformed),
-        _ => quote!((#value).checked_mul(#s).and_then(|__v| __v.checked_add(#o))#malformed),
     }
 }
