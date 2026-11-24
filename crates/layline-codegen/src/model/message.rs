@@ -478,7 +478,7 @@ impl Segment {
     }
 }
 
-/// A read-only integer the enclosing message passes in.
+/// A read-only integer or `bool` the enclosing message passes in.
 ///
 /// Fields can refer to it like an earlier field. Encode never writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -486,7 +486,7 @@ impl Segment {
 pub struct Param {
     /// The name fields refer to.
     pub name: String,
-    /// The integer type.
+    /// The integer type, or [`Scalar::Bool`].
     pub repr: Scalar,
 }
 
@@ -505,7 +505,16 @@ pub struct MessageDef {
     /// The type name.
     pub name: String,
     /// The byte order.
+    ///
+    /// The order of the hidden blocks' `Layout` impls when [`endian_from`](Self::endian_from)
+    /// is set.
     pub endian: Endian,
+    /// The `bool` [parameter](Self::needs) that picks the byte order: big-endian when `true`.
+    ///
+    /// Decode and encode are generic over [`ByteOrder`](layline_core::order::ByteOrder), and
+    /// choose the order once per message. Fixed fields in this message's blocks follow it,
+    /// including counts, lengths and checksums encode fills in. Nested layouts keep their own.
+    pub endian_from: Option<String>,
     /// The bit order, or `None` for a byte-addressed message.
     ///
     /// A bit-addressed message holds bit fields and inline [presence bits](Presence::Bit),
@@ -534,6 +543,7 @@ impl MessageDef {
         Self {
             name: String::from(name),
             endian: Endian::Le,
+            endian_from: None,
             bits: None,
             needs: Vec::new(),
             segments,
@@ -571,6 +581,12 @@ impl MessageDef {
     #[must_use]
     pub fn with_endian(self, endian: Endian) -> Self {
         Self { endian, ..self }
+    }
+
+    /// Picks the byte order from the `bool` parameter `param`: big-endian when `true`.
+    #[must_use]
+    pub fn with_endian_from(self, param: &str) -> Self {
+        Self { endian_from: Some(String::from(param)), ..self }
     }
 
     /// Makes the message bit-addressed, in this bit order.

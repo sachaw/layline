@@ -10,7 +10,7 @@ use super::text::text_wire_len;
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, SlotOf, path};
-use crate::{Endian, Error, Kind, Root, Segment};
+use crate::{Error, Kind, Root, Segment};
 
 /// The `bool` a derived flag holds. Presence is the only derivation that is not a number.
 pub(super) fn derived_flag(d: &Derived, own: Own) -> Option<TokenStream> {
@@ -180,7 +180,6 @@ pub(super) struct StampAt<'a> {
     pub(super) coll: &'a str,
     pub(super) of: SlotOf,
     pub(super) field: &'a str,
-    pub(super) endian: Endian,
     /// Whether the segment is a single record. Only the error message uses it.
     pub(super) record: bool,
 }
@@ -192,7 +191,7 @@ pub(super) fn stamp_slot(
     value: &TokenStream,
     root: &Root,
 ) -> Result<TokenStream, Error> {
-    let StampAt { owner, coll, of, field, endian, record } = at;
+    let StampAt { owner, coll, of, field, record } = at;
     let what = of.what();
     let Some(slot) = slots.iter().find(|s| s.coll == coll && s.of == of) else {
         let tie = of.tie(field, record);
@@ -202,7 +201,7 @@ pub(super) fn stamp_slot(
              {article} {what} field must be a fixed-width integer in a block"
         )));
     };
-    Ok(fill_reserved(owner, slot, field, of.claim(record), value, endian, root))
+    Ok(fill_reserved(owner, slot, field, of.claim(record), value, root))
 }
 
 /// The number a reserved field holds until it is stamped: zero, or the nearest end of its
@@ -242,7 +241,6 @@ pub(super) fn fill_reserved(
     field: &str,
     claim: &str,
     value: &TokenStream,
-    endian: Endian,
     root: &Root,
 ) -> TokenStream {
     let Slot { mark, width_bytes, write, .. } = slot;
@@ -250,17 +248,14 @@ pub(super) fn fill_reserved(
     let narrow = too_narrow(field, claim);
     let fill = match write {
         SlotWrite::Scalar { ty, range } => {
-            let to = match endian {
-                Endian::Be => quote!(to_be_bytes),
-                Endian::Le => quote!(to_le_bytes),
-            };
             let fits = fits(Target::Field(ty, 0), &quote!(__len), &narrow, root);
             let ranged = range.map(|r| in_range(field, r, &quote!(__len)));
             quote! {
                 #fits
                 #ranged
                 let __pos = <#ty as #root::WireInt>::from_i64(__len);
-                out.written_mut()[#mark..#mark + #width].copy_from_slice(&__pos.#to());
+                out.written_mut()[#mark..#mark + #width]
+                    .copy_from_slice(&<__O as #root::__private::ByteOrder>::write(__pos));
             }
         }
         SlotWrite::Nested { value: held, ty, outer, name } => {
@@ -280,7 +275,7 @@ pub(super) fn fill_reserved(
             quote! {
                 #fits
                 let __ck = #sub { #inner: <#ty as #root::WireInt>::from_i64(__len) };
-                out.written_mut()[#mark..#mark + #width].copy_from_slice(&__ck.encode());
+                out.written_mut()[#mark..#mark + #width].copy_from_slice(&__ck.encode_in::<__O>());
             }
         }
     };

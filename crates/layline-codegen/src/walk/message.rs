@@ -37,7 +37,7 @@ use crate::walk::derive_attr;
 use crate::walk::doc_attr;
 use crate::walk::tokens::ident;
 use crate::walk::{references, row, scalar_ty};
-use crate::{Error, MessageDef, Root};
+use crate::{Endian, Error, MessageDef, Root};
 
 /// A compile-time assertion about a type known only by name.
 ///
@@ -162,7 +162,14 @@ fn lower_message(
         const OPEN_ENDED: #bool = #open_ended;
     };
     let too_deep = too_deep(root);
+    // The body reads and writes in the order `__O`: a fixed one here, or the parameter's.
+    let fixed = |body: &TokenStream| match &m.endian_from {
+        Some(_) => quote!(),
+        None => fixed_order(m.endian, body, root),
+    };
+    let (parse_order, bytes_order) = (fixed(&parse), fixed(&bytes));
     let decode = quote! {
+        #parse_order
         #too_deep
         let __body = body;
         let mut __at = 0usize;
@@ -171,6 +178,7 @@ fn lower_message(
         #ok((Self { #build }, __hi))
     };
     let encode = quote! {
+        #bytes_order
         #base
         #bytes
         #ok(())
@@ -222,6 +230,10 @@ fn lower_message(
         };
         return Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows));
     }
+    let (decode, encode, held) = match &m.endian_from {
+        None => (decode, encode, quote!()),
+        Some(param) => held_order(&name, param, decode, encode, root),
+    };
     let codec = quote! {
         #ctx_decl
 
@@ -250,9 +262,87 @@ fn lower_message(
                 #encode
             }
         }
+
+        #held
     };
 
     Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows))
+}
+
+/// `type __O = Le;` or `Be`: the order a body with a fixed `endian` reads and writes in, if
+/// `body` reads or writes a scalar.
+pub(super) fn fixed_order(endian: Endian, body: &TokenStream, root: &Root) -> TokenStream {
+    fn names_order(body: &TokenStream) -> bool {
+        body.clone().into_iter().any(|t| match t {
+            proc_macro2::TokenTree::Ident(i) => i == "__O",
+            proc_macro2::TokenTree::Group(g) => names_order(&g.stream()),
+            _ => false,
+        })
+    }
+    if !names_order(body) {
+        return quote!();
+    }
+    let order = match endian {
+        Endian::Le => quote!(#root::__private::Le),
+        Endian::Be => quote!(#root::__private::Be),
+    };
+    quote! { type __O = #order; }
+}
+
+/// A message whose order is the parameter `param`: `decode` and `encode` bodies generic over
+/// `__O`, and the trait methods that pick `Be` or `Le` once from the context.
+fn held_order(
+    name: &proc_macro2::Ident,
+    param: &str,
+    decode: TokenStream,
+    encode: TokenStream,
+    root: &Root,
+) -> (TokenStream, TokenStream, TokenStream) {
+    let Prelude { result, u8, u32, usize, .. } = root.prelude();
+    let p = ident(param);
+    let (be, le) = (quote!(#root::__private::Be), quote!(#root::__private::Le));
+    let order = quote!(#root::__private::ByteOrder);
+    let held = quote! {
+        #[automatically_derived]
+        impl #name {
+            /// Decode in the byte order `__O`.
+            #[doc(hidden)]
+            fn __layline_decode<__O: #order>(
+                body: &[#u8],
+                __depth: #u32,
+                __ctx: <Self as #root::Message>::Ctx,
+            ) -> #result<(Self, #usize), #root::ParseError> {
+                #decode
+            }
+
+            /// Encode in the byte order `__O`.
+            #[doc(hidden)]
+            fn __layline_encode<__O: #order, __B: #root::Buffer>(
+                &self,
+                out: &mut __B,
+                __ctx: <Self as #root::Message>::Ctx,
+            ) -> #result<(), #root::Overflow> {
+                #encode
+            }
+        }
+    };
+    (
+        quote! {
+            if __ctx.#p {
+                Self::__layline_decode::<#be>(body, __depth, __ctx)
+            } else {
+                Self::__layline_decode::<#le>(body, __depth, __ctx)
+            }
+        },
+        quote! {
+            if __ctx.#p {
+                self.__layline_encode::<#be, __B>(out, __ctx)
+            } else {
+                self.__layline_encode::<#le, __B>(out, __ctx)
+            }
+        },
+        held,
+    )
 }
 
 /// The `<Name>Ctx` struct: one field per parameter, and `new`.

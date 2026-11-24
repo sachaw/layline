@@ -65,11 +65,11 @@ pub(super) fn take(len: &TokenStream, root: &Root) -> TokenStream {
     }
 }
 
-/// `let #bind = ..; __at += #len;`: read one hidden layout at the cursor.
+/// `let #bind = ..; __at += #len;`: read one hidden layout at the cursor, in the order `__O`.
 pub(super) fn read_layout(bind: &Ident, sub: &Ident, len: &Literal, root: &Root) -> TokenStream {
     let bytes = take(&quote!(#len), root);
     quote! {
-        let #bind = <#sub as #root::Layout>::decode_slice(#bytes)
+        let #bind = #sub::decode_slice_in::<__O>(#bytes)
             .map_err(|__err| __err.rebased(__at))?;
         __at += #len;
     }

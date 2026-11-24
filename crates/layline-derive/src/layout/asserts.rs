@@ -5,7 +5,6 @@ use quote::{format_ident, quote, quote_spanned};
 
 use layline_codegen::Root;
 
-use super::access::byte_fns;
 use super::{Body, Item, Plan, Prim, Reading, body_ty};
 
 struct MagicAt {
@@ -541,13 +540,12 @@ impl Plan<'_> {
         let writes = self.asserts.check.iter().map(|c| {
             let value = fold_over(&c.algorithm, &c.runs, quote!(__out), root);
             let ty = self.field_ty(&c.field);
-            let to_bytes = byte_fns(self.endian).1;
             let at = c.at;
             let put = super::access::put(
                 &quote!(__out),
                 &quote!(#at),
                 c.width,
-                &quote!(__ck.#to_bytes()),
+                &self.order().write(quote!(__ck)),
             );
             quote! {
                 {

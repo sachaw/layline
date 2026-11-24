@@ -404,21 +404,6 @@ struct M {
 }
 
 #[test]
-fn a_parameter_a_when_would_write_back() {
-    refused(
-        r#"#[derive(Message)]
-#[message(needs(flags: u8))]
-pub struct M {
-    pub a: u8,
-    #[when(flags & 0x01)]
-    pub stamp: Option<u16>,
-}"#,
-        "`flags` is a parameter, and encode cannot write presence bits into it. \
-         Name a field of this message",
-    );
-}
-
-#[test]
 fn a_negated_mask_is_not_a_test() {
     refused(
         r#"use layline::Message;

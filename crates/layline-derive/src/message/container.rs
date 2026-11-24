@@ -10,6 +10,8 @@ use crate::ty::scalar_of;
 
 pub(super) struct MessageAttr {
     pub(super) endian: Endian,
+    /// `endian = needs(p)`: the `bool` parameter that picks the byte order.
+    pub(super) endian_from: Option<syn::Ident>,
     pub(super) root: Root,
     /// `closed`: an unlisted discriminant is a decode error.
     pub(super) closed: Option<Span>,
@@ -72,14 +74,18 @@ fn parse_needs(
         let name: syn::Ident = content.parse()?;
         content.parse::<syn::Token![:]>()?;
         let ty: Type = content.parse()?;
-        let Some(repr @ (Scalar::U(_) | Scalar::I(_))) = scalar_of(&ty) else {
-            return Err(syn::Error::new(
-                ty.span(),
-                format!(
-                    "`{ident}`: parameter `{name}` must be an integer, not `{}`",
-                    crate::attr::spelled(&ty),
-                ),
-            ));
+        let repr = match scalar_of(&ty) {
+            Some(repr @ (Scalar::U(_) | Scalar::I(_))) => repr,
+            _ if crate::ty::bare_ident(&ty).is_some_and(|i| i == "bool") => Scalar::Bool,
+            _ => {
+                return Err(syn::Error::new(
+                    ty.span(),
+                    format!(
+                        "`{ident}`: parameter `{name}` must be an integer or a `bool`, not `{}`",
+                        crate::attr::spelled(&ty),
+                    ),
+                ));
+            }
         };
         out.push(Param::new(&crate::attr::name(&name), repr));
         if content.is_empty() {
@@ -96,10 +102,43 @@ fn parse_needs(
     Ok(out)
 }
 
+/// The byte order a message states: `le`, `be`, or `needs(p)` for a `bool` parameter.
+enum Order {
+    Fixed(Endian),
+    Held(syn::Ident),
+}
+
+/// `endian = le | be | needs(p)`.
+fn endian_spec(meta: &syn::meta::ParseNestedMeta<'_>, ident: &syn::Ident) -> syn::Result<Order> {
+    let shape = || {
+        meta.error(format!(
+            "`{ident}`: expected `endian = le`, `endian = be`, or `endian = needs(p)` for a \
+             `bool` parameter `p`"
+        ))
+    };
+    let value = meta.value()?;
+    let word: syn::Ident = value.parse().map_err(|_| shape())?;
+    match word.to_string().as_str() {
+        "le" => Ok(Order::Fixed(Endian::Le)),
+        "be" => Ok(Order::Fixed(Endian::Be)),
+        "needs" if value.peek(syn::token::Paren) => {
+            let content;
+            syn::parenthesized!(content in value);
+            let param: syn::Ident = content.parse().map_err(|_| shape())?;
+            if !content.is_empty() {
+                return Err(shape());
+            }
+            Ok(Order::Held(param))
+        }
+        _ => Err(shape()),
+    }
+}
+
 pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
     refuse_misplaced_on_container(input)?;
     let default = || MessageAttr {
         endian: Endian::Le,
+        endian_from: None,
         root: Root::default(),
         closed: None,
         bits: None,
@@ -116,7 +155,7 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
         let span = meta.path.span();
         if meta.path.is_ident("endian") {
             crate::attr::once_key(&mut endian, &meta, ident, "message", || {
-                Ok((crate::attr::endian_value(&meta, ident)?, span))
+                Ok((endian_spec(&meta, ident)?, span))
             })
         } else if meta.path.is_ident("order") {
             crate::attr::once_key(&mut order, &meta, ident, "message", || {
@@ -149,8 +188,14 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
         }
     })?;
 
+    let (fixed, endian_from) = match &endian {
+        Some((Order::Fixed(e), _)) => (*e, None),
+        Some((Order::Held(p), _)) => (Endian::Le, Some(p.clone())),
+        None => (Endian::Le, None),
+    };
     let out = MessageAttr {
-        endian: endian.map_or(Endian::Le, |(e, _)| e),
+        endian: fixed,
+        endian_from,
         root: root.unwrap_or_default(),
         closed,
         bits: None,

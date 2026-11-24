@@ -259,7 +259,7 @@ impl Walk<'_> {
         self.byte_steps.extend(quote! {
             #mark
             #rebuild
-            out.push(&#sub { #(#inits)* }.encode())?;
+            out.push(&#sub { #(#inits)* }.encode_in::<__O>())?;
             #reserve
         });
         Ok(())

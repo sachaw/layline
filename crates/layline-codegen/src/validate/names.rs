@@ -74,21 +74,14 @@ pub(super) fn read_only(seen: &Seen<'_>, field: &str, what: &str) -> Result<(), 
     )))
 }
 
-/// Checks the `#[with(..)]` list of a nested message: one earlier field per parameter.
-pub(super) fn stated_with(seen: &Seen<'_>, name: &str, kind: &Kind) -> Result<(), Invalid> {
+/// Checks the `#[with(..)]` list of a nested message: one earlier integer or `bool` per
+/// parameter, a field of this message, a field of a nested layout in it, or a parameter.
+pub(super) fn stated_with(seen: &Seen<'_>, kind: &Kind) -> Result<(), Invalid> {
     let Kind::Msg { with, .. } = kind else { return Ok(()) };
     for arg in with {
-        if arg.contains('.') {
-            return Err(Invalid::field(
-                name,
-                format!(
-                    "`#[with({arg})]` reaches into `{}`. \
-                     Each parameter takes one field of this message",
-                    split_ref(arg).0,
-                ),
-            ));
+        if resolve(seen, arg, Reads::Flag).is_err() {
+            resolve(seen, arg, Reads::Number)?;
         }
-        resolve(seen, arg, Reads::Number)?;
     }
     Ok(())
 }

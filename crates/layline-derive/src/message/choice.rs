@@ -68,7 +68,17 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     }
 
-    let MessageAttr { endian, root, closed, bits, needs } = container_attr(input)?;
+    let MessageAttr { endian, endian_from, root, closed, bits, needs } = container_attr(input)?;
+    if let Some(p) = endian_from {
+        return Err(syn::Error::new(
+            p.span(),
+            format!(
+                "`{}`: an enum takes no parameters to read its byte order from. \
+                 Write `endian = le` or `endian = be`, or move `needs` to an arm's type",
+                input.ident
+            ),
+        ));
+    }
     if let Some((_, span)) = needs {
         return Err(syn::Error::new(
             span,

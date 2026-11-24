@@ -181,7 +181,10 @@ pub(super) fn walk_segments(
     };
     for p in item.needs {
         let id = ident(&p.name);
-        w.env.bind(&p.name, quote!(__ctx.#id));
+        match p.repr {
+            crate::Scalar::Bool => w.env.bind_flag(&p.name, quote!(__ctx.#id)),
+            _ => w.env.bind(&p.name, quote!(__ctx.#id)),
+        }
     }
 
     for (_, d) in &w.derived {

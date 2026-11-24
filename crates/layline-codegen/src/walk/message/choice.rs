@@ -260,6 +260,8 @@ fn lower_choice(
 
     let (owner, str_ty) = (c.name.as_str(), root.prelude().primitive("str"));
     let too_deep = too_deep(root);
+    let parse_order = super::fixed_order(c.endian, &decode_arms, root);
+    let bytes_order = super::fixed_order(c.endian, &encode_arms, root);
     let codec = quote! {
         impl #root::Choice for #name {
             const NAME: &'static #str_ty = #owner;
@@ -278,6 +280,7 @@ fn lower_choice(
                 body: &[#u8],
                 __depth: #u32,
             ) -> #result<(Self, #usize), #root::ParseError> {
+                #parse_order
                 #too_deep
                 let __body = body;
                 match discriminant {
@@ -297,6 +300,7 @@ fn lower_choice(
                 &self,
                 out: &mut __B,
             ) -> #result<(), #root::Overflow> {
+                #bytes_order
                 match self {
                     #encode_arms
                     #encode_tail

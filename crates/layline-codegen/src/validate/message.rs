@@ -133,14 +133,35 @@ fn needs(msg: &MessageDef) -> Result<Seen<'_>, Invalid> {
                 msg.name
             )));
         }
-        if !Kind::Scalar(*repr).is_integer() {
+        if !Kind::Scalar(*repr).is_integer() && *repr != Scalar::Bool {
             return Err(Invalid::Other(format!(
-                "message `{}`: parameter `{name}` is `{}`. A parameter must be an integer",
+                "message `{}`: parameter `{name}` is `{}`. A parameter must be an integer or a \
+                 `bool`",
                 msg.name,
                 repr.primitive(),
             )));
         }
         seen.push(Known { name, kind: Kind::Scalar(*repr), param: true });
+    }
+    if let Some(from) = &msg.endian_from {
+        match msg.needs.iter().find(|p| p.name == *from) {
+            Some(Param { repr: Scalar::Bool, .. }) => {}
+            Some(Param { repr, .. }) => {
+                return Err(Invalid::Other(format!(
+                    "message `{}`: the byte order reads parameter `{from}`, which is `{}`. \
+                     Declare it `{from}: bool`, true for big-endian",
+                    msg.name,
+                    repr.primitive(),
+                )));
+            }
+            None => {
+                return Err(Invalid::Other(format!(
+                    "message `{}`: the byte order reads `{from}`, which is not a parameter. \
+                     Declare it in `needs`: `needs({from}: bool)`",
+                    msg.name,
+                )));
+            }
+        }
     }
     Ok(seen)
 }
@@ -258,7 +279,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                         ));
                     }
                 }
-                stated_with(seen, name, kind)?;
+                stated_with(seen, kind)?;
                 seen.push(Known::field(name, kind));
             }
             Segment::Repeat { name, element, count, at, .. } => {
@@ -334,13 +355,13 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     resolve(seen, field, Reads::Number)?;
                     read_only(seen, field, "a collection offset")?;
                 }
-                stated_with(seen, name, element)?;
+                stated_with(seen, element)?;
             }
             Segment::Placed { name, kind, at, absent, .. } => {
                 kind_paths(name, kind)?;
                 resolve(seen, at, Reads::Number)?;
                 read_only(seen, at, "a record offset")?;
-                stated_with(seen, name, kind)?;
+                stated_with(seen, kind)?;
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
                     resolve(seen, by, Reads::Number)?;
                     read_only(seen, by, "a record length")?;
@@ -424,13 +445,12 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
             }
             Segment::Opt { when, field } => {
                 field_names(field)?;
-                stated_with(seen, &field.name, &field.kind)?;
+                stated_with(seen, &field.kind)?;
                 match when {
                     Presence::Remaining => {}
                     Presence::Mask { field: flag, mask }
                     | Presence::MaskClear { field: flag, mask } => {
                         resolve(seen, flag, Reads::Number)?;
-                        read_only(seen, flag, "presence bits")?;
                         if *mask == 0 {
                             return Err(Invalid::field(
                                 &field.name,
@@ -443,7 +463,6 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     }
                     Presence::Flag { field: flag } | Presence::FlagClear { field: flag } => {
                         resolve(seen, flag, Reads::Flag)?;
-                        read_only(seen, flag, "presence bits")?;
                     }
                     Presence::Bit => {
                         return Err(Invalid::field(

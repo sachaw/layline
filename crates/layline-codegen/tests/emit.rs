@@ -369,3 +369,45 @@ fn a_borrowing_message_declares_its_lifetime() {
     let why = generate(&chunk(Some("a"), Kind::Scalar(Scalar::U(16)))).expect_err("not bytes");
     assert!(why.to_string().contains("a borrowed collection is bytes"), "{why}");
 }
+
+/// A message whose order a parameter picks has one generic body, chosen once per message.
+#[test]
+fn a_byte_order_from_a_parameter_emits_one_generic_body() {
+    use layline_codegen::{MessageDef, Param, Segment};
+
+    let m = MessageDef::new(
+        "Pdw",
+        vec![Segment::block(vec![Field::new("toa", Kind::Scalar(Scalar::I(64)))])],
+    )
+    .with_needs(vec![Param::new("big_endian", Scalar::Bool)])
+    .with_endian_from("big_endian");
+    let emitted = generate(&Module::new(vec![Item::Message(m)])).expect("emits").source;
+    let flat: String = emitted.split_whitespace().collect();
+
+    assert!(flat.contains("pubbig_endian:bool,"), "the context holds the flag:\n{emitted}");
+    assert!(
+        flat.contains("if__ctx.big_endian{Self::__layline_decode::<::layline::__private::Be>"),
+        "decode picks the order once:\n{emitted}"
+    );
+    assert!(
+        flat.contains("fn__layline_decode<__O:::layline::__private::ByteOrder>"),
+        "one body, generic over the order:\n{emitted}"
+    );
+    assert!(flat.contains("encode_in::<__O>()"), "the block writes in that order:\n{emitted}");
+}
+
+/// A fixed order is the same body, at one order.
+#[test]
+fn a_fixed_byte_order_names_its_order_once() {
+    use layline_codegen::{MessageDef, Segment};
+
+    let m = MessageDef::new(
+        "Head",
+        vec![Segment::block(vec![Field::new("len", Kind::Scalar(Scalar::U(16)))])],
+    )
+    .with_endian(Endian::Be);
+    let emitted = generate(&Module::new(vec![Item::Message(m)])).expect("emits").source;
+    let flat: String = emitted.split_whitespace().collect();
+    assert!(flat.contains("type__O=::layline::__private::Be;"), "{emitted}");
+    assert!(!flat.contains("__layline_decode"), "{emitted}");
+}

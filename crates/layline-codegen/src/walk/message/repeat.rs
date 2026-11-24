@@ -11,7 +11,7 @@ use super::value::{WithCtx, discovered_read, value_write};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{SlotOf, doc_attr, kind_ty, path, scalar_ty};
-use crate::{Collection, Count, Endian, Error, Kind, Len, Root, Scalar, Segment};
+use crate::{Collection, Count, Error, Kind, Len, Root, Scalar, Segment};
 
 /// How one element is read and written, and how far it moves the cursor.
 pub(super) enum Step {
@@ -95,7 +95,6 @@ pub(super) fn element_width(elem: &Kind, root: &Root) -> TokenStream {
 /// The step for one `element` of collection `coll`.
 pub(super) fn element_step(
     element: &Kind,
-    endian: Endian,
     coll: &str,
     ctx: Option<&WithCtx>,
     root: &Root,
@@ -126,20 +125,17 @@ pub(super) fn element_step(
                 )));
             }
             let ty = scalar_ty(*s);
-            let (from, to) = match endian {
-                Endian::Be => (quote!(from_be_bytes), quote!(to_be_bytes)),
-                Endian::Le => (quote!(from_le_bytes), quote!(to_le_bytes)),
-            };
+            let order = quote!(<__O as #root::__private::ByteOrder>);
             let byte = matches!(s, Scalar::U(8));
             let read = match (width, byte) {
                 (1, true) => quote! { __s[0] },
                 (1, false) => quote! { __s[0] as #ty },
-                _ => quote! { #ty::#from(__s.try_into().expect("sized")) },
+                _ => quote! { #order::read::<#ty>(__s.try_into().expect("sized")) },
             };
             let write = match (width, byte) {
                 (1, true) => quote! { out.push(&[*__e])?; },
                 (1, false) => quote! { out.push(&[*__e as #u8])?; },
-                _ => quote! { out.push(&__e.#to())?; },
+                _ => quote! { out.push(&#order::write(*__e))?; },
             };
             Ok(Step::Fixed { len: width, read, write })
         }
@@ -186,7 +182,7 @@ impl Walk<'_> {
         self.binds.push(Bind { name: coll_ident.clone(), ty: coll_ty, value: coll_val });
 
         let ctx = self.with_ctx(element, own)?;
-        let step = element_step(element, item.endian, coll, ctx.as_ref(), root)?;
+        let step = element_step(element, coll, ctx.as_ref(), root)?;
 
         let each = match &step {
             Step::Fixed { len, .. } => Some(*len as u64 * 8),
@@ -203,14 +199,7 @@ impl Walk<'_> {
             let here = self.here();
             stamp = stamp_slot(
                 &self.slots,
-                StampAt {
-                    owner,
-                    coll,
-                    of: SlotOf::Position,
-                    field,
-                    endian: item.endian,
-                    record: false,
-                },
+                StampAt { owner, coll, of: SlotOf::Position, field, record: false },
                 &here,
                 root,
             )?;
@@ -459,14 +448,7 @@ impl Walk<'_> {
                 quote! { let __span_start = out.len(); },
                 stamp_slot(
                     &self.slots,
-                    StampAt {
-                        owner,
-                        coll,
-                        of: SlotOf::Length,
-                        field: &by.field,
-                        endian: item.endian,
-                        record: false,
-                    },
+                    StampAt { owner, coll, of: SlotOf::Length, field: &by.field, record: false },
                     &affine_inverse(
                         quote!(out.len() - __span_start),
                         (by.scale, by.offset),
@@ -635,14 +617,7 @@ impl Walk<'_> {
             let here = self.here();
             stamp = stamp_slot(
                 &self.slots,
-                StampAt {
-                    owner,
-                    coll,
-                    of: SlotOf::Position,
-                    field,
-                    endian: item.endian,
-                    record: false,
-                },
+                StampAt { owner, coll, of: SlotOf::Position, field, record: false },
                 &here,
                 root,
             )?;
@@ -653,14 +628,7 @@ impl Walk<'_> {
                 quote! { let __span_start = out.len(); },
                 stamp_slot(
                     &self.slots,
-                    StampAt {
-                        owner,
-                        coll,
-                        of: SlotOf::Length,
-                        field: &by.field,
-                        endian: item.endian,
-                        record: false,
-                    },
+                    StampAt { owner, coll, of: SlotOf::Length, field: &by.field, record: false },
                     &affine_inverse(
                         quote!(out.len() - __span_start),
                         (by.scale, by.offset),

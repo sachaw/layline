@@ -35,6 +35,38 @@ pub(super) enum Access {
     Whole { ty: Prim, offset: usize },
 }
 
+/// How a whole scalar's bytes are ordered.
+pub(super) enum Order {
+    /// The layout's own `endian`.
+    Fixed(Endian),
+    /// The `__O: ByteOrder` a message's hidden block is called with.
+    Held(TokenStream),
+}
+
+impl Order {
+    /// The scalar `ty` read from the byte array `bytes`.
+    pub(super) fn read(&self, ty: &TokenStream, bytes: TokenStream) -> TokenStream {
+        match self {
+            Order::Fixed(endian) => {
+                let (from, _) = byte_fns(*endian);
+                quote! { #ty::#from(#bytes) }
+            }
+            Order::Held(order) => quote! { <__O as #order>::read::<#ty>(#bytes) },
+        }
+    }
+
+    /// The bytes of the scalar `value`.
+    pub(super) fn write(&self, value: TokenStream) -> TokenStream {
+        match self {
+            Order::Fixed(endian) => {
+                let (_, to) = byte_fns(*endian);
+                quote! { #value.#to() }
+            }
+            Order::Held(order) => quote! { <__O as #order>::write(#value) },
+        }
+    }
+}
+
 pub(super) struct Writing<'a> {
     pub(super) place: &'a Place,
     /// The field's index into `__LAYLINE_LENSES`.
@@ -83,6 +115,16 @@ impl Access {
 }
 
 impl Plan<'_> {
+    /// The order of whole scalars: the caller's for a message's hidden block, else `endian`.
+    pub(super) fn order(&self) -> Order {
+        if self.internal.0 {
+            let root = self.root;
+            Order::Held(quote!(#root::__private::ByteOrder))
+        } else {
+            Order::Fixed(self.endian)
+        }
+    }
+
     pub(super) fn hoisted(&self) -> bool {
         self.grid.is_bit_addressed() && self.grid.interior_boundary().is_none() && self.bits <= 128
     }
@@ -281,11 +323,11 @@ impl Plan<'_> {
                 read
             }
             Access::Region { ty, byte, off, mask } => {
-                let load = scalar_read(*ty, *byte, &place.buf, self.endian);
+                let load = scalar_read(*ty, *byte, &place.buf, &self.order());
                 let mask = uint_literal(*ty, *mask);
                 quote! { ((#load >> #off) & #mask) }
             }
-            Access::Whole { ty, offset } => scalar_read(*ty, *offset, &place.buf, self.endian),
+            Access::Whole { ty, offset } => scalar_read(*ty, *offset, &place.buf, &self.order()),
         }
     }
 
@@ -379,10 +421,10 @@ impl Plan<'_> {
                 }}
             }
             Access::Region { ty, byte, off, mask } => {
-                let (_, to) = byte_fns(self.endian);
-                let load = scalar_read(*ty, *byte, &place.buf, self.endian);
+                let order = self.order();
+                let load = scalar_read(*ty, *byte, &place.buf, &order);
                 let mask = uint_literal(*ty, *mask);
-                let put = put(&place.buf, &quote!(#byte), ty.width(), &quote!(__new.#to()));
+                let put = put(&place.buf, &quote!(#byte), ty.width(), &order.write(quote!(__new)));
                 quote! {{
                     let __cur = #load;
                     let __new = (__cur & !(#mask << #off)) | (((#raw) & #mask) << #off);
@@ -390,7 +432,7 @@ impl Plan<'_> {
                 }}
             }
             Access::Whole { ty, offset } => {
-                scalar_write(*ty, *offset, &place.buf, raw, self.endian)
+                scalar_write(*ty, *offset, &place.buf, raw, &self.order())
             }
         }
     }
@@ -637,9 +679,8 @@ impl Plan<'_> {
             Prim::Bool => quote! { (#buf[#off] != 0) },
             _ => {
                 let ty = s.ident();
-                let (from, _) = byte_fns(self.endian);
                 let bytes = (0..s.width()).map(|i| quote! { #buf[#off + #i] });
-                quote! { ::core::primitive::#ty::#from([ #(#bytes),* ]) }
+                self.order().read(&quote!(::core::primitive::#ty), quote!([ #(#bytes),* ]))
             }
         }
     }
@@ -658,9 +699,8 @@ impl Plan<'_> {
                 Prim::U8 => quote! { #buf[#off] = #value; },
                 Prim::I8 | Prim::Bool => quote! { #buf[#off] = #value as ::core::primitive::u8; },
                 _ => {
-                    let (_, to) = byte_fns(self.endian);
                     let w = s.width();
-                    put(buf, &off, w, &quote!(#value.#to()))
+                    put(buf, &off, w, &self.order().write(quote!(#value)))
                 }
             },
             Body::Repeat { body: inner, len }
@@ -780,7 +820,7 @@ fn uint_literal(s: Prim, v: u64) -> Literal {
     }
 }
 
-fn scalar_read(s: Prim, offset: usize, buf: &TokenStream, endian: Endian) -> TokenStream {
+fn scalar_read(s: Prim, offset: usize, buf: &TokenStream, order: &Order) -> TokenStream {
     match s {
         Prim::U8 => quote! { #buf[#offset] },
         Prim::I8 => quote! { #buf[#offset] as ::core::primitive::i8 },
@@ -788,12 +828,11 @@ fn scalar_read(s: Prim, offset: usize, buf: &TokenStream, endian: Endian) -> Tok
         _ => {
             let ty = s.ident();
             let ty = quote!(::core::primitive::#ty);
-            let (from, _) = byte_fns(endian);
             let bytes = (0..s.width()).map(|i| {
                 let at = offset + i;
                 quote! { #buf[#at] }
             });
-            quote! { #ty::#from([ #(#bytes),* ]) }
+            order.read(&ty, quote!([ #(#bytes),* ]))
         }
     }
 }
@@ -803,12 +842,11 @@ fn scalar_write(
     offset: usize,
     buf: &TokenStream,
     value: TokenStream,
-    endian: Endian,
+    order: &Order,
 ) -> TokenStream {
-    let (_, to) = byte_fns(endian);
     match s {
         Prim::U8 => quote! { #buf[#offset] = #value; },
         Prim::I8 | Prim::Bool => quote! { #buf[#offset] = #value as ::core::primitive::u8; },
-        _ => put(buf, &quote!(#offset), s.width(), &quote!(#value.#to())),
+        _ => put(buf, &quote!(#offset), s.width(), &order.write(value)),
     }
 }

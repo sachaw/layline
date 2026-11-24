@@ -89,21 +89,6 @@ pub struct M {
 }
 
 #[test]
-fn with_reaches_through_a_nested_layout() {
-    refused(
-        r#"#[derive(Message)]
-pub struct M {
-    #[bytes(2)]
-    pub head: Head,
-    #[with(head.n)]
-    #[message]
-    pub child: Block,
-}"#,
-        "`#[with(..)]` takes one earlier field name per parameter",
-    );
-}
-
-#[test]
 fn a_parameter_that_is_also_a_field() {
     refused(
         r#"#[derive(Message)]
@@ -141,6 +126,67 @@ fn a_parameter_that_is_not_an_integer() {
 pub struct M {
     pub a: u8,
 }"#,
-        "`M`: parameter `scale` must be an integer, not `f32`",
+        "`M`: parameter `scale` must be an integer or a `bool`, not `f32`",
+    );
+}
+
+#[test]
+fn a_byte_order_from_an_integer_parameter() {
+    refused(
+        r#"#[derive(Message)]
+#[message(needs(order: u8), endian = needs(order))]
+pub struct M {
+    pub a: u16,
+}"#,
+        "`M`: the byte order reads `order`, which is `u8`. Declare it `order: bool`",
+    );
+}
+
+#[test]
+fn a_byte_order_from_no_parameter() {
+    refused(
+        r#"#[derive(Message)]
+#[message(endian = needs(big))]
+pub struct M {
+    pub a: u16,
+}"#,
+        "`M`: the byte order reads `big`, which is not a parameter. Declare it: `needs(big: bool)`",
+    );
+}
+
+#[test]
+fn a_byte_order_from_a_parameter_on_an_enum() {
+    refused(
+        r#"#[derive(Message)]
+#[message(endian = needs(big))]
+pub enum Body {
+    #[value(1)] A(u16),
+}"#,
+        "`Body`: an enum takes no parameters to read its byte order from",
+    );
+}
+
+#[test]
+fn a_byte_order_that_is_not_a_word() {
+    refused(
+        r#"#[derive(Message)]
+#[message(needs(big: bool), endian = big)]
+pub struct M {
+    pub a: u16,
+}"#,
+        "`M`: expected `endian = le`, `endian = be`, or `endian = needs(p)`",
+    );
+}
+
+#[test]
+fn an_integer_magic_under_a_held_byte_order() {
+    refused(
+        r#"#[derive(Message)]
+#[message(needs(big: bool), endian = needs(big))]
+pub struct M {
+    #[magic(0xAA55)]
+    pub sync: u16,
+}"#,
+        "field `sync`: an integer #[magic] has no byte order until `big` picks one",
     );
 }

@@ -102,6 +102,19 @@ impl Plan<'_> {
             }
             None => (self.decode_body(), self.encode_body(), None),
         };
+        // A message's hidden block reads in the order its caller picks, and `decode` and
+        // `encode` are that code at the block's own `endian`.
+        let (decode, encode, held) = match self.internal.0 {
+            true => {
+                let order = match self.endian {
+                    layline_codegen::Endian::Le => quote!(#root::__private::Le),
+                    layline_codegen::Endian::Be => quote!(#root::__private::Be),
+                };
+                let held = self.held_order(&decode_ret, decode, encode);
+                (quote!(Self::decode_in::<#order>(wire)), quote!(self.encode_in::<#order>()), held)
+            }
+            false => (decode, encode, quote!()),
+        };
         let encode_doc = self.truncate_doc();
         let covers_container = (self.bits > 0).then(|| {
             quote! {
@@ -153,6 +166,8 @@ impl Plan<'_> {
                     #encode
                 }
 
+                #held
+
                 #words
 
                 #(#overlays)*
@@ -161,6 +176,51 @@ impl Plan<'_> {
             #covers_container
 
             #view
+        }
+    }
+
+    /// `decode_in`, `decode_slice_in` and `encode_in`: decode and encode in the order `__O`.
+    fn held_order(
+        &self,
+        decode_ret: &TokenStream,
+        decode: TokenStream,
+        encode: TokenStream,
+    ) -> TokenStream {
+        let root = self.root;
+        let wire_bytes = self.wire_bytes;
+        let order = quote!(#root::__private::ByteOrder);
+        quote! {
+            #[doc(hidden)]
+            #[inline]
+            pub fn decode_in<__O: #order>(
+                wire: &[::core::primitive::u8; #wire_bytes],
+            ) -> #decode_ret {
+                #decode
+            }
+
+            #[doc(hidden)]
+            #[inline]
+            pub fn decode_slice_in<__O: #order>(
+                bytes: &[::core::primitive::u8],
+            ) -> ::core::result::Result<Self, #root::ParseError> {
+                match <&[::core::primitive::u8; #wire_bytes]>::try_from(bytes) {
+                    ::core::result::Result::Ok(wire) => Self::decode_in::<__O>(wire),
+                    ::core::result::Result::Err(_) => {
+                        ::core::result::Result::Err(#root::ParseError::Short {
+                            need_bytes: #wire_bytes,
+                            at: 0,
+                            got_bytes: bytes.len(),
+                        })
+                    }
+                }
+            }
+
+            #[doc(hidden)]
+            #[inline]
+            #[must_use]
+            pub fn encode_in<__O: #order>(&self) -> [::core::primitive::u8; #wire_bytes] {
+                #encode
+            }
         }
     }
 

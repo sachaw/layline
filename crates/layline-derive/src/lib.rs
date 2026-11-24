@@ -238,12 +238,16 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// # Container attributes
 ///
 /// - `#[message(endian = le | be)]`: byte order. Default `le`.
+/// - `#[message(endian = needs(p))]`: the byte order is the `bool` parameter `p`, big-endian when
+///   `true`. Decode and encode pick it once per message. The message's own fixed fields follow it,
+///   counts and checksums included. A nested layout keeps its own `endian`, and an integer
+///   `#[magic]` wider than a byte is refused: write its bytes.
 /// - `#[message(bits)]`, `#[message(bits, order = lsb | msb)]`: all fields are bit fields, padded
 ///   with zero bits to a whole byte. Default order `lsb`.
-/// - `#[message(needs(a: u8, b: u16))]`: parameters the parent message supplies. They become
-///   `Message::Ctx`, a generated `<Name>Ctx` struct. The holder writes a parameter, so encode
-///   cannot derive it: encode panics when a `#[count]`, `#[len]` or `#[switch]` it drives
-///   disagrees with the value.
+/// - `#[message(needs(a: u8, b: bool))]`: integer and `bool` parameters the parent message
+///   supplies. They become `Message::Ctx`, a generated `<Name>Ctx` struct. The holder writes a
+///   parameter, so encode cannot derive it: encode panics when a `#[count]`, `#[len]`,
+///   `#[switch]` or `#[when]` it drives disagrees with the value.
 /// - `#[message(closed)]`: on an enum, an unknown discriminant fails with
 ///   `ParseError::Malformed`.
 /// - `#[message(crate = path)]`: the path to `layline`. Default `::layline`.
@@ -276,12 +280,12 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[var]`: a `VarCodec` value, whose size is read from the wire.
 /// - `#[text]`, `#[text(Codec)]`: a `String`, as UTF-8 or through the `TextCodec` `Codec`.
 /// - `#[message]`: a nested `Message`, boxed or not.
-/// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's `needs`. Use with
-///   `#[message]`.
+/// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's `needs`: integers,
+///   `bool`s, fields of a nested layout (`hdr.f`) or parameters. Use with `#[message]`.
 /// - `#[switch(f)]`: an enum whose variant `f` selects. `#[switch(..)]` selects by the remaining
 ///   length.
 /// - `#[when(flags & MASK)]`, `#[when(flag)]`: an `Option<T>` present when the bits are set.
-///   Encode sets them for `Some` and clears them for `None`.
+///   Encode sets them for `Some` and clears them for `None`. `flags` may be a parameter.
 /// - `#[when(flags & MASK == 0)]`, `#[when(!flag)]`: an `Option<T>` present when the bits are
 ///   clear, as with a flag that says a default applies. Encode clears them for `Some` and sets
 ///   them for `None`. `!(flags & MASK)` is refused: on an integer, `!` flips the bits.

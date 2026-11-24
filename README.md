@@ -72,6 +72,31 @@ does not count, as a RIFF chunk's odd body has.
 A field can be present when a flag is clear: `#[when(flags & 0x4 == 0)]` or `#[when(!flag)]`.
 Encode writes the flag from the field, setting the bits for `None`.
 
+A message can take its byte order from its holder, picked once per message:
+
+```rust
+use layline::Message;
+
+#[derive(Message, Debug, PartialEq)]
+#[message(needs(big: bool), endian = needs(big))]
+pub struct Sample {
+    pub value: u16,
+}
+
+#[derive(Message, Debug, PartialEq)]
+pub struct Packet {
+    pub big: bool,
+    #[with(big)]
+    #[message]
+    pub sample: Sample,
+}
+
+let wire = Packet { big: true, sample: Sample { value: 0x0102 } }.encode();
+assert_eq!(wire, [1, 0x01, 0x02]);
+let wire = Packet { big: false, sample: Sample { value: 0x0102 } }.encode();
+assert_eq!(wire, [0, 0x02, 0x01]);
+```
+
 A struct with a lifetime borrows its byte runs from the input instead of copying them, so it
 decodes without an allocator. It implements `MessageRef<'a>`:
 

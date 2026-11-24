@@ -51,12 +51,17 @@ impl Env {
         self.values.push((String::from(name), Bound::Nested(access)));
     }
 
-    /// The expression that reads integer `name`, at its declared type.
-    ///
-    /// [`get`](Self::get) widens it to `i64`.
-    pub(super) fn number(&self, name: &str) -> Option<&TokenStream> {
-        match self.bound(name)? {
-            Bound::Number(read) => Some(read),
+    /// What `#[with(name)]` passes, as decode reads it: an integer or `bool` field at its own
+    /// type, or a field of a nested layout. The flag is whether `name` is a `bool` field.
+    pub(super) fn argument(&self, name: &str) -> Option<(TokenStream, bool)> {
+        let (outer, inner) = split_ref(name);
+        match (self.bound(outer)?, inner) {
+            (Bound::Number(read), None) => Some((read.clone(), false)),
+            (Bound::Flag(read), None) => Some((read.clone(), true)),
+            (Bound::Nested(access), Some(inner)) => {
+                let f = ident(inner);
+                Some((quote!(#access.#f), false))
+            }
             _ => None,
         }
     }

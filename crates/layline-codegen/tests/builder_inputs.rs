@@ -215,18 +215,6 @@ fn a_parameter_a_bit_addressed_message_states_is_refused() {
 
 #[test]
 fn a_parameter_the_wire_would_write_back_is_refused() {
-    let absent = needs(
-        vec![param("flags", Scalar::U(8))],
-        vec![
-            Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(8)))]),
-            Segment::opt(
-                layline_codegen::Presence::Mask { field: "flags".into(), mask: 1 },
-                Field::new("stamp", Kind::Scalar(Scalar::U(16))),
-            ),
-        ],
-    );
-    refused(&absent, "`flags` is a parameter, and encode cannot write presence bits into it");
-
     let placed = needs(
         vec![param("off", Scalar::U(8))],
         vec![
@@ -237,19 +225,62 @@ fn a_parameter_the_wire_would_write_back_is_refused() {
     refused(&placed, "`off` is a parameter, and encode cannot write a record offset into it");
 }
 
+/// Encode checks an optional field against the parameter rather than writing presence bits.
 #[test]
-fn a_with_that_reaches_through_a_nested_layout_is_refused() {
+fn a_when_can_test_a_parameter() {
+    let stamp = |when| {
+        needs(
+            vec![param("mask", Scalar::U(32)), param("on", Scalar::Bool)],
+            vec![
+                Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(8)))]),
+                Segment::opt(when, Field::new("stamp", Kind::Scalar(Scalar::U(16)))),
+            ],
+        )
+    };
+    let tests = [
+        layline_codegen::Presence::Mask { field: "mask".into(), mask: 1 },
+        layline_codegen::Presence::MaskClear { field: "mask".into(), mask: 2 },
+        layline_codegen::Presence::Flag { field: "on".into() },
+    ];
+    for when in tests {
+        let m = stamp(when);
+        assert!(validate_message(&m).is_ok(), "{:?}", validate_message(&m));
+    }
+}
+
+#[test]
+fn a_with_reads_a_field_of_a_nested_layout_or_a_bool() {
     let m = MessageDef::new(
         "M",
         vec![
-            Segment::block(vec![Field::new("head", Kind::Nested { ty: "Head".into(), bytes: 2 })]),
+            Segment::block(vec![
+                Field::new("head", Kind::Nested { ty: "Head".into(), bytes: 2 }),
+                Field::new("big", Kind::Scalar(Scalar::ByteBool)),
+            ]),
             Segment::value(
                 "child",
-                Kind::Msg { ty: "Block".into(), boxed: false, with: vec![String::from("head.n")] },
+                Kind::Msg {
+                    ty: "Block".into(),
+                    boxed: false,
+                    with: vec![String::from("head.n"), String::from("big")],
+                },
             ),
         ],
     );
-    refused(&m, "Each parameter takes one field");
+    assert!(validate_message(&m).is_ok(), "{:?}", validate_message(&m));
+}
+
+#[test]
+fn a_byte_order_from_a_parameter_names_a_bool_parameter() {
+    let body = || vec![Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(16)))])];
+    let held = needs(vec![param("big", Scalar::Bool)], body()).with_endian_from("big");
+    assert!(validate_message(&held).is_ok(), "{:?}", validate_message(&held));
+
+    let wide = needs(vec![param("big", Scalar::U(8))], body()).with_endian_from("big");
+    refused(&wide, "the byte order reads parameter `big`, which is `u8`");
+
+    let missing = needs(vec![param("big", Scalar::Bool)], body()).with_endian_from("order");
+    refused(&missing, "the byte order reads `order`, which is not a parameter");
 }
 
 #[test]

@@ -87,7 +87,7 @@ impl Walk<'_> {
                     #read
                     #some(__o.#ident)
                 },
-                quote! { out.push(&#sub { #ident: #take }.encode())?; },
+                quote! { out.push(&#sub { #ident: #take }.encode_in::<__O>())?; },
             )
         } else {
             let ctx = self.with_ctx(&f.kind, own)?;
@@ -107,6 +107,19 @@ impl Walk<'_> {
             };
         });
         let held = own.by_ref(&f.name);
+        // The holder writes a parameter, so encode checks the field against it.
+        if let Some((flag, ..)) = when.tests()
+            && self.is_param(flag)
+        {
+            let msg = format!(
+                "optional field `{}`: whether it is `Some` is not what parameter `{flag}` states. \
+                 Decode would read a different body",
+                f.name
+            );
+            self.byte_steps.extend(quote! {
+                ::core::assert!((#held).is_some() == (#present), #msg);
+            });
+        }
         self.byte_steps.extend(quote! {
             if let #some(__v) = #held {
                 #write_one

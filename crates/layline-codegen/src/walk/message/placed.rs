@@ -34,7 +34,7 @@ impl Walk<'_> {
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });
 
         let ctx = self.with_ctx(kind, own)?;
-        let step = element_step(kind, item.endian, field, ctx.as_ref(), root)?;
+        let step = element_step(kind, field, ctx.as_ref(), root)?;
         let mut row = Row::new(field, span_of_kind(kind)).decoded_by(deferred_type(kind)).seek(at);
         if let Some(absent) = absent {
             row = row.when(match absent {
@@ -81,8 +81,7 @@ impl Walk<'_> {
 
         let here = self.here();
         let stamp = |of: SlotOf, into: &str, value: &TokenStream| {
-            let at =
-                StampAt { owner, coll: field, of, field: into, endian: item.endian, record: true };
+            let at = StampAt { owner, coll: field, of, field: into, record: true };
             stamp_slot(&self.slots, at, value, root)
         };
         let write_one = step.write_one();

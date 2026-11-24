@@ -7,6 +7,7 @@
 //! - [`audit`]: prints those tables.
 //! - [`frame`] (feature `frame`): stream framing.
 //! - [`num`] (feature `num`): LEB128, VLQ, Exp-Golomb and reserved values.
+//! - [`order`]: byte order as a type, for a message that reads its order from its holder.
 
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -22,6 +23,7 @@ pub mod checksum;
 pub mod frame;
 #[cfg(feature = "num")]
 pub mod num;
+pub mod order;
 #[cfg(feature = "alloc")]
 pub mod text;
 
@@ -97,6 +99,7 @@ pub mod __private {
 
     pub use crate::bound::{Nestable, WireFlag, fits_in_field};
     pub use crate::field::assert_layout;
+    pub use crate::order::{Be, ByteOrder, Le};
     pub use crate::word::BitWord;
 
     #[cfg(feature = "alloc")]
@@ -126,6 +129,8 @@ mod sealed {
     pub trait ChecksumFits {}
     pub trait WireFlag {}
     pub trait CrcWord {}
+    pub trait ByteOrder {}
+    pub trait Ordered {}
 }
 
 pub use bits::{BitCodec, BitReader, BitWriter};

@@ -226,14 +226,18 @@ impl Walk<'_> {
                 held.push(quote!(__ctx.#id));
                 continue;
             }
-            let Some(access) = self.env.number(name) else {
+            let Some((access, flag)) = self.env.argument(name) else {
                 return Err(Error::Refused(format!(
-                    "{owner}: `#[with({name})]`: `{name}` is not an earlier integer field or a parameter. \
-                     Name one of those"
+                    "{owner}: `#[with({name})]`: `{name}` is not an earlier integer or `bool` \
+                     field, a field of an earlier nested layout, or a parameter. Name one of those"
                 )));
             };
-            read.push(access.clone());
-            held.push(own.get(name));
+            read.push(access);
+            let value = own.get(name);
+            held.push(match flag {
+                true => quote!(#root::__private::WireFlag::to_flag(&#value)),
+                false => value,
+            });
         }
         let ctx = quote!(<#p as #root::Message>::Ctx::new);
         Ok(Some(WithCtx { decode: quote!(#ctx(#(#read),*)), encode: quote!(#ctx(#(#held),*)) }))

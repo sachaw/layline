@@ -260,6 +260,7 @@ mod tests {
                 Item::Message(MessageDef {
                     name: "VelocityReport".into(),
                     endian: Endian::Le,
+                    endian_from: None,
                     bits: None,
                     needs: Vec::new(),
                     segments: vec![Segment::Switch {
@@ -377,6 +378,7 @@ mod tests {
         let msg = |over: Coverage| MessageDef {
             name: "Packet".into(),
             endian: Endian::Le,
+            endian_from: None,
             bits: None,
             needs: Vec::new(),
             segments: vec![
@@ -408,6 +410,7 @@ mod tests {
             &MessageDef {
                 name: "Packet".into(),
                 endian: Endian::Le,
+                endian_from: None,
                 bits: None,
                 needs: Vec::new(),
                 segments: vec![
@@ -452,6 +455,7 @@ mod tests {
         let msg = |extra: Segment| MessageDef {
             name: "Packet".into(),
             endian: Endian::Le,
+            endian_from: None,
             bits: None,
             needs: Vec::new(),
             segments: vec![
@@ -509,6 +513,7 @@ mod tests {
                 Item::Message(MessageDef {
                     name: "Packet".into(),
                     endian: Endian::Le,
+                    endian_from: None,
                     bits: None,
                     needs: Vec::new(),
                     segments: vec![

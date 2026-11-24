@@ -483,18 +483,20 @@ fn parse_with(attr: &syn::Attribute, name: &str) -> syn::Result<Vec<Ref>> {
     let shape = || {
         format!(
             "field `{name}`: `#[with(..)]` takes one earlier field name per parameter, \
-             such as `#[with(a, b)]`"
+             such as `#[with(a, b)]` or `#[with(hdr.n)]`"
         )
     };
     let refs = attr
-        .parse_args_with(
-            syn::punctuated::Punctuated::<syn::Ident, syn::Token![,]>::parse_terminated,
-        )
+        .parse_args_with(|input: syn::parse::ParseStream<'_>| {
+            syn::punctuated::Punctuated::<Ref, syn::Token![,]>::parse_terminated_with(
+                input, field_ref,
+            )
+        })
         .map_err(|_| syn::Error::new(attr.meta.span(), shape()))?;
     if refs.is_empty() {
         return Err(syn::Error::new(attr.meta.span(), shape()));
     }
-    Ok(refs.into_iter().map(|id| Ref { name: crate::attr::name(&id), span: id.span() }).collect())
+    Ok(refs.into_iter().collect())
 }
 
 fn parse_switch(attr: &syn::Attribute, name: &str) -> syn::Result<SwitchOn> {

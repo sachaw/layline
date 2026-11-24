@@ -3,9 +3,7 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
 
-use layline_codegen::{
-    Count, Discriminant, Endian, Field, Kind, Len, MessageDef, Presence, Root, Segment,
-};
+use layline_codegen::{Count, Discriminant, Field, Kind, Len, MessageDef, Presence, Root, Segment};
 
 use super::bits::lower_bits;
 use super::*;
@@ -30,14 +28,25 @@ fn solved_field(
     kind: &Kind,
     claims: &Claims,
     stated: Option<layline_codegen::Stated>,
-    endian: Endian,
+    p: &Parsed,
 ) -> syn::Result<Field> {
+    let width = (kind.bits().unwrap_or(0) / 8) as usize;
+    if let (Some(from), Some(m)) = (&p.endian_from, &claims.magic)
+        && matches!(m.lit, syn::Lit::Int(_))
+        && width > 1
+    {
+        return Err(syn::Error::new(
+            m.span,
+            format!(
+                "field `{name}`: an integer #[magic] has no byte order until `{from}` picks one. \
+                 Write its bytes in wire order: `#[magic(b\"..\")]`"
+            ),
+        ));
+    }
     let magic = claims
         .magic
         .as_ref()
-        .map(|m| {
-            crate::claim::magic_bytes(m, name, (kind.bits().unwrap_or(0) / 8) as usize, endian)
-        })
+        .map(|m| crate::claim::magic_bytes(m, name, width, p.endian))
         .transpose()?;
     let mut field = Field::new(name, kind.clone());
     field.range = claims.range;
@@ -91,13 +100,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                 unreachable!("a bit-addressed message is lowered by `lower_bits`")
             }
             Body::Fixed { kind, claims } => {
-                block.push(solved_field(
-                    &f.name,
-                    kind,
-                    claims,
-                    f.stated.map(|a| a.stated),
-                    p.endian,
-                )?);
+                block.push(solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?);
             }
             Body::Value { kind, .. } => {
                 flush(&mut segments, &mut block);
@@ -234,13 +237,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                 }
                 segments.push(Segment::Opt {
                     when: when.as_ref().map_or(Presence::Remaining, WhenSpec::presence),
-                    field: solved_field(
-                        &f.name,
-                        kind,
-                        claims,
-                        f.stated.map(|a| a.stated),
-                        p.endian,
-                    )?,
+                    field: solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?,
                 });
             }
         }
@@ -265,6 +262,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
     let mut msg = MessageDef::new(&crate::attr::name(&p.ident), segments)
         .with_endian(p.endian)
         .with_needs(p.needs.clone());
+    if let Some(from) = &p.endian_from {
+        msg = msg.with_endian_from(&crate::attr::name(from));
+    }
     if let Some(l) = &p.lifetime {
         msg = msg.with_lifetime(&l.ident.to_string());
     }

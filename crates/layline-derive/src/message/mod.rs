@@ -61,6 +61,8 @@ struct Parsed {
     /// The lifetime of borrowed fields: `Name<'a>`.
     lifetime: Option<syn::Lifetime>,
     endian: Endian,
+    /// `endian = needs(p)`: the `bool` parameter that picks the byte order.
+    endian_from: Option<syn::Ident>,
     /// `#[message(bits, order = ..)]`.
     bits: Option<BitOrder>,
     /// `#[message(needs(..))]`.
@@ -434,7 +436,7 @@ struct ElementSize {
 fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
     let lifetime = borrowed_lifetime(input)?;
 
-    let MessageAttr { endian, root, closed, bits, needs } = container_attr(input)?;
+    let MessageAttr { endian, endian_from, root, closed, bits, needs } = container_attr(input)?;
     if let (Some((_, span)), Some(_)) = (&needs, &bits) {
         return Err(syn::Error::new(
             *span,
@@ -484,7 +486,43 @@ fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
         None => named.named.iter().map(msg_field).collect::<syn::Result<Vec<_>>>()?,
     };
     let needs = needs.map(|(params, _)| params).unwrap_or_default();
-    Ok(Parsed { ident: input.ident.clone(), lifetime, endian, bits, needs, root, fields })
+    if let Some(p) = &endian_from {
+        let name = crate::attr::name(p);
+        match needs.iter().find(|n| n.name == name) {
+            Some(n) if n.repr == Scalar::Bool => {}
+            Some(n) => {
+                return Err(syn::Error::new(
+                    p.span(),
+                    format!(
+                        "`{}`: the byte order reads `{name}`, which is `{}`. \
+                         Declare it `{name}: bool`, true for big-endian",
+                        input.ident,
+                        n.repr.primitive(),
+                    ),
+                ));
+            }
+            None => {
+                return Err(syn::Error::new(
+                    p.span(),
+                    format!(
+                        "`{}`: the byte order reads `{name}`, which is not a parameter. \
+                         Declare it: `needs({name}: bool)`",
+                        input.ident
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(Parsed {
+        ident: input.ident.clone(),
+        lifetime,
+        endian,
+        endian_from,
+        bits,
+        needs,
+        root,
+        fields,
+    })
 }
 
 const REPEAT_ATTRS: &str = "`#[count(n)]`, `#[fill]`, `#[until(b)]`, or `#[until(mask = M)]`";
