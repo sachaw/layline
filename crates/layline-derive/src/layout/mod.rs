@@ -197,6 +197,37 @@ impl Plan<'_> {
     fn unit(&self) -> (u64, &'static str) {
         if self.grid.is_bit_addressed() { (1, "bit") } else { (8, "byte") }
     }
+
+    /// Whether the layout checks its own bytes, so `decode` returns a `Result`.
+    fn checks_own(&self) -> bool {
+        self.asserts.any() || self.internal.0 || self.prefix_value.is_some()
+    }
+
+    /// Whether `decode` returns a `Result`, as a `bool` expression: `true` for a layout that
+    /// checks its own bytes, whether a nested layout's `decode` does for one that nests, and
+    /// `None` for one that decodes every wire.
+    fn fallible(&self) -> Option<TokenStream> {
+        if self.checks_own() {
+            return Some(quote!(true));
+        }
+        let root = self.root;
+        let nested: Vec<TokenStream> = self
+            .items
+            .iter()
+            .filter_map(|item| nested_ty(&item.body))
+            .map(|ty| quote!(<#ty as #root::Layout>::DECODE_FALLIBLE))
+            .collect();
+        (!nested.is_empty()).then(|| quote!(#(#nested)||*))
+    }
+}
+
+/// The layout a body nests, alone or as array elements.
+fn nested_ty(body: &Body) -> Option<&syn::Type> {
+    match body {
+        Body::Nested { ty, .. } => Some(ty),
+        Body::Repeat { body, .. } => nested_ty(body),
+        Body::Packed(_) => None,
+    }
 }
 
 fn body_ty(body: &Body) -> TokenStream {

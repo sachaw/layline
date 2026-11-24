@@ -272,10 +272,10 @@ pub struct Packet {
 }
 
 #[test]
-fn nested_layout_is_asserted_infallible() {
+fn a_view_asserts_its_nested_layouts_infallible() {
     expands_with(
         r#"#[derive(Debug, Clone, PartialEq, Layout)]
-#[layout(bytes = 10, endian = be)]
+#[layout(bytes = 10, endian = be, view)]
 struct Holder {
     #[bytes(8)]
     child: Sig,
@@ -284,10 +284,38 @@ struct Holder {
         quote::quote!(
             const _: () = ::core::assert!(
                 !<Sig as ::layline::Layout>::DECODE_FALLIBLE,
-                "field `child`: `Sig` has a fallible `decode`, so a layout cannot nest it.  Nest it in a `#[derive(Message)]`, or move its checks into this layout"
+                "field `child`: `Sig` checks its bytes, and a view reads its fields unchecked.  Remove `view`, or nest it in a layout without one"
             );
         ),
     );
+}
+
+#[test]
+fn a_holder_is_as_fallible_as_what_it_nests() {
+    let src = r#"#[derive(Debug, Clone, PartialEq, Layout)]
+#[layout(bytes = 10, endian = be)]
+struct Holder {
+    #[bytes(8)]
+    child: Sig,
+    tail: u16,
+}"#;
+    expands_with(
+        src,
+        quote::quote!(
+            const DECODE_FALLIBLE: ::core::primitive::bool =
+                <Sig as ::layline::Layout>::DECODE_FALLIBLE;
+        ),
+    );
+    expands_with(
+        src,
+        quote::quote!(
+            pub fn decode(
+                wire: &[::core::primitive::u8; 10usize],
+            ) -> ::layline::__private::Decoded<Self, { <Sig as ::layline::Layout>::DECODE_FALLIBLE }>
+        ),
+    );
+    let refused = tokens(&quote::quote!(!<Sig as ::layline::Layout>::DECODE_FALLIBLE));
+    assert!(!expansion(src).contains(&refused), "a holder without a view nests any layout");
 }
 
 #[test]

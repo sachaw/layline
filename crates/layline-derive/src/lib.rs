@@ -29,7 +29,8 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 ///
 /// Fields are laid out in declaration order and must cover every bit.
 /// `decode` returns `Result<Self, ParseError>` if the struct uses `#[magic]`, `#[checksum]`,
-/// `#[range]`, `prefix_value`, `internal` or a byte-mode `bool`. Otherwise it returns `Self`.
+/// `#[range]`, `prefix_value`, `internal` or a byte-mode `bool`, or nests a layout whose `decode`
+/// does. Otherwise it returns `Self`.
 ///
 /// # Container attributes
 ///
@@ -53,7 +54,8 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 ///   buffer. A view is unchecked, so a reader can inspect a corrupt record: `verify()` runs the
 ///   checks `decode` runs on magic bytes, `prefix_value` and checksums, `checked(&wire)` views
 ///   only bytes that pass them, and `seal()` rewrites the prefix, magic and checksums after the
-///   setters. Not allowed with `#[range]` or a byte-mode `bool`.
+///   setters. Not allowed with `#[range]`, a byte-mode `bool`, or a nested layout whose `decode`
+///   is fallible.
 /// - `truncate`: encode keeps the low `N` bits of a value wider than its `#[bits(N)]` field, as a
 ///   hardware register does, instead of panicking. Decode is unchanged. Without it, encode panics
 ///   rather than write bits that read back as a different value. A view's setters always keep the
@@ -68,7 +70,7 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 /// - `#[codec(N)]`: a `FieldCodec` stored as an 8, 16, 32 or 64-bit integer, or an array of
 ///   them. `bytes` only.
 /// - `#[bytes(N)]`: a nested layout of `N` bytes, or an array of them. `N` must match its
-///   `WIRE_BYTES`. `bytes` and `words` only.
+///   `WIRE_BYTES`. Decode runs its checks and returns its error. `bytes` and `words` only.
 /// - `#[at(bit = N)]`, `#[at(byte = N)]`: the field's expected position. The build fails if the
 ///   widths put it elsewhere. `STATED` lists these positions.
 /// - `#[overlay(name: T)]`: adds `name` and `set_name`, which read and write the field's bits as

@@ -80,7 +80,8 @@ pub(super) struct Place {
     pub(super) buf: TokenStream,
     /// The same bytes as a reference to the whole array.
     pub(super) buf_ref: TokenStream,
-    /// Decode and encode load the layout into a local once. View accessors load it on each call.
+    /// Decode and encode load the layout into a local once. View accessors load it on each call,
+    /// and read a nested layout without its checks.
     pub(super) hoisted: bool,
 }
 
@@ -562,13 +563,26 @@ impl Plan<'_> {
                             .map_err(|__err| __err.rebased(#a))?
                     }
                 } else {
-                    quote! {
+                    let decode = quote! {
                         <#ty>::decode(
                             match <&[::core::primitive::u8; #bytes]>::try_from(&#buf[#a..#b]) {
                                 ::core::result::Result::Ok(__sub) => __sub,
                                 ::core::result::Result::Err(_) => &[0u8; #bytes],
                             },
                         )
+                    };
+                    if !place.hoisted {
+                        return decode;
+                    }
+                    let root = self.root;
+                    let exit = self.decode_error(quote!(__err.rebased(#a)));
+                    quote! {
+                        match <#root::__private::Fallibility<
+                            { <#ty as #root::Layout>::DECODE_FALLIBLE },
+                        > as #root::__private::Decodes<#ty>>::result(#decode) {
+                            ::core::result::Result::Ok(__nested) => __nested,
+                            ::core::result::Result::Err(__err) => #exit,
+                        }
                     }
                 }
             }

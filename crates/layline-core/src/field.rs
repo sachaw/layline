@@ -247,6 +247,68 @@ pub const fn assert_layout(fields: &[FieldDef<'_>], total: u64) {
     );
 }
 
+/// What `decode` returns for a layout whose fallibility is [`Layout::DECODE_FALLIBLE`] of the
+/// layouts it nests: `Result<T, ParseError>` when `FALLIBLE`, and `T` otherwise.
+///
+/// A derive cannot see a field's type, so a layout that nests others names its return type
+/// through this.
+///
+/// [`ParseError`]: crate::ParseError
+pub type Decoded<T, const FALLIBLE: bool> = <Fallibility<FALLIBLE> as Decodes<T>>::Out;
+
+/// Whether a decode can fail, as a type. See [`Decoded`].
+pub struct Fallibility<const FALLIBLE: bool>;
+
+/// Converts between a decode's [`Decoded`] value and a `Result`.
+pub trait Decodes<T> {
+    /// `Result<T, ParseError>`, or `T`.
+    type Out;
+
+    /// The decode's value, from a decode written to return a `Result`.
+    ///
+    /// An infallible layout nests only infallible layouts, read through
+    /// [`result`](Self::result), so its decode has no error to pass.
+    fn finish(decoded: Result<T, crate::ParseError>) -> Self::Out;
+
+    /// The decode's value as a `Result`.
+    ///
+    /// # Errors
+    ///
+    /// The decode's own error, when it has one.
+    fn result(decoded: Self::Out) -> Result<T, crate::ParseError>;
+}
+
+impl<T> Decodes<T> for Fallibility<true> {
+    type Out = Result<T, crate::ParseError>;
+
+    #[inline]
+    fn finish(decoded: Result<T, crate::ParseError>) -> Self::Out {
+        decoded
+    }
+
+    #[inline]
+    fn result(decoded: Self::Out) -> Result<T, crate::ParseError> {
+        decoded
+    }
+}
+
+impl<T> Decodes<T> for Fallibility<false> {
+    type Out = T;
+
+    #[inline]
+    fn finish(decoded: Result<T, crate::ParseError>) -> T {
+        match decoded {
+            Ok(value) => value,
+            Err(_) => unreachable!("an infallible layout nests only infallible layouts"),
+        }
+    }
+
+    #[inline]
+    fn result(decoded: T) -> Result<T, crate::ParseError> {
+        Ok(decoded)
+    }
+}
+
 /// A fixed-size type whose named fields cover every bit.
 ///
 /// `FIELDS` passes [`check_layout`]: it ascends from bit zero to `WIRE_BYTES * 8`, with no gaps or overlaps.
@@ -266,9 +328,10 @@ pub trait Layout: Sized {
     /// Every field, in ascending order, covering `WIRE_BYTES * 8` bits.
     const FIELDS: &'static [crate::table::FieldDef<'static>];
 
-    /// Whether the inherent `decode` returns a `Result`, as it does when the layout checks its own bytes.
+    /// Whether the inherent `decode` returns a `Result`, as it does when the layout checks its own
+    /// bytes or nests a layout that does.
     ///
-    /// Read by the parent, since a derive cannot see a field's type.
+    /// Read by the parent, since a derive cannot see a field's type. See [`Decoded`].
     #[doc(hidden)]
     const DECODE_FALLIBLE: bool = false;
 

@@ -35,7 +35,8 @@ impl Plan<'_> {
         let field_defs = self.field_defs();
         let lenses = self.lens_array();
 
-        let asserting = self.asserts.any() || self.internal.0 || self.prefix_value.is_some();
+        let asserting = self.checks_own();
+        let fallible = self.fallible();
         let magic_const = self.magic_const();
         let (decode_ret, decode_doc) = if asserting {
             (
@@ -46,6 +47,18 @@ impl Plan<'_> {
                     /// # Errors
                     ///
                     /// Returns an error if the bytes fail a check this record declares.
+                },
+            )
+        } else if let Some(nested) = &fallible {
+            (
+                quote!(#root::__private::Decoded<Self, { #nested }>),
+                quote! {
+                    /// Decode from wire bytes.
+                    ///
+                    /// # Errors
+                    ///
+                    /// Returns a `Result` when a nested layout checks its bytes, with that
+                    /// layout's error. Otherwise returns `Self`.
                 },
             )
         } else {
@@ -137,7 +150,7 @@ impl Plan<'_> {
             covered: self.cover_defs(),
         };
         let layout_tr =
-            layout_impl(ident, &tables, &field_defs, self.prefix, wire_bytes, asserting, self.root);
+            layout_impl(ident, &tables, &field_defs, self.prefix, wire_bytes, &fallible, self.root);
 
         quote! {
             #(#checks)*
@@ -320,8 +333,16 @@ impl Plan<'_> {
         });
         let built = quote! { Self { #(#fields)* } };
         if !self.asserts.any() && self.prefix_value.is_none() {
+            let root = self.root;
             return if self.internal.0 {
                 quote! { #prologue ::core::result::Result::Ok(#built) }
+            } else if let Some(nested) = self.fallible() {
+                quote! {
+                    #prologue
+                    <#root::__private::Fallibility<{ #nested }> as #root::__private::Decodes<Self>>::finish(
+                        ::core::result::Result::Ok(#built),
+                    )
+                }
             } else {
                 quote! { #prologue #built }
             };
@@ -349,6 +370,20 @@ impl Plan<'_> {
             #ranges
             #verify
             ::core::result::Result::Ok(#built)
+        }
+    }
+
+    /// `return`s `err` from `decode`, in the type `decode` returns.
+    pub(super) fn decode_error(&self, err: TokenStream) -> TokenStream {
+        if self.checks_own() {
+            return quote! { return ::core::result::Result::Err(#err) };
+        }
+        let root = self.root;
+        let nested = self.fallible().expect("only a layout that nests reads a nested layout");
+        quote! {
+            return <#root::__private::Fallibility<{ #nested }> as #root::__private::Decodes<Self>>::finish(
+                ::core::result::Result::Err(#err),
+            )
         }
     }
 
@@ -595,12 +630,12 @@ impl Plan<'_> {
                     quote!(#ty),
                 ));
                 let nests = crate::check::assert_msg(format!(
-                    "field `{name}`: `{}` has a fallible `decode`, so a layout cannot nest it. \
-                     Nest it in a `#[derive(Message)]`, or move its checks into this layout",
+                    "field `{name}`: `{}` checks its bytes, and a view reads its fields \
+                     unchecked. Remove `view`, or nest it in a layout without one",
                     quote!(#ty),
                 ));
                 let root = self.root;
-                let nesting = (!self.internal.0).then(|| {
+                let nesting = self.view.then(|| {
                     quote_spanned! {*span=>
                         const _: () = ::core::assert!(!<#ty as #root::Layout>::DECODE_FALLIBLE, #nests);
                     }
@@ -638,19 +673,23 @@ fn layout_impl(
     field_defs: &[TokenStream],
     prefix: u32,
     wire_bytes: usize,
-    fallible: bool,
+    fallible: &Option<TokenStream>,
     root: &Root,
 ) -> TokenStream {
     let Tables { types, stated, constants, ranges, covered } = t;
     let name = ident.to_string();
-    let decoded = if fallible {
-        quote!(Self::decode(wire))
-    } else {
-        quote!(::core::result::Result::Ok(Self::decode(wire)))
+    // `decode` returns what `Decoded` names, which is a `Result` for `true`.
+    let decoded = match fallible {
+        Some(f) => quote! {
+            <#root::__private::Fallibility<{ #f }> as #root::__private::Decodes<Self>>::result(
+                Self::decode(wire),
+            )
+        },
+        None => quote!(::core::result::Result::Ok(Self::decode(wire))),
     };
     // `DECODE_FALLIBLE` defaults to `false`.
-    let fallible_const = fallible.then(|| {
-        quote! { const DECODE_FALLIBLE: ::core::primitive::bool = true; }
+    let fallible_const = fallible.as_ref().map(|f| {
+        quote! { const DECODE_FALLIBLE: ::core::primitive::bool = #f; }
     });
     // `PREFIX_BITS` defaults to zero.
     let prefix_bits = (prefix != 0).then(|| {

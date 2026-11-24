@@ -98,7 +98,7 @@ pub mod __private {
     pub use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
     pub use crate::bound::{Nestable, WireFlag, fits_in_field};
-    pub use crate::field::assert_layout;
+    pub use crate::field::{Decoded, Decodes, Fallibility, assert_layout};
     pub use crate::order::{Be, ByteOrder, Le};
     pub use crate::word::BitWord;
 
