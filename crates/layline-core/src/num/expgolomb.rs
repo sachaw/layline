@@ -21,7 +21,7 @@ use crate::{ParseError, WireInt};
 ///
 /// ```
 /// use layline_core::num::{ExpGolomb, unzigzag, zigzag};
-/// use layline_core::{BitCodec, BitWriter, Buffer, Overflow, ParseError};
+/// use layline_core::{BitCodec, BitWriter, Buffer, EncodeError, ParseError};
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct Se(i64);
@@ -32,7 +32,7 @@ use crate::{ParseError, WireInt};
 ///         Ok((Se(-unzigzag(code.0)), used))
 ///     }
 ///
-///     fn encode<B: Buffer>(&self, out: &mut BitWriter<'_, B, true>) -> Result<(), Overflow> {
+///     fn encode<B: Buffer>(&self, out: &mut BitWriter<'_, B, true>) -> Result<(), EncodeError> {
 ///         ExpGolomb(zigzag(-self.0)).encode(out)
 ///     }
 /// }
@@ -89,11 +89,11 @@ impl BitCodec<true> for ExpGolomb {
     fn encode<B: crate::Buffer>(
         &self,
         out: &mut BitWriter<'_, B, true>,
-    ) -> Result<(), crate::Overflow> {
+    ) -> Result<(), crate::EncodeError> {
         let (zeros, suffix) = self.split();
         out.write(0, zeros)?;
         out.bit(true)?;
-        out.write(suffix, zeros)
+        Ok(out.write(suffix, zeros)?)
     }
 }
 

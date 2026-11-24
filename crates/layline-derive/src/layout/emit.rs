@@ -72,6 +72,7 @@ impl Plan<'_> {
         let view = self.view.then(|| self.view_type());
         // A word-sized layout is straight-line shifts and masks on one register, so it inlines.
         let inline = self.register().map(|_| quote!(#[inline]));
+        let efallible = self.encode_fallible();
         let (decode, encode, words) = match self.word_ty() {
             Some(word) => {
                 let (from, to) = super::access::byte_fns(self.endian);
@@ -90,9 +91,41 @@ impl Plan<'_> {
                     to = to,
                 );
                 let truncates = self.truncate_doc();
+                let word_ty = quote!(#word);
+                let (to_ret, to_must_use) = self.encode_signature(&word_ty);
+                let (encode, to_bits) = match &efallible {
+                    None => (
+                        quote! { self.to_bits().#to() },
+                        quote! {
+                            #to_bits
+                            __bits
+                        },
+                    ),
+                    Some(f) => (
+                        quote! { self.__layline_to_bits()?.#to() },
+                        quote! {
+                            <#root::__private::Fallibility<{ #f }> as #root::__private::Encodes<
+                                #word,
+                            >>::finish(self.__layline_to_bits())
+                        },
+                    ),
+                };
+                let inner = efallible.as_ref().map(|_| {
+                    let body = self.encode_bits();
+                    quote! {
+                        #[doc(hidden)]
+                        #[inline]
+                        fn __layline_to_bits(
+                            &self,
+                        ) -> ::core::result::Result<#word, #root::EncodeError> {
+                            #body
+                            ::core::result::Result::Ok(__bits)
+                        }
+                    }
+                });
                 (
                     quote! { Self::from_bits(#word::#from(*wire)) },
-                    quote! { self.to_bits().#to() },
+                    encode,
                     Some(quote! {
                         #[doc = #from_doc]
                         #[inline]
@@ -105,11 +138,12 @@ impl Plan<'_> {
                         #[doc = #to_doc]
                         #truncates
                         #[inline]
-                        #[must_use]
-                        pub fn to_bits(&self) -> #word {
+                        #to_must_use
+                        pub fn to_bits(&self) -> #to_ret {
                             #to_bits
-                            __bits
                         }
+
+                        #inner
                     }),
                 )
             }
@@ -117,16 +151,62 @@ impl Plan<'_> {
         };
         // A message's hidden block reads in the order its caller picks, and `decode` and
         // `encode` are that code at the block's own `endian`.
-        let (decode, encode, held) = match self.internal.0 {
+        let array = quote!([::core::primitive::u8; #wire_bytes]);
+        // `tried`: the bytes as a `Result<_, EncodeError>`, for a layout that refuses values or is
+        // a message's block. A plain layout's `encode` is the bytes.
+        let (decode, held, tried) = match self.internal.0 {
             true => {
                 let order = match self.endian {
                     layline_codegen::Endian::Le => quote!(#root::__private::Le),
                     layline_codegen::Endian::Be => quote!(#root::__private::Be),
                 };
-                let held = self.held_order(&decode_ret, decode, encode);
-                (quote!(Self::decode_in::<#order>(wire)), quote!(self.encode_in::<#order>()), held)
+                let held = self.held_order(&decode_ret, decode, encode.clone());
+                (
+                    quote!(Self::decode_in::<#order>(wire)),
+                    held,
+                    Some(quote!(self.encode_in::<#order>())),
+                )
             }
-            false => (decode, encode, quote!()),
+            false => match &efallible {
+                None => (decode, quote!(), None),
+                Some(_) => (
+                    decode,
+                    quote! {
+                        #[doc(hidden)]
+                        #inline
+                        fn __layline_encode(
+                            &self,
+                        ) -> ::core::result::Result<#array, #root::EncodeError> {
+                            ::core::result::Result::Ok({ #encode })
+                        }
+                    },
+                    Some(quote!(self.__layline_encode())),
+                ),
+            },
+        };
+        let (encode_ret, encode_must_use) = self.encode_signature(&array);
+        let (encode, encode_into) = match &tried {
+            None => (
+                encode,
+                quote! {
+                    #root::Buffer::push(out, &self.encode())?;
+                    ::core::result::Result::Ok(())
+                },
+            ),
+            Some(tried) => {
+                let f = efallible.clone().unwrap_or_else(|| quote!(false));
+                (
+                    quote! {
+                        <#root::__private::Fallibility<{ #f }> as #root::__private::Encodes<#array>>::finish(
+                            #tried,
+                        )
+                    },
+                    quote! {
+                        #root::Buffer::push(out, &#tried?)?;
+                        ::core::result::Result::Ok(())
+                    },
+                )
+            }
         };
         let encode_doc = self.truncate_doc();
         let covers_container = (self.bits > 0).then(|| {
@@ -149,8 +229,15 @@ impl Plan<'_> {
             ranges: self.range_defs(),
             covered: self.cover_defs(),
         };
-        let layout_tr =
-            layout_impl(ident, &tables, &field_defs, self.prefix, wire_bytes, &fallible, self.root);
+        let layout_tr = layout_impl(
+            ident,
+            &tables,
+            &field_defs,
+            (self.prefix, wire_bytes),
+            (&fallible, &efallible),
+            &encode_into,
+            self.root,
+        );
 
         quote! {
             #(#checks)*
@@ -174,8 +261,8 @@ impl Plan<'_> {
                 /// Encode to wire bytes.
                 #encode_doc
                 #inline
-                #[must_use]
-                pub fn encode(&self) -> [::core::primitive::u8; #wire_bytes] {
+                #encode_must_use
+                pub fn encode(&self) -> #encode_ret {
                     #encode
                 }
 
@@ -230,9 +317,10 @@ impl Plan<'_> {
 
             #[doc(hidden)]
             #[inline]
-            #[must_use]
-            pub fn encode_in<__O: #order>(&self) -> [::core::primitive::u8; #wire_bytes] {
-                #encode
+            pub fn encode_in<__O: #order>(
+                &self,
+            ) -> ::core::result::Result<[::core::primitive::u8; #wire_bytes], #root::EncodeError> {
+                ::core::result::Result::Ok({ #encode })
             }
         }
     }
@@ -464,29 +552,43 @@ impl Plan<'_> {
         }
     }
 
+    /// The return type of an encode that returns `t`, and its `#[must_use]`: `t`, a `Result`
+    /// for a layout that refuses values itself, or `Encoded` of what it holds. A `Result` is
+    /// already `#[must_use]`.
+    fn encode_signature(&self, t: &TokenStream) -> (TokenStream, TokenStream) {
+        let f = self.encode_fallible().unwrap_or_else(|| quote!(false));
+        let (_, ret) = layline_codegen::__derive::signatures(&f, t, self.root);
+        let must_use = self.encode_fallible().is_none().then(|| quote!(#[must_use]));
+        (ret, must_use.unwrap_or_default())
+    }
+
     /// Documents what encode does with a value wider than its field.
     fn truncate_doc(&self) -> TokenStream {
         let narrowed = self.items.iter().any(|item| super::access::narrowed(&item.body));
         let ranged = self.asserts.ranged();
-        match (narrowed && !self.truncate, ranged) {
-            (false, false) if narrowed => quote! {
-                ///
-                /// Each field keeps only the low bits its width holds, as a hardware register does.
-            },
-            (false, false) => quote!(),
-            (fits, ranged) => {
-                let why = match (fits, ranged) {
-                    (true, true) => "If a field's value does not fit its width or its `#[range]`.",
-                    (true, false) => "If a field's value does not fit its width.",
-                    _ => "If a field's value is outside its `#[range]`.",
-                };
-                quote! {
-                    ///
-                    /// # Panics
-                    ///
-                    #[doc = #why]
-                }
+        let widths =
+            !self.truncate && self.items.iter().any(|item| super::refuses_width(&item.body));
+        let why = match (widths, ranged) {
+            (true, true) => "a field's value does not fit its width or its `#[range]`",
+            (true, false) => "a field's value does not fit its width",
+            (false, true) => "a field's value is outside its `#[range]`",
+            (false, false) if self.encode_fallible().is_some() => {
+                "a nested layout or codec field refuses its value. Otherwise returns the bytes"
             }
+            (false, false) if narrowed => {
+                return quote! {
+                    ///
+                    /// Each field keeps only the low bits its width holds, as a hardware register does.
+                };
+            }
+            (false, false) => return quote!(),
+        };
+        let why = format!("`EncodeError` if {why}.");
+        quote! {
+            ///
+            /// # Errors
+            ///
+            #[doc = #why]
         }
     }
 
@@ -671,9 +773,9 @@ fn layout_impl(
     ident: &syn::Ident,
     t: &Tables,
     field_defs: &[TokenStream],
-    prefix: u32,
-    wire_bytes: usize,
-    fallible: &Option<TokenStream>,
+    (prefix, wire_bytes): (u32, usize),
+    (fallible, efallible): (&Option<TokenStream>, &Option<TokenStream>),
+    encode_into: &TokenStream,
     root: &Root,
 ) -> TokenStream {
     let Tables { types, stated, constants, ranges, covered } = t;
@@ -690,6 +792,10 @@ fn layout_impl(
     // `DECODE_FALLIBLE` defaults to `false`.
     let fallible_const = fallible.as_ref().map(|f| {
         quote! { const DECODE_FALLIBLE: ::core::primitive::bool = #f; }
+    });
+    // `ENCODE_FALLIBLE` defaults to `false`.
+    let encode_const = efallible.as_ref().map(|f| {
+        quote! { const ENCODE_FALLIBLE: ::core::primitive::bool = #f; }
     });
     // `PREFIX_BITS` defaults to zero.
     let prefix_bits = (prefix != 0).then(|| {
@@ -753,11 +859,13 @@ fn layout_impl(
                 }
             }
 
+            #encode_const
+
             fn encode_into<__B: #root::Buffer>(
                 &self,
                 out: &mut __B,
-            ) -> ::core::result::Result<(), #root::Overflow> {
-                #root::Buffer::push(out, &self.encode())
+            ) -> ::core::result::Result<(), #root::EncodeError> {
+                #encode_into
             }
         }
     }

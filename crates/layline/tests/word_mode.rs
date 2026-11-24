@@ -560,21 +560,21 @@ fn decode_encode_round_trip_is_byte_identical() {
     for _ in 0..FUZZ_WORDS {
         let mut wire = [0u8; 9];
         rng.fill(&mut wire);
-        assert_eq!(TrackRecord::decode(&wire).encode(), wire);
-        assert_eq!(TrackExtension::decode(&wire).encode(), wire);
-        assert_eq!(PointInitial::decode(&wire).encode(), wire);
-        assert_eq!(PointExtension::decode(&wire).encode(), wire);
-        assert_eq!(TrackInitial::decode(&wire).encode(), wire);
-        assert_eq!(TrackDetail::decode(&wire).encode(), wire);
-        assert_eq!(TrackCovariance::decode(&wire).encode(), wire);
-        assert_eq!(TrackDetailAlt::decode(&wire).encode(), wire);
+        assert_eq!(TrackRecord::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(TrackExtension::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(PointInitial::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(PointExtension::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(TrackInitial::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(TrackDetail::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(TrackCovariance::decode(&wire).encode().unwrap(), wire);
+        assert_eq!(TrackDetailAlt::decode(&wire).encode().unwrap(), wire);
     }
 }
 
 #[test]
 fn hand_vector_label_and_sublabel_land_in_the_right_bytes() {
     let iw = TrackRecord { label: 0b00011, sublabel: 0b010, ..Default::default() };
-    let wire = iw.encode();
+    let wire = iw.encode().unwrap();
     assert_eq!(wire[0], 0x0C);
     assert_eq!(wire[1], 0x01);
     assert_eq!(&wire[2..], &[0u8; 7]);
@@ -592,6 +592,6 @@ fn the_class_overlay_reads_and_writes_the_same_three_bits() {
     iw.set_class_detail(ClassDetail::from_raw(2));
     assert_eq!(iw.class, Classification::Tentative);
 
-    let oracle = WordBits::from_container(&iw.encode());
+    let oracle = WordBits::from_container(&iw.encode().unwrap());
     assert_eq!(oracle.field(66, 3), 2);
 }

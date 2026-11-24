@@ -79,7 +79,7 @@ pub struct Packed {
 #[test]
 fn a_nonzero_flag_can_be_a_bit_field() {
     assert_eq!(Packed::decode(&[0b0000_0100]), Packed { any: Nonzero(true), rest: 0 });
-    assert_eq!(Packed { any: Nonzero(true), rest: 1 }.encode(), [0b0000_1001]);
+    assert_eq!(Packed { any: Nonzero(true), rest: 1 }.encode().unwrap(), [0b0000_1001]);
 }
 
 /// A byte bool in a message sits in the block of fixed fields and can mark presence.
@@ -101,10 +101,10 @@ fn a_message_byte_bool_marks_presence_and_is_strict() {
     assert_eq!(used, 7);
     assert_eq!(got.stamp, Some(0x1234));
     assert!(got.has_stamp);
-    assert_eq!(got.encode(), with);
+    assert_eq!(got.encode().unwrap(), with);
 
     let without = Reply { code: 9, has_stamp: true, stamp: None, len: 0, data: vec![0xAA] };
-    assert_eq!(without.encode(), [0x09, 0x00, 0x01, 0xAA]);
+    assert_eq!(without.encode().unwrap(), [0x09, 0x00, 0x01, 0xAA]);
 
     assert_eq!(
         Reply::decode(&[0x09, 0x02, 0x34, 0x12, 0x00]),

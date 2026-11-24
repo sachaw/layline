@@ -4,7 +4,7 @@
 #![cfg(feature = "derive")]
 
 use layline::table::{By, Span, Start};
-use layline::{Layout, Message, ParseError, table::fixed_bits};
+use layline::{EncodeError, Layout, Message, ParseError, table::fixed_bits};
 
 #[derive(Debug, Clone, Copy, PartialEq, Layout)]
 #[layout(bytes = 2)]
@@ -82,7 +82,7 @@ fn a_step_whose_padding_the_body_ran_out_of_is_a_short_body() {
 #[test]
 fn the_count_and_the_stride_are_both_back_patched() {
     let e = Epoch { n: 99, sb_length: 77, sub_blocks: pairs(), trailer: 0xBEEF };
-    assert_eq!(e.encode(), NARROW.to_vec(), "hand-computed");
+    assert_eq!(e.encode().unwrap(), NARROW.to_vec(), "hand-computed");
     assert_eq!(<Pair as Layout>::WIRE_BYTES, 2, "byte 1 above");
 }
 
@@ -90,9 +90,9 @@ fn the_count_and_the_stride_are_both_back_patched() {
 fn a_wider_wire_re_encodes_at_the_width_this_build_knows() {
     let (e, _) = Epoch::decode(&WIDE).expect("parses");
     assert_eq!(e.sb_length, 4, "as it arrived");
-    assert_eq!(e.encode(), NARROW.to_vec(), "encode writes at this build's element width");
+    assert_eq!(e.encode().unwrap(), NARROW.to_vec(), "encode writes at this build's element width");
 
-    let (again, used) = Epoch::decode(&e.encode()).expect("parses");
+    let (again, used) = Epoch::decode(&e.encode().unwrap()).expect("parses");
     assert_eq!(again, Epoch { n: 2, sb_length: 2, sub_blocks: pairs(), trailer: 0xBEEF });
     assert_eq!(used, 8);
 }
@@ -123,8 +123,8 @@ fn a_big_endian_strided_run_round_trips() {
     assert_eq!(e.trailer, 0xBEEF);
     assert_eq!(used, 10, "2 header + 2 * 3 + 2 trailer, by hand");
 
-    assert_eq!(e.encode(), vec![2, 2, 0x01, 0x02, 0x03, 0x04, 0xBE, 0xEF]);
-    let (again, used) = EpochBe::decode(&e.encode()).expect("parses");
+    assert_eq!(e.encode().unwrap(), vec![2, 2, 0x01, 0x02, 0x03, 0x04, 0xBE, 0xEF]);
+    let (again, used) = EpochBe::decode(&e.encode().unwrap()).expect("parses");
     assert_eq!(again.sub_blocks, e.sub_blocks);
     assert_eq!(again.trailer, 0xBEEF);
     assert_eq!(used, 8);
@@ -148,9 +148,11 @@ struct WideRun {
 }
 
 #[test]
-#[should_panic(expected = "field `sb_length` is too narrow for the wire width of one element")]
 fn a_stride_field_too_narrow_for_the_element_is_caught_by_derived_fits() {
-    let _ = WideRun { n: 0, sb_length: 0, items: vec![Wide { tag: 7, body: [0; 256] }] }.encode();
+    assert_eq!(
+        WideRun { n: 0, sb_length: 0, items: vec![Wide { tag: 7, body: [0; 256] }] }.encode(),
+        Err(EncodeError::Unfit { field: "sb_length", value: 260, bits: 0 })
+    );
 }
 
 #[test]

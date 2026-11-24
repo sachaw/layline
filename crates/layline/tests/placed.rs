@@ -4,7 +4,7 @@
 #![cfg(feature = "derive")]
 
 use layline::table::{Presence, Span, Start};
-use layline::{Layout, Message};
+use layline::{EncodeError, Layout, Message};
 
 #[derive(Debug, Clone, Copy, PartialEq, Layout)]
 #[layout(bytes = 4)]
@@ -48,7 +48,7 @@ const CONTAINER_WIRE: &[u8] =
 
 #[test]
 fn a_record_lands_where_the_walk_packed_it_and_the_offset_is_stamped_from_that() {
-    assert_eq!(container().encode(), CONTAINER_WIRE.to_vec());
+    assert_eq!(container().encode().unwrap(), CONTAINER_WIRE.to_vec());
 
     let (back, used) = Container::decode(CONTAINER_WIRE).expect("parses");
     assert_eq!(used, CONTAINER_WIRE.len());
@@ -70,7 +70,7 @@ fn a_reader_honours_an_offset_that_points_backwards() {
     assert_eq!(back.symb, Symb { n: 2, names: vec![0x41, 0x42] });
     assert_eq!(used, 15);
 
-    assert_eq!(back.encode(), CONTAINER_WIRE.to_vec());
+    assert_eq!(back.encode().unwrap(), CONTAINER_WIRE.to_vec());
 }
 
 #[test]
@@ -120,13 +120,13 @@ struct Optional {
 fn an_absent_record_is_an_offset_of_zero() {
     let present =
         Optional { table_off: 0xFF, table: Some(Table { first: 0x0201, count: 3 }), trailer: 0x7F };
-    assert_eq!(present.encode(), vec![1, 0x01, 0x02, 0x03, 0x00, 0x7F]);
+    assert_eq!(present.encode().unwrap(), vec![1, 0x01, 0x02, 0x03, 0x00, 0x7F]);
 
     let absent = Optional { table_off: 0xFF, table: None, trailer: 0x7F };
-    assert_eq!(absent.encode(), vec![0, 0x7F]);
+    assert_eq!(absent.encode().unwrap(), vec![0, 0x7F]);
 
     for m in [present.clone(), absent.clone()] {
-        let bytes = m.encode();
+        let bytes = m.encode().unwrap();
         let (back, used) = Optional::decode(&bytes).expect("parses");
         assert_eq!(used, bytes.len());
         assert_eq!((back.table, back.trailer), (m.table, m.trailer));
@@ -256,13 +256,13 @@ const CONTAINER2_MIXED: &[u8] = &[
 #[test]
 fn a_section_placed_by_one_derived_field_and_gated_by_another() {
     let all = container2(Some(symb()), Some(info()), Some(table_block()), 64);
-    assert_eq!(all.encode(), CONTAINER2_ALL.to_vec(), "the hand-computed wire");
+    assert_eq!(all.encode().unwrap(), CONTAINER2_ALL.to_vec(), "the hand-computed wire");
 
     let none = container2(None, None, None, 40);
-    assert_eq!(none.encode(), CONTAINER2_NONE.to_vec());
+    assert_eq!(none.encode().unwrap(), CONTAINER2_NONE.to_vec());
 
     let mixed = container2(None, Some(info()), Some(table_block()), 57);
-    assert_eq!(mixed.encode(), CONTAINER2_MIXED.to_vec());
+    assert_eq!(mixed.encode().unwrap(), CONTAINER2_MIXED.to_vec());
 
     for (wire, m) in [(CONTAINER2_ALL, &all), (CONTAINER2_NONE, &none), (CONTAINER2_MIXED, &mixed)]
     {
@@ -283,7 +283,7 @@ fn a_section_placed_by_one_derived_field_and_gated_by_another() {
         );
         assert_eq!((back.magic, back.byte_order, back.version), (0x4B43_4150, 0xFEFF, 0x0100));
         assert_eq!((back.header_size, back.block_count), (40, 3));
-        assert_eq!(back.encode(), wire.to_vec(), "encode returns the same bytes");
+        assert_eq!(back.encode().unwrap(), wire.to_vec(), "encode returns the same bytes");
     }
 }
 
@@ -296,15 +296,15 @@ fn a_stale_offset_beside_a_zero_size_reads_as_absent() {
     let (back, used) = Container2::decode(&stale).expect("parses");
     assert_eq!(back.table, None, "a zero size gates the record as absent");
     assert_eq!(used, 40, "nothing was read at the stale offset");
-    assert_eq!(back.encode(), CONTAINER2_NONE.to_vec());
+    assert_eq!(back.encode().unwrap(), CONTAINER2_NONE.to_vec());
 }
 
 #[test]
 fn a_writers_size_is_replaced_by_the_measurement_whichever_way_it_is_wrong() {
     let lying = Container2 { table_size: 9, table: None, ..container2(None, None, None, 40) };
-    assert_eq!(lying.encode(), CONTAINER2_NONE.to_vec());
+    assert_eq!(lying.encode().unwrap(), CONTAINER2_NONE.to_vec());
     assert_eq!(
-        &lying.encode()[36..40],
+        &lying.encode().unwrap()[36..40],
         &[0, 0, 0, 0],
         "encode writes 0 to `table_size` for an absent record"
     );
@@ -315,9 +315,9 @@ fn a_writers_size_is_replaced_by_the_measurement_whichever_way_it_is_wrong() {
         info_size: 0,
         ..container2(Some(symb()), Some(info()), Some(table_block()), 64)
     };
-    assert_eq!(modest.encode(), CONTAINER2_ALL.to_vec());
+    assert_eq!(modest.encode().unwrap(), CONTAINER2_ALL.to_vec());
     assert_eq!(
-        &modest.encode()[36..40],
+        &modest.encode().unwrap()[36..40],
         &[9, 0, 0, 0],
         "encode writes the measured 9 to `table_size`"
     );
@@ -381,21 +381,20 @@ struct NarrowSize {
 }
 
 #[test]
-#[should_panic(
-    expected = "field `body_size` is too narrow for the byte length of a record the wire derives it from"
-)]
 fn a_size_field_too_narrow_for_the_length_is_caught_where_it_is_stamped() {
     let ok = NarrowSize {
         body_offset: 0,
         body_size: 0,
         body: Some(Block { magic: TABL, n: 250, body: vec![0; 250] }),
     };
-    let wire = ok.encode();
+    let wire = ok.encode().unwrap();
     assert_eq!(wire[2], 255, "the measured length, in the field that gates the section");
     assert_eq!(NarrowSize::decode(&wire).expect("parses").0.body, ok.body);
 
-    let _ =
-        NarrowSize { body: Some(Block { magic: TABL, n: 251, body: vec![0; 251] }), ..ok }.encode();
+    assert_eq!(
+        NarrowSize { body: Some(Block { magic: TABL, n: 251, body: vec![0; 251] }), ..ok }.encode(),
+        Err(EncodeError::Unfit { field: "body_size", value: 256, bits: 0 })
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -415,18 +414,18 @@ struct MayWeighNothing {
 }
 
 #[test]
-#[should_panic(
-    expected = "record `body` is present and measured zero bytes, and length field `body_size`"
-)]
 fn a_present_record_that_measures_nothing_is_caught_where_it_is_stamped() {
     let ok = MayWeighNothing {
         body_offset: 0,
         body_size: 0,
         body: Some(Weightless { data: vec![7, 8] }),
     };
-    assert_eq!(ok.encode(), vec![4, 0, 2, 0, 7, 8], "offset 4, size 2, both measured");
+    assert_eq!(ok.encode().unwrap(), vec![4, 0, 2, 0, 7, 8], "offset 4, size 2, both measured");
 
-    let _ = MayWeighNothing { body: Some(Weightless { data: vec![] }), ..ok }.encode();
+    assert_eq!(
+        MayWeighNothing { body: Some(Weightless { data: vec![] }), ..ok }.encode(),
+        Err(EncodeError::Empty { field: "body" })
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -441,9 +440,6 @@ struct TooNarrow {
 }
 
 #[test]
-#[should_panic(
-    expected = "field `table_off` is too narrow for the position of a record the wire derives it from"
-)]
 fn an_offset_field_too_narrow_for_the_position_is_caught_where_it_is_stamped() {
     let ok = TooNarrow {
         table_off: 0,
@@ -451,10 +447,13 @@ fn an_offset_field_too_narrow_for_the_position_is_caught_where_it_is_stamped() {
         pad: vec![0; 253],
         table: Table { first: 1, count: 2 },
     };
-    assert_eq!(ok.encode()[0], 255);
-    assert_eq!(TooNarrow::decode(&ok.encode()).expect("parses").0.table, ok.table);
+    assert_eq!(ok.encode().unwrap()[0], 255);
+    assert_eq!(TooNarrow::decode(&ok.encode().unwrap()).expect("parses").0.table, ok.table);
 
-    let _ = TooNarrow { pad: vec![0; 254], ..ok }.encode();
+    assert_eq!(
+        TooNarrow { pad: vec![0; 254], ..ok }.encode(),
+        Err(EncodeError::Unfit { field: "table_off", value: 256, bits: 0 })
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -478,8 +477,8 @@ fn an_offset_inside_a_nested_message_counts_from_that_messages_own_body() {
         lead: 0xABCD,
         inner: Inner { off: 0xFF, table: Table { first: 0x0201, count: 3 } },
     };
-    assert_eq!(m.encode(), vec![0xCD, 0xAB, 1, 0x01, 0x02, 0x03, 0x00]);
-    let (back, used) = Outer::decode(&m.encode()).expect("parses");
+    assert_eq!(m.encode().unwrap(), vec![0xCD, 0xAB, 1, 0x01, 0x02, 0x03, 0x00]);
+    let (back, used) = Outer::decode(&m.encode().unwrap()).expect("parses");
     assert_eq!(used, 7);
     assert_eq!(back.inner.off, 1);
     assert_eq!(back.inner.table, m.inner.table);

@@ -30,7 +30,7 @@ fn a_boxed_run_decodes_and_re_encodes() {
     assert_eq!(used, WIRE.len());
     assert_eq!(&*m.items, &[1u16, 2, 3]);
     assert_eq!(m.trailer, 0xBEEF, "decode reads `trailer` after the three counted elements");
-    assert_eq!(m.encode(), WIRE);
+    assert_eq!(m.encode().unwrap(), WIRE);
 }
 
 #[test]

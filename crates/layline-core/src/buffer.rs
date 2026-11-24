@@ -59,14 +59,13 @@ pub trait Buffer {
     }
 }
 
-/// Run one encode into a new vector.
+/// Run one encode into a new vector: the bytes, or the value's refusal.
 #[cfg(feature = "alloc")]
 pub(crate) fn to_vec(
-    encode: impl FnOnce(&mut alloc::vec::Vec<u8>) -> Result<(), Overflow>,
-) -> alloc::vec::Vec<u8> {
+    encode: impl FnOnce(&mut alloc::vec::Vec<u8>) -> Result<(), crate::EncodeError>,
+) -> Result<alloc::vec::Vec<u8>, crate::EncodeError> {
     let mut out = alloc::vec::Vec::new();
-    encode(&mut out).expect("a vector grows to fit");
-    out
+    encode(&mut out).map(|()| out)
 }
 
 /// A buffer ran out of room during encode.

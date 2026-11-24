@@ -2,7 +2,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Buffer, Choice, Dispatch, Fixed, Layout, Message, Overflow};
+use layline::{Buffer, Dispatch, Fixed, Layout, Message, Overflow};
 
 #[derive(Debug, Clone, PartialEq, Layout)]
 #[layout(bytes = 4)]
@@ -61,7 +61,7 @@ enum Frame {
 
 /// The bytes `value` writes into a caller's array, asserted equal to the bytes it writes into a vector.
 fn in_place<T: Message<Ctx = ()>>(value: &T) -> Vec<u8> {
-    let vector = value.encode();
+    let vector = value.encode().unwrap();
 
     let mut room = vec![0xA5u8; vector.len() + 8];
     let mut out = Fixed::new(&mut room);
@@ -72,7 +72,7 @@ fn in_place<T: Message<Ctx = ()>>(value: &T) -> Vec<u8> {
         let mut room = vec![0u8; short];
         assert_eq!(
             value.encode_into(&mut Fixed::new(&mut room)),
-            Err(Overflow),
+            Err(Overflow.into()),
             "{short} of {} bytes and the encode returned",
             vector.len()
         );
@@ -122,7 +122,7 @@ fn a_layout_a_choice_and_a_dispatch_take_the_same_buffer() {
     let mut room = [0u8; 3];
     assert_eq!(
         Frame::Head(Head { kind: 1, seq: 2 }).encode_into(&mut Fixed::new(&mut room)),
-        Err(Overflow)
+        Err(Overflow.into())
     );
 }
 
@@ -131,7 +131,7 @@ fn a_refused_encode_leaves_the_segments_written_before_it() {
     let m = Sized { tag: 1, len: 4, value: Body::Head(Head { kind: 9, seq: 8 }) };
     let mut room = [0u8; 4];
     let mut out = Fixed::new(&mut room);
-    assert_eq!(m.encode_into(&mut out), Err(Overflow));
+    assert_eq!(m.encode_into(&mut out), Err(Overflow.into()));
     assert_eq!(out.written(), &[1, 4], "the header landed and the four-byte arm did not");
 }
 

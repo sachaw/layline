@@ -19,7 +19,7 @@ pub struct C1Body {
 #[test]
 fn skip_region_is_left_zero_and_ignored() {
     let body = C1Body { channel_original: 0x55, relay_delay_2: 0x2A, spare: 0 };
-    let wire = body.encode();
+    let wire = body.encode().unwrap();
     assert_eq!(wire.len(), 9);
     assert_eq!(wire[0] & 0x7F, 0, "low 7 bits are the dispatcher's, left zero");
 
@@ -53,14 +53,14 @@ pub struct Unstamped {
 #[test]
 fn encode_writes_the_stated_stamp() {
     let s = Prefixed { value: 0x3FF, spare: 0 };
-    let wire = s.encode();
+    let wire = s.encode().unwrap();
     assert_eq!(wire[0] & 0b11, 0b10, "encode writes `prefix_value` into the low bits");
 
     let u = Unstamped { value: 0x3FF, spare: 0 };
-    assert_eq!(u.encode()[0] & 0b11, 0, "without `prefix_value` the low bits stay zero");
+    assert_eq!(u.encode().unwrap()[0] & 0b11, 0, "without `prefix_value` the low bits stay zero");
 
-    assert_eq!(wire[0] & !0b11, u.encode()[0] & !0b11);
-    assert_eq!(wire[1], u.encode()[1]);
+    assert_eq!(wire[0] & !0b11, u.encode().unwrap()[0] & !0b11);
+    assert_eq!(wire[1], u.encode().unwrap()[1]);
 }
 
 #[derive(Layout, Debug, Clone, PartialEq)]
@@ -102,7 +102,7 @@ struct WideStamped {
 #[test]
 fn a_wide_layout_writes_its_stamp() {
     let v = WideStamped { kind: 1, count: 7, a: 0x0102_0304, b: 0, c: 0xFFFF };
-    let wire = v.encode();
+    let wire = v.encode().unwrap();
     assert_eq!(&wire[..2], &[0x16, 0x16], "the prefix bytes contain `prefix_value`");
     assert_eq!(wire[2], 0x10, "`kind` is at byte 2, after the prefix");
 }
@@ -110,7 +110,7 @@ fn a_wide_layout_writes_its_stamp() {
 #[test]
 fn a_wide_checked_stamp_refuses_the_wrong_prefix() {
     let v = WideStamped { kind: 2, count: 1, a: 5, b: 6, c: 7 };
-    let mut wire = v.encode();
+    let mut wire = v.encode().unwrap();
     let back = WideStamped::decode_slice(&wire).expect("the prefix matches `prefix_value`");
     assert_eq!(back, v);
 

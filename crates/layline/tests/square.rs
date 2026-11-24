@@ -3,7 +3,7 @@
 #![cfg(feature = "derive")]
 
 use layline::table::{By, Span};
-use layline::{Message, ParseError, table::fixed_bits};
+use layline::{EncodeError, Message, ParseError, table::fixed_bits};
 
 #[derive(Debug, Clone, PartialEq, Message)]
 #[message(endian = be)]
@@ -34,13 +34,15 @@ fn the_run_holds_the_square_and_the_field_behind_it_lands() {
 #[test]
 fn encode_recomputes_the_order_from_the_collection() {
     let m = Covariance { order: 99, cells: (1..=9).collect(), trailer: 0xBEEF };
-    assert_eq!(m.encode(), WIRE);
+    assert_eq!(m.encode().unwrap(), WIRE);
 }
 
 #[test]
-#[should_panic(expected = "no whole number squares to its length")]
 fn encode_refuses_a_collection_that_is_not_square() {
-    let _ = Covariance { order: 0, cells: vec![1, 2, 3, 4, 5, 6, 7], trailer: 0 }.encode();
+    assert_eq!(
+        Covariance { order: 0, cells: vec![1, 2, 3, 4, 5, 6, 7], trailer: 0 }.encode(),
+        Err(EncodeError::Inexact { field: "order", value: 7 })
+    );
 }
 
 #[test]

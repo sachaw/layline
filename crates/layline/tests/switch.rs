@@ -3,7 +3,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Message, ParseError};
+use layline::{EncodeError, Message, ParseError};
 use layline_core::num::Uleb128;
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -50,7 +50,7 @@ fn every_arm_round_trips() {
     ];
 
     for (packet, wire) in cases {
-        assert_eq!(packet.encode(), wire, "{packet:?} encodes");
+        assert_eq!(packet.encode().unwrap(), wire, "{packet:?} encodes");
         let (back, used) = Packet::decode(&wire).expect("parses");
         assert_eq!(back, packet);
         assert_eq!(used, wire.len(), "`used` is the arm's length plus the header");
@@ -63,17 +63,21 @@ fn an_unrecognised_discriminant_keeps_its_bytes() {
     let (packet, used) = Packet::decode(&wire).expect("parses");
     assert_eq!(packet, Packet { kind: 0x9E, body: Body::Unknown(vec![0xDE, 0xAD, 0xBE, 0xEF]) });
     assert_eq!(used, wire.len());
-    assert_eq!(packet.encode(), wire, "byte-identical, discriminant and all");
+    assert_eq!(packet.encode().unwrap(), wire, "byte-identical, discriminant and all");
 }
 
 #[test]
 fn the_discriminant_is_recomputed_from_the_arm() {
     let lying = Packet { kind: 99, body: Body::Level(7) };
-    assert_eq!(lying.encode(), vec![2, 7], "encode writes the arm's value over the discriminant");
+    assert_eq!(
+        lying.encode().unwrap(),
+        vec![2, 7],
+        "encode writes the arm's value over the discriminant"
+    );
 
     let unknown = Packet { kind: 99, body: Body::Unknown(vec![7]) };
     assert_eq!(
-        unknown.encode(),
+        unknown.encode().unwrap(),
         vec![99, 7],
         "the `#[other]` arm keeps the discriminant in the struct"
     );
@@ -109,7 +113,7 @@ struct Sample {
 #[test]
 fn a_bounded_switch_may_be_followed_by_more_fields() {
     let s = Sample { unit: 1, reading: Reading::Fahrenheit(-40), checksum: 0xBEEF };
-    let wire = s.encode();
+    let wire = s.encode().unwrap();
     assert_eq!(wire, vec![1, 0xD8, 0xFF, 0xEF, 0xBE]);
     assert_eq!(Sample::decode(&wire), Ok((s, 5)));
 }
@@ -152,7 +156,7 @@ struct Tagged {
 #[test]
 fn a_discriminant_may_be_a_discovered_varint() {
     let ping = Tagged { tag: Uleb128(0), body: Body::Ping(PingBody { seq: 9 }) };
-    assert_eq!(ping.encode(), vec![0, 9, 0]);
+    assert_eq!(ping.encode().unwrap(), vec![0, 9, 0]);
     assert_eq!(Tagged::decode(&[0, 9, 0]), Ok((ping, 3)));
 
     let wire = vec![0xAC, 0x02, 1, 2, 3];
@@ -160,7 +164,7 @@ fn a_discriminant_may_be_a_discovered_varint() {
     assert_eq!(t.tag, Uleb128(300));
     assert_eq!(t.body, Body::Unknown(vec![1, 2, 3]));
     assert_eq!(used, wire.len());
-    assert_eq!(t.encode(), wire, "the varint tag survives the round trip");
+    assert_eq!(t.encode().unwrap(), wire, "the varint tag survives the round trip");
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -199,14 +203,14 @@ fn a_switch_may_discriminate_on_the_bytes_that_are_left() {
     let fine =
         Measurement { seq: 8, reported: Reported::Fine(Fine { x: 0xAABB_CCDD, y: 0x1122_3344 }) };
 
-    assert_eq!(coarse.encode(), vec![7, 0x22, 0x11, 0x44, 0x33]);
-    assert_eq!(fine.encode(), vec![8, 0xDD, 0xCC, 0xBB, 0xAA, 0x44, 0x33, 0x22, 0x11]);
+    assert_eq!(coarse.encode().unwrap(), vec![7, 0x22, 0x11, 0x44, 0x33]);
+    assert_eq!(fine.encode().unwrap(), vec![8, 0xDD, 0xCC, 0xBB, 0xAA, 0x44, 0x33, 0x22, 0x11]);
 
-    assert_eq!(coarse.encode().len(), 5);
-    assert_eq!(fine.encode().len(), 9);
+    assert_eq!(coarse.encode().unwrap().len(), 5);
+    assert_eq!(fine.encode().unwrap().len(), 9);
 
     for s in [&coarse, &fine] {
-        let w = s.encode();
+        let w = s.encode().unwrap();
         assert_eq!(Measurement::decode(&w), Ok((s.clone(), w.len())), "{s:?}");
     }
 }
@@ -217,7 +221,7 @@ fn a_length_no_arm_claims_is_still_a_message() {
     let (s, used) = Measurement::decode(&wire).expect("parses");
     assert_eq!(s.reported, Reported::Unrecognised(vec![1, 2, 3]));
     assert_eq!(used, wire.len());
-    assert_eq!(s.encode(), wire, "an unclaimed length round-trips losslessly");
+    assert_eq!(s.encode().unwrap(), wire, "an unclaimed length round-trips losslessly");
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -253,7 +257,7 @@ fn a_u8_length_windows_the_switch_and_a_field_follows_it() {
         ),
     ];
     for (frame, wire) in cases {
-        assert_eq!(frame.encode(), wire, "{frame:?} encodes with the recomputed length");
+        assert_eq!(frame.encode().unwrap(), wire, "{frame:?} encodes with the recomputed length");
         let (back, used) = Frame::decode(&wire).expect("parses");
         assert_eq!(used, wire.len());
         assert_eq!(back.body, frame.body);
@@ -263,10 +267,9 @@ fn a_u8_length_windows_the_switch_and_a_field_follows_it() {
 }
 
 #[test]
-#[should_panic(expected = "too narrow for the byte length of a switch")]
 fn an_arm_too_long_for_its_length_field_is_refused_on_encode() {
     let f = Frame { kind: 9, len: 0, body: Body::Unknown(vec![0; 256]), crc: 0 };
-    let _ = f.encode();
+    assert_eq!(f.encode(), Err(EncodeError::Unfit { field: "len", value: 256, bits: 0 }));
 }
 
 #[test]

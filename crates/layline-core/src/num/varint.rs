@@ -1,5 +1,5 @@
 //! LEB128 and zigzag.
-use crate::{Buffer, Overflow, VarCodec, WireInt};
+use crate::{Buffer, EncodeError, VarCodec, WireInt};
 
 /// Unsigned LEB128 (DWARF ULEB128, WebAssembly `varuint`).
 ///
@@ -52,7 +52,7 @@ impl VarCodec for Uleb128 {
         Err(crate::ParseError::Short { need_bytes: bytes.len() + 1, got_bytes: bytes.len(), at: 0 })
     }
 
-    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), Overflow> {
+    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), EncodeError> {
         let mut rest = self.0;
         loop {
             let mut byte = (rest & 0x7F) as u8;
@@ -138,7 +138,7 @@ impl VarCodec for Sleb128 {
         Err(crate::ParseError::Short { need_bytes: bytes.len() + 1, got_bytes: bytes.len(), at: 0 })
     }
 
-    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), Overflow> {
+    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), EncodeError> {
         let mut rest = self.0;
         loop {
             let mut byte = (rest as u64 & 0x7F) as u8;
@@ -174,7 +174,7 @@ impl WireInt for Sleb128 {
 ///
 /// ```
 /// use layline_core::num::{Uleb128, unzigzag, zigzag};
-/// use layline_core::{Buffer, Overflow, ParseError, VarCodec};
+/// use layline_core::{Buffer, EncodeError, ParseError, VarCodec};
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct Delta(i64);
@@ -185,7 +185,7 @@ impl WireInt for Sleb128 {
 ///         Ok((Delta(unzigzag(raw.0)), used))
 ///     }
 ///
-///     fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), Overflow> {
+///     fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), EncodeError> {
 ///         Uleb128(zigzag(self.0)).encode(out)
 ///     }
 /// }

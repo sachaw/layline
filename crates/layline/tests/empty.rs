@@ -86,7 +86,7 @@ fn an_empty_arm_is_its_selector_alone() {
         (Body::Hello(Hello { id: 0x0102 }), vec![1, 0x02, 0x01]),
     ] {
         let frame = Frame { kind: 0, body };
-        assert_eq!(frame.encode(), wire, "{frame:?}");
+        assert_eq!(frame.encode().unwrap(), wire, "{frame:?}");
         let (back, used) = Frame::decode(&wire).expect("decodes");
         assert_eq!(used, wire.len());
         assert_eq!(back.body, frame.body);
@@ -104,7 +104,7 @@ fn nested_empty_messages_take_no_room() {
         marks: vec![Closed; 3],
         tail: 0x5A,
     };
-    let wire = holder.encode();
+    let wire = holder.encode().unwrap();
     assert_eq!(wire, [3, 0x5A]);
     assert_eq!(Holder::decode(&wire), Ok((Holder { n: 3, ..holder }, 2)));
 }

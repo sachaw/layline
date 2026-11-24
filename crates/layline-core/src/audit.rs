@@ -745,7 +745,7 @@ E Element::Unknown 0
             fn decode_slice(_: &[u8]) -> Result<Self, crate::ParseError> {
                 Err(crate::ParseError::Short { need_bytes: 5, got_bytes: 0, at: 0 })
             }
-            fn encode_into<B: crate::Buffer>(&self, _: &mut B) -> Result<(), crate::Overflow> {
+            fn encode_into<B: crate::Buffer>(&self, _: &mut B) -> Result<(), crate::EncodeError> {
                 Ok(())
             }
             const FIELDS: &'static [crate::table::FieldDef<'static>] = HEADER;
@@ -773,7 +773,7 @@ S Hand count byte 4
             fn decode_slice(_: &[u8]) -> Result<Self, crate::ParseError> {
                 Err(crate::ParseError::Short { need_bytes: 5, got_bytes: 0, at: 0 })
             }
-            fn encode_into<B: crate::Buffer>(&self, _: &mut B) -> Result<(), crate::Overflow> {
+            fn encode_into<B: crate::Buffer>(&self, _: &mut B) -> Result<(), crate::EncodeError> {
                 Ok(())
             }
             const FIELDS: &'static [crate::table::FieldDef<'static>] = HEADER;

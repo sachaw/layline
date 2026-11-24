@@ -32,6 +32,12 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 /// `#[range]`, `prefix_value`, `internal` or a byte-mode `bool`, or nests a layout whose `decode`
 /// does. Otherwise it returns `Self`.
 ///
+/// `encode` is the same choice for values: it returns `Result<[u8; N], EncodeError>` if the struct
+/// declares something a value can break, a `#[range]` or, without `truncate`, an integer narrower
+/// than its type, and `[u8; N]` if it declares nothing and holds nothing that does. A struct that
+/// nests a layout or holds a `FieldCodec` returns what they do, through `Encoded`.
+/// `Layout::ENCODE_FALLIBLE` says which, as `DECODE_FALLIBLE` does for `decode`.
+///
 /// # Container attributes
 ///
 /// Choose one size:
@@ -57,9 +63,10 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 ///   setters. Not allowed with `#[range]`, a byte-mode `bool`, or a nested layout whose `decode`
 ///   is fallible.
 /// - `truncate`: encode keeps the low `N` bits of a value wider than its `#[bits(N)]` field, as a
-///   hardware register does, instead of panicking. Decode is unchanged. Without it, encode panics
-///   rather than write bits that read back as a different value. A view's setters always keep the
-///   low bits.
+///   hardware register does, instead of refusing it. Decode is unchanged. Without it, encode
+///   returns `EncodeError::Unfit` rather than write bits that read back as a different value. A
+///   view's setters always keep the low bits, and a view of a struct whose `encode` can refuse
+///   comes from it by `TryFrom`.
 /// - `internal`: marks a block that `Message` generates. Makes `decode` fallible.
 /// - `crate = path`: the path to `layline`. Default `::layline`.
 ///
@@ -165,7 +172,9 @@ pub fn derive_dispatch(input: TokenStream) -> TokenStream {
 /// Derives `FieldCodec` and `WireInt` for an integer newtype or an enum of named values, and
 /// `FieldCodec` for a group of bit fields.
 ///
-/// Every `N`-bit value decodes.
+/// Every `N`-bit value decodes. A value whose raw bits do not fit `N`, a newtype holding more than
+/// `N` bits or an `#[other]` value past them, has no encoding: `try_raw` refuses it with
+/// `EncodeError::Unfit`, and `FieldCodec::ENCODE_FALLIBLE` is `true` for a type that can hold one.
 ///
 /// # Container attributes
 ///
@@ -181,8 +190,8 @@ pub fn derive_dispatch(input: TokenStream) -> TokenStream {
 ///
 /// - `order = lsb | msb`: with `msb`, the first field takes the most significant bits. Default
 ///   `lsb`.
-/// - `truncate`: `to_raw` keeps the low `K` bits of a value wider than its field, instead of
-///   panicking.
+/// - `truncate`: `try_raw` and `to_bits` keep the low `K` bits of a value wider than its field,
+///   instead of refusing it with `EncodeError::Unfit`. `to_raw` always keeps them.
 ///
 /// ```
 /// # use layline::FieldCodec;
@@ -234,7 +243,16 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// `#[switch]` selects.
 ///
 /// Consecutive plain fields become a hidden `#[derive(Layout)]` struct. Encode fills in count,
-/// length, offset, discriminant and flag fields from the fields they describe. In a byte-mode
+/// length, offset, discriminant and flag fields from the fields they describe.
+///
+/// `encode` and `encode_into` return `Result<_, EncodeError>` when the message declares something
+/// a value can break, or holds a type that does, and otherwise the bytes and
+/// `Result<(), Overflow>`. What a value can break: a field narrower than its type, a `#[range]`, a
+/// cap, a count, length, offset or discriminant field too narrow for what it states, a `scale` it
+/// cannot state exactly, a terminator or mask inside the value, and a parameter it disagrees with.
+/// The error names the field, the declaration and the value. A message held through `Box` or
+/// `Vec` counts as refusing unless it is this one, since it may hold this one in turn.
+/// `Message::ENCODE_FALLIBLE` says which; the trait's own methods always return `EncodeError`. In a byte-mode
 /// message a `bool` is one strict byte, as in a `bytes = N` layout. A struct with no fields,
 /// `struct Ready {}` or `struct Ready;`, is a message of no bytes, such as a frame whose selector
 /// alone says what happened.
@@ -250,8 +268,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   with zero bits to a whole byte. Default order `lsb`.
 /// - `#[message(needs(a: u8, b: bool))]`: integer and `bool` parameters the parent message
 ///   supplies. They become `Message::Ctx`, a generated `<Name>Ctx` struct. The holder writes a
-///   parameter, so encode cannot derive it: encode panics when a `#[count]`, `#[len]`,
-///   `#[switch]` or `#[when]` it drives disagrees with the value.
+///   parameter, so encode cannot derive it: encode returns `EncodeError::Mismatch` when a
+///   `#[count]`, `#[len]`, `#[switch]` or `#[when]` it drives disagrees with the value.
 /// - `#[message(closed)]`: on an enum, an unknown discriminant fails with
 ///   `ParseError::Malformed`.
 /// - `#[message(crate = path)]`: the path to `layline`. Default `::layline`.
@@ -309,8 +327,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   them.
 /// - `#[checksum(Alg, over = a..=b)]`: a checksum over fields `a` to `b`. Decode verifies it and
 ///   encode computes it.
-/// - `#[range(lo..=hi)]`: the allowed values. Decode rejects others, and encode panics on them,
-///   checking a derived length or offset once it is known.
+/// - `#[range(lo..=hi)]`: the allowed values. Decode rejects others, and encode refuses them with
+///   `EncodeError::OutOfRange`, checking a derived length or offset once it is known.
 ///
 /// # Borrowed fields
 ///

@@ -227,6 +227,18 @@ pub(super) fn bits_parts(
     }
 
     let table = rows.iter().map(|row| row_tokens(row, root));
+    let via: Vec<TokenStream> = declared
+        .iter()
+        .filter_map(|(f, _)| match &f.kind {
+            Kind::Var { ty } => {
+                let p = path(ty);
+                Some(quote!(<#p as #root::BitCodec<#msb>>::ENCODE_FALLIBLE))
+            }
+            other => super::refuse::held_refusal(other, &m.name, false, root),
+        })
+        .collect();
+    let fallible = super::refuse::refusal(super::refuse::refuses_itself(&writes), &via);
+    let inherent = super::inherent_encodes(&fallible, &quote!(#root::Message), Some(false), root);
     let (owner, str_ty) = (m.name.as_str(), root.prelude().primitive("str"));
     let too_deep = too_deep(root);
     let codec = quote! {
@@ -239,6 +251,8 @@ pub(super) fn bits_parts(
             const SEGMENTS: &'static [#root::table::SegmentDef<'static>] = &[#(#table)*];
 
             const OPEN_ENDED: #bool = false;
+
+            const ENCODE_FALLIBLE: #bool = #fallible;
 
             fn decode_with_nested(
                 body: &[#u8],
@@ -255,11 +269,16 @@ pub(super) fn bits_parts(
                 &self,
                 out: &mut __B,
                 __ctx: (),
-            ) -> #result<(), #root::Overflow> {
+            ) -> #result<(), #root::EncodeError> {
                 let mut __bits = #root::BitWriter::<_, #msb>::new(out);
                 #writes
                 #ok(())
             }
+        }
+
+        #[automatically_derived]
+        impl #name {
+            #inherent
         }
     };
 
@@ -398,23 +417,32 @@ fn bit_read(name: &str, kind: &Kind, msb: bool, root: &Root) -> TokenStream {
     }
 }
 
-/// Write one field to the cursor, panicking if the value does not fit its width.
+/// Write one field to the cursor, refusing a value that does not fit its width.
 fn bit_write((name, kind): (&str, &Kind), held: Held<'_>, msb: bool, root: &Root) -> TokenStream {
     let (by_ref, by_value) = held;
     if let Kind::Var { .. } = kind {
-        return quote! { #root::BitCodec::<#msb>::encode(#by_ref, &mut __bits)?; };
+        return quote! {
+            #root::BitCodec::<#msb>::encode(#by_ref, &mut __bits)
+                .map_err(|__e| __e.named(#name))?;
+        };
     }
     let bits = kind.width();
     let w = Literal::u64_unsuffixed(bits);
-    let msg = format!("field `{name}`: value does not fit #[bits({bits})]");
-    let raw = bit_encode(kind, held, root);
-    let fits = match kind {
-        Kind::Scalar(Scalar::Bool) | Kind::Codec { .. } if bits < 64 => {
-            Some(quote! { ::core::assert!(#raw >> #w == 0, #msg); })
+    let raw = match kind {
+        // A codec's own `try_raw` refuses a value its bits cannot hold.
+        Kind::Codec { .. } => {
+            let ty = kind_ty(kind, root);
+            quote! {
+                <#ty as #root::FieldCodec>::try_raw(#by_ref)
+                    .map_err(|__e| __e.named(#name))?
+            }
         }
+        _ => bit_encode(kind, held, root),
+    };
+    let fits = match kind {
         Kind::Scalar(Scalar::U(n) | Scalar::I(n)) if *n < 64 => {
             let (ty, i64) = (kind_ty(kind, root), root.prelude().i64);
-            Some(fits(Target::Field(&ty, bits), &quote!(#by_value as #i64), &msg, root))
+            Some(fits(Target::Field(&ty, bits), &quote!(#by_value as #i64), name, root))
         }
         _ => None,
     };

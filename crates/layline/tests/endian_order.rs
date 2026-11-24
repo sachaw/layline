@@ -47,7 +47,7 @@ pub struct Registers {
 #[test]
 fn modbus_registers_are_big_endian_words() {
     let regs = Registers { voltage: 0x1234, current: 0x00FF, fault: true, spare: 0 };
-    let wire = regs.encode();
+    let wire = regs.encode().unwrap();
     assert_eq!(&wire[..2], &[0x12, 0x34], "register high byte first");
     assert_eq!(&wire[2..4], &[0x00, 0xFF]);
     assert_eq!(Registers::decode(&wire), regs);
@@ -72,7 +72,7 @@ pub struct Ipv4Word0 {
 #[test]
 fn ipv4_version_and_ihl_land_in_the_famous_first_byte() {
     let w = Ipv4Word0 { version: 4, ihl: 5, dscp: 0, ecn: 0, total_length: 1500 };
-    let wire = w.encode();
+    let wire = w.encode().unwrap();
     assert_eq!(wire[0], 0x45);
     assert_eq!(&wire[2..4], &1500u16.to_be_bytes());
     assert_eq!(Ipv4Word0::decode(&wire), w);
@@ -101,11 +101,11 @@ pub struct Beacon {
 fn a_be_msb0_word_puts_its_named_spare_at_the_tail() {
     let b = Beacon { version: 0x9, serial: 0x2A5, mode: 0b101, spare: 0 };
 
-    assert_eq!(b.encode(), [0x92, 0xA5, 0xA0]);
+    assert_eq!(b.encode().unwrap(), [0x92, 0xA5, 0xA0]);
     assert_eq!(Beacon::decode(&[0x92, 0xA5, 0xA0]), b);
 
     let b = Beacon { spare: 0b11001, ..b };
-    assert_eq!(b.encode(), [0x92, 0xA5, 0xB9]);
+    assert_eq!(b.encode().unwrap(), [0x92, 0xA5, 0xB9]);
     assert_eq!(Beacon::decode(&[0x92, 0xA5, 0xB9]), b);
 
     // FIELDS is in physical (LSB0) order, the reverse of the declaration order under `order = msb`.
@@ -141,15 +141,15 @@ pub struct WordDelta {
 fn signed_fields_sign_extend_and_round_trip() {
     for v in [-8192i16, -1, 0, 1, 8191] {
         let d = Deltas { delta_lat: v, delta_lon: -v.saturating_add(1), valid: true, spare: 0 };
-        assert_eq!(Deltas::decode(&d.encode()), d, "delta {v}");
+        assert_eq!(Deltas::decode(&d.encode().unwrap()), d, "delta {v}");
     }
     let d = Deltas { delta_lat: -1, ..Default::default() };
-    let wire = d.encode();
+    let wire = d.encode().unwrap();
     assert_eq!(wire[0], 0xFF);
     assert_eq!(wire[1] & 0x3F, 0x3F);
 
     for v in [-2048i16, -1, 0, 2047] {
         let w = WordDelta { delta: v, flags: 5 };
-        assert_eq!(WordDelta::decode(&w.encode()), w, "word delta {v}");
+        assert_eq!(WordDelta::decode(&w.encode().unwrap()), w, "word delta {v}");
     }
 }

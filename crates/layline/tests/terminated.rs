@@ -43,7 +43,7 @@ fn the_continuation_bit_is_derived_from_position() {
         destinations: vec![Dest { address: 0x0A }, Dest { address: 0x0B }, Dest { address: 0x0C }],
     };
     assert_eq!(
-        m.encode(),
+        m.encode().unwrap(),
         vec![0x55, 0x0A << 1, 0x0B << 1, (0x0C << 1) | 1],
         "only the last element has the mask bit set"
     );
@@ -69,7 +69,7 @@ fn the_round_trip_closes_over_every_run_length() {
         let (m, used) = AddressField::decode(&wire).expect("parses");
         assert_eq!(used, wire.len(), "{n} elements consumed");
         assert_eq!(m.destinations.len(), n, "{n} elements read");
-        assert_eq!(m.encode(), wire, "{n} elements re-encode identically");
+        assert_eq!(m.encode().unwrap(), wire, "{n} elements re-encode identically");
     }
 }
 
@@ -114,7 +114,7 @@ fn encode_appends_the_terminator_the_struct_does_not_hold() {
         octets: vec![Octet { value: 0x41, spare: false }],
         tail: 0x7E,
     };
-    assert_eq!(m.encode(), vec![0x01, 0x0A, 0x0B, 0xFF, 0x41, 0x00, 0x7E]);
+    assert_eq!(m.encode().unwrap(), vec![0x01, 0x0A, 0x0B, 0xFF, 0x41, 0x00, 0x7E]);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn an_empty_run_is_just_its_terminator() {
     let wire = [0x00u8, 0xFF, 0x00, 0x09];
     let (m, used) = Sentinel::decode(&wire).expect("parses");
     assert_eq!((used, m.raw.len(), m.octets.len(), m.tail), (4, 0, 0, 9));
-    assert_eq!(m.encode(), wire);
+    assert_eq!(m.encode().unwrap(), wire);
 }
 
 #[test]

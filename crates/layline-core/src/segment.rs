@@ -398,6 +398,13 @@ pub trait Message: Sized {
         ctx: Self::Ctx,
     ) -> Result<(Self, usize), crate::ParseError>;
 
+    /// Whether encode can refuse a value, as it can when the type declares something a value
+    /// can violate or holds a type that does. The inherent encode a derive writes returns a
+    /// `Result` exactly then; the trait's methods always do.
+    ///
+    /// Read by a holder, since a derive cannot see a field's type.
+    const ENCODE_FALLIBLE: bool = false;
+
     /// Append the wire bytes to `out`.
     ///
     /// Encode computes counts, lengths, offsets, flags and discriminants from the value.
@@ -405,29 +412,31 @@ pub trait Message: Sized {
     ///
     /// # Errors
     ///
-    /// [`Overflow`](crate::Overflow), leaving the bytes already written in place.
+    /// [`Overflow`](crate::Overflow), leaving the bytes already written in place. A message that
+    /// refuses values returns [`EncodeError`](crate::EncodeError), which also names a value its
+    /// declarations refuse.
     fn encode_into_with<B: crate::Buffer>(
         &self,
         out: &mut B,
         ctx: Self::Ctx,
-    ) -> Result<(), crate::Overflow>;
+    ) -> Result<(), crate::EncodeError>;
 
     /// [`encode_into_with`](Self::encode_into_with) for a message with no parameters.
     ///
     /// # Errors
     ///
     /// As [`encode_into_with`](Self::encode_into_with).
-    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::Overflow>
+    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::EncodeError>
     where
         Self: Message<Ctx = ()>,
     {
         self.encode_into_with(out, ())
     }
 
-    /// [`encode_into_with`](Self::encode_into_with) into a new vector.
+    /// [`encode_into_with`](Self::encode_into_with) into a new vector: the bytes, or for a message
+    /// that refuses values, `Result<Vec<u8>, EncodeError>`.
     #[cfg(feature = "alloc")]
-    #[must_use]
-    fn encode_with(&self, ctx: Self::Ctx) -> crate::__private::Vec<u8> {
+    fn encode_with(&self, ctx: Self::Ctx) -> Result<crate::__private::Vec<u8>, crate::EncodeError> {
         crate::buffer::to_vec(|out| self.encode_into_with(out, ctx))
     }
 
@@ -445,8 +454,7 @@ pub trait Message: Sized {
 
     /// [`encode_with`](Self::encode_with) for a message with no parameters.
     #[cfg(feature = "alloc")]
-    #[must_use]
-    fn encode(&self) -> crate::__private::Vec<u8>
+    fn encode(&self) -> Result<crate::__private::Vec<u8>, crate::EncodeError>
     where
         Self: Message<Ctx = ()>,
     {
@@ -489,17 +497,23 @@ pub trait MessageRef<'a>: Sized {
     /// As [`Message::decode_with`].
     fn decode(bytes: &'a [u8]) -> Result<(Self, usize), crate::ParseError>;
 
+    /// Whether encode can refuse a value, as it can when the type declares something a value
+    /// can violate or holds a type that does. The inherent encode a derive writes returns a
+    /// `Result` exactly then; the trait's methods always do.
+    ///
+    /// Read by a holder, since a derive cannot see a field's type.
+    const ENCODE_FALLIBLE: bool = false;
+
     /// Append the wire bytes to `out`.
     ///
     /// # Errors
     ///
-    /// [`Overflow`](crate::Overflow), leaving the bytes already written in place.
-    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::Overflow>;
+    /// As [`Message::encode_into_with`].
+    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::EncodeError>;
 
-    /// [`encode_into`](Self::encode_into) into a new vector.
+    /// [`encode_into`](Self::encode_into) into a new vector, as [`Message::encode_with`].
     #[cfg(feature = "alloc")]
-    #[must_use]
-    fn encode(&self) -> crate::__private::Vec<u8> {
+    fn encode(&self) -> Result<crate::__private::Vec<u8>, crate::EncodeError> {
         crate::buffer::to_vec(|out| self.encode_into(out))
     }
 
@@ -563,17 +577,23 @@ pub trait Choice: Sized {
         Self::ARMS.iter().any(|arm| arm.value == Some(discriminant))
     }
 
+    /// Whether encode can refuse a value, as it can when the type declares something a value
+    /// can violate or holds a type that does. The inherent encode a derive writes returns a
+    /// `Result` exactly then; the trait's methods always do.
+    ///
+    /// Read by a holder, since a derive cannot see a field's type.
+    const ENCODE_FALLIBLE: bool = false;
+
     /// Append the arm's body to `out`.
     ///
     /// # Errors
     ///
-    /// [`Overflow`](crate::Overflow), leaving the bytes already written in place.
-    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::Overflow>;
+    /// As [`Message::encode_into_with`].
+    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::EncodeError>;
 
-    /// [`encode_into`](Self::encode_into) into a new vector.
+    /// [`encode_into`](Self::encode_into) into a new vector, as [`Message::encode_with`].
     #[cfg(feature = "alloc")]
-    #[must_use]
-    fn encode(&self) -> crate::__private::Vec<u8> {
+    fn encode(&self) -> Result<crate::__private::Vec<u8>, crate::EncodeError> {
         crate::buffer::to_vec(|out| self.encode_into(out))
     }
 

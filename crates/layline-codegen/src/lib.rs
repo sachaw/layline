@@ -49,8 +49,8 @@ pub mod __derive {
     pub use crate::walk::row::FieldDef;
     pub use crate::walk::{
         Check, ChoiceParts, DispatchParts, EnumParts, LayoutParts, MessageParts, WidthAttr,
-        choice_parts, dispatch_parts, enum_parts, field_rows, kind_ty, layout_parts, message_parts,
-        width_attr,
+        choice_parts, dispatch_parts, enum_parts, field_rows, kind_ty, known, layout_parts,
+        message_parts, refusal, signatures, width_attr,
     };
 }
 

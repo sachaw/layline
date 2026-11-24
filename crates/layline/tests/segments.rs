@@ -90,17 +90,17 @@ fn the_joint_is_where_the_wire_stops_agreeing_with_the_grammar() {
         Counted { magic: 0x0102_0304, count: 0, entries: vec![Entry { value: 7 }], crc: 0xBEEF };
     let two = Counted { entries: vec![Entry { value: 7 }, Entry { value: 8 }], ..one.clone() };
 
-    assert_eq!((one.encode().len(), two.encode().len()), (12, 16));
+    assert_eq!((one.encode().unwrap().len(), two.encode().unwrap().len()), (12, 16));
 
     let solved_bytes = (fixed_bits(<Counted as Message>::SEGMENTS) / 8) as usize;
     assert_eq!(solved_bytes, 6);
-    assert_eq!(&one.encode()[..4], &[0x01, 0x02, 0x03, 0x04]);
-    assert_eq!(&two.encode()[..4], &[0x01, 0x02, 0x03, 0x04]);
-    assert_eq!(&one.encode()[4..6], &[0, 1]);
-    assert_eq!(&two.encode()[4..6], &[0, 2]);
+    assert_eq!(&one.encode().unwrap()[..4], &[0x01, 0x02, 0x03, 0x04]);
+    assert_eq!(&two.encode().unwrap()[..4], &[0x01, 0x02, 0x03, 0x04]);
+    assert_eq!(&one.encode().unwrap()[4..6], &[0, 1]);
+    assert_eq!(&two.encode().unwrap()[4..6], &[0, 2]);
 
-    assert_eq!(&one.encode()[10..12], &[0xBE, 0xEF]);
-    assert_eq!(&two.encode()[14..16], &[0xBE, 0xEF]);
+    assert_eq!(&one.encode().unwrap()[10..12], &[0xBE, 0xEF]);
+    assert_eq!(&two.encode().unwrap()[14..16], &[0xBE, 0xEF]);
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -187,12 +187,12 @@ fn each_arm_publishes_its_own_table_from_its_own_first_bit() {
 #[test]
 fn the_arm_chosen_moves_everything_behind_the_switch() {
     let ping = Switched { kind: 9, body: Body::Ping(Ping { seq: 0x0102 }), crc: 0xBEEF };
-    assert_eq!(ping.encode(), vec![0x00, 0x01, 0x02, 0xBE, 0xEF]);
+    assert_eq!(ping.encode().unwrap(), vec![0x00, 0x01, 0x02, 0xBE, 0xEF]);
     let pong = Switched { kind: 9, body: Body::Pong(Pong { seq: 1 }), crc: 0xBEEF };
-    assert_eq!(pong.encode(), vec![0x01, 0x00, 0x00, 0x00, 0x01, 0xBE, 0xEF]);
+    assert_eq!(pong.encode().unwrap(), vec![0x01, 0x00, 0x00, 0x00, 0x01, 0xBE, 0xEF]);
 
-    assert_eq!(Switched::decode(&ping.encode()), Ok((Switched { kind: 0, ..ping }, 5)));
-    assert_eq!(Switched::decode(&pong.encode()), Ok((Switched { kind: 1, ..pong }, 7)));
+    assert_eq!(Switched::decode(&ping.encode().unwrap()), Ok((Switched { kind: 0, ..ping }, 5)));
+    assert_eq!(Switched::decode(&pong.encode().unwrap()), Ok((Switched { kind: 1, ..pong }, 7)));
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -302,10 +302,10 @@ fn a_fixed_run_of_text_is_solved_and_the_field_behind_it_has_a_position() {
     assert_eq!(fixed_bits(table), 88, "1 + 8 + 2 bytes, all of it fixed");
 
     let short = Padded { kind: 1, name: "ab".into(), crc: 0xBEEF };
-    assert_eq!(short.encode().len(), 11);
-    assert_eq!(&short.encode()[9..], &[0xBE, 0xEF]);
+    assert_eq!(short.encode().unwrap().len(), 11);
+    assert_eq!(&short.encode().unwrap()[9..], &[0xBE, 0xEF]);
     let full = Padded { kind: 1, name: "abcdefgh".into(), crc: 0xBEEF };
-    assert_eq!(&full.encode()[9..], &[0xBE, 0xEF]);
+    assert_eq!(&full.encode().unwrap()[9..], &[0xBE, 0xEF]);
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]

@@ -47,7 +47,7 @@ struct Whole {
 #[test]
 fn a_checksum_over_the_whole_message_is_recomputed_on_encode() {
     let m = Whole { magic: 0xABCD, len: 999, payload: vec![1, 2, 3], crc: 0 };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
 
     let covered = [0xAB, 0xCD, 0x00, 0x03, 1, 2, 3];
     let want = <Crc16Ccitt as Checksum>::compute(&covered);
@@ -65,7 +65,7 @@ fn a_checksum_over_the_whole_message_is_recomputed_on_encode() {
 #[test]
 fn a_corrupted_body_is_a_checksum_error_carrying_both_values() {
     let m = Whole { magic: 0xABCD, len: 0, payload: vec![1, 2, 3], crc: 0 };
-    let mut bytes = m.encode();
+    let mut bytes = m.encode().unwrap();
     let good = u16::from_be_bytes([bytes[7], bytes[8]]);
 
     bytes[5] ^= 0xFF;
@@ -97,8 +97,8 @@ struct Skipped {
 #[test]
 fn over_a_named_field_covers_a_different_range_than_over_everything() {
     let payload = vec![1, 2, 3];
-    let whole = Whole { magic: 0xABCD, len: 0, payload: payload.clone(), crc: 0 }.encode();
-    let skipped = Skipped { magic: 0xABCD, len: 0, payload, crc: 0 }.encode();
+    let whole = Whole { magic: 0xABCD, len: 0, payload: payload.clone(), crc: 0 }.encode().unwrap();
+    let skipped = Skipped { magic: 0xABCD, len: 0, payload, crc: 0 }.encode().unwrap();
 
     assert_eq!(whole.len(), skipped.len());
     assert_eq!(whole[..7], skipped[..7]);
@@ -109,11 +109,11 @@ fn over_a_named_field_covers_a_different_range_than_over_everything() {
     assert_eq!(&skipped[7..], &<Crc16Ccitt as Checksum>::compute(&from_len).to_be_bytes());
     assert_ne!(whole[7..], skipped[7..], "the two ranges differ");
 
-    let moved = Skipped { magic: 0x0000, len: 0, payload: vec![1, 2, 3], crc: 0 }.encode();
+    let moved = Skipped { magic: 0x0000, len: 0, payload: vec![1, 2, 3], crc: 0 }.encode().unwrap();
     assert_eq!(moved[7..], skipped[7..]);
     assert!(Skipped::decode(&moved).is_ok());
 
-    let moved = Whole { magic: 0x0000, len: 0, payload: vec![1, 2, 3], crc: 0 }.encode();
+    let moved = Whole { magic: 0x0000, len: 0, payload: vec![1, 2, 3], crc: 0 }.encode().unwrap();
     assert_ne!(moved[7..], whole[7..]);
 }
 
@@ -146,7 +146,7 @@ fn a_checksum_covers_discovered_extents_it_could_not_have_predicted() {
             body: body.clone(),
             lrc: 0xAA,
         };
-        let bytes = m.encode();
+        let bytes = m.encode().unwrap();
 
         let mut covered = Vec::new();
         covered.extend_from_slice(label.as_bytes());
@@ -201,7 +201,8 @@ struct FromACollection {
 fn a_range_may_start_at_a_collection_which_is_not_a_number() {
     let bytes =
         FromACollection { magic: 0xABCD, len: 0, payload: vec![1, 2, 3], trailer: 0x5566, crc: 0 }
-            .encode();
+            .encode()
+            .unwrap();
 
     let covered = [1u8, 2, 3, 0x55, 0x66];
     assert_eq!(
@@ -252,7 +253,7 @@ fn two_checksums_cover_two_ranges_and_neither_is_read_from_the_struct() {
         words: vec![0x0102, 0x0304],
         body_sum: 0x2222,
     };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
 
     let header = [0x81, 0x55, 0x02];
     let want_lrc = <Lrc8 as Checksum>::compute(&header);
@@ -318,7 +319,7 @@ fn the_rotate_add_sum_covers_the_whole_set_except_its_own_bytes() {
         flags: 0x0020,
         tail: vec![0xC0, 0x01, 0x02, 0x03],
     };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
 
     let mut record = vec![0x85, 4, 0, 0, 0x20, 0x00, 0xC0, 0x01, 0x02, 0x03];
     let want = rotate_add_reference(&record);
@@ -346,14 +347,14 @@ fn the_rotate_add_sum_covers_the_whole_set_except_its_own_bytes() {
     assert_eq!(back.sum, want);
     assert_eq!(back.count, 4);
     assert_eq!(back, Excised { count: 4, sum: want, ..m });
-    assert_eq!(back.encode(), bytes, "encode returns the same bytes");
+    assert_eq!(back.encode().unwrap(), bytes, "encode returns the same bytes");
 }
 
 #[test]
 fn a_corrupted_excised_record_is_a_checksum_error_wherever_the_damage_is() {
     let m =
         Excised { kind: 0x85, count: 0, sum: 0, flags: 0x0020, tail: vec![0xC0, 0x01, 0x02, 0x03] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     assert!(Excised::decode(&bytes).is_ok());
 
     for i in 0..bytes.len() {
@@ -399,7 +400,7 @@ struct Batch {
 #[test]
 fn a_forward_range_that_starts_after_the_checksum_excises_nothing() {
     let m = Batch { magic: 2, n: 0, crc: 0xDEAD, attributes: 0x0102, records: vec![7, 8, 9] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
 
     let covered = [0x01u8, 0x02, 7, 8, 9];
     let want = <Crc16Ccitt as Checksum>::compute(&covered);
@@ -408,7 +409,7 @@ fn a_forward_range_that_starts_after_the_checksum_excises_nothing() {
     let (back, used) = Batch::decode(&bytes).expect("round-trips");
     assert_eq!((used, back.crc, back.n), (bytes.len(), want, 3));
 
-    let moved = Batch { magic: 9, ..m.clone() }.encode();
+    let moved = Batch { magic: 9, ..m.clone() }.encode().unwrap();
     assert_eq!(moved[2..4], bytes[2..4]);
     for inside in 4..bytes.len() {
         let mut bad = bytes.clone();
@@ -434,7 +435,7 @@ struct HeaderCheck {
 #[test]
 fn a_range_may_end_before_the_body_and_still_run_past_the_checksum() {
     let m = HeaderCheck { magic: 0x8155, lrc: 0x77, len: 0, payload: vec![1, 2, 3] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
 
     let covered = [0x81u8, 0x55, 3];
     let want = <Lrc8 as Checksum>::compute(&covered);
@@ -467,9 +468,11 @@ struct HeaderCheckExclusive {
 
 #[test]
 fn an_exclusive_end_past_the_field_covers_the_same_bytes_an_inclusive_one_does() {
-    let inclusive = HeaderCheck { magic: 0x8155, lrc: 0, len: 0, payload: vec![1, 2, 3] }.encode();
-    let exclusive =
-        HeaderCheckExclusive { magic: 0x8155, lrc: 0, len: 0, payload: vec![1, 2, 3] }.encode();
+    let inclusive =
+        HeaderCheck { magic: 0x8155, lrc: 0, len: 0, payload: vec![1, 2, 3] }.encode().unwrap();
+    let exclusive = HeaderCheckExclusive { magic: 0x8155, lrc: 0, len: 0, payload: vec![1, 2, 3] }
+        .encode()
+        .unwrap();
     assert_eq!(inclusive, exclusive, "`..payload` and `..=len` bound the same range");
     assert_eq!(exclusive[2], <Lrc8 as Checksum>::compute(&[0x81, 0x55, 3]));
     assert!(HeaderCheckExclusive::decode(&exclusive).is_ok());
@@ -518,7 +521,7 @@ struct NoChecksum {
 
 #[test]
 fn a_body_that_ends_before_the_checksum_is_short_not_wrong() {
-    let bytes = Whole { magic: 1, len: 0, payload: vec![1, 2], crc: 0 }.encode();
+    let bytes = Whole { magic: 1, len: 0, payload: vec![1, 2], crc: 0 }.encode().unwrap();
     for cut in 0..bytes.len() {
         match Whole::decode(&bytes[..cut]) {
             Err(ParseError::Short { .. } | ParseError::Malformed { .. }) => {}
@@ -549,7 +552,7 @@ const DIRECTORY: [u8; 4] = [0x02, 0xFE, 0xEF, 0xBE];
 #[test]
 fn a_check_value_waits_for_a_reservation_inside_its_range() {
     let d = Directory { entry_at: 0, lrc: 0, entry: Entry { value: 0xBEEF } };
-    assert_eq!(d.encode(), DIRECTORY);
+    assert_eq!(d.encode().unwrap(), DIRECTORY);
     assert_eq!(
         <Lrc8 as Checksum>::compute(&DIRECTORY[..1]),
         0xFE,
@@ -571,7 +574,7 @@ fn a_checksum_may_cover_one_that_does_not_cover_it_back() {
         b: u16,
     }
 
-    let wire = Forward { body: 0x1234, a: 0, b: 0 }.encode();
+    let wire = Forward { body: 0x1234, a: 0, b: 0 }.encode().unwrap();
     let (back, used) = Forward::decode(&wire).expect("decode reads what encode wrote");
     assert_eq!(used, wire.len());
     assert_ne!(back.a, 0, "encode wrote `a`");
@@ -594,7 +597,7 @@ fn a_checksum_covers_a_byte_length_after_it_is_stamped() {
     }
 
     let m = EarlyCrc { magic: 0xABCD, len: 0, crc: 0, payload: vec![1, 2, 3] };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
 
     assert_eq!(&wire[2..4], &[0x00, 0x03], "encode wrote `len`");
     let (back, used) = EarlyCrc::decode(&wire).expect("decode reads what encode wrote");

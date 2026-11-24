@@ -6,7 +6,7 @@
 #![cfg(feature = "derive")]
 
 use layline::checksum::Crc;
-use layline::{Layout, Message, ParseError};
+use layline::{EncodeError, Layout, Message, ParseError};
 
 type Crc16 = Crc<u16, 0x1021, 0xFFFF, 0x0000, false>;
 
@@ -124,7 +124,7 @@ fn each_order_round_trips_under_every_mask() {
     for big in [true, false] {
         for mask in 0..8 {
             let m = packet(mask, big, 3);
-            let wire = m.encode();
+            let wire = m.encode().unwrap();
             assert_eq!(wire, packet_wire(mask, big, 3), "mask {mask:#x}, big {big}");
 
             let (back, used) = DwDataPacket::decode(&wire).expect("decodes");
@@ -136,15 +136,19 @@ fn each_order_round_trips_under_every_mask() {
                 e.crc = element(mask, i, big).1;
             }
             assert_eq!(back, want, "encode fills in the counts and checksums, mask {mask:#x}");
-            assert_eq!(back.encode(), wire, "a decoded packet re-encodes to the same bytes");
+            assert_eq!(
+                back.encode().unwrap(),
+                wire,
+                "a decoded packet re-encodes to the same bytes"
+            );
         }
     }
 }
 
 #[test]
 fn the_flag_alone_flips_the_elements() {
-    let be = packet(0x3, true, 1).encode();
-    let le = packet(0x3, false, 1).encode();
+    let be = packet(0x3, true, 1).encode().unwrap();
+    let le = packet(0x3, false, 1).encode().unwrap();
     assert_eq!(be[..5], le[..5], "the header is big-endian either way");
     assert_eq!(be[6..8], le[6..8]);
     assert_eq!(&be[8..16], &0x0102_0304_0506_0708i64.to_be_bytes());
@@ -159,7 +163,7 @@ fn the_flag_alone_flips_the_elements() {
 #[test]
 fn a_nested_layout_keeps_its_own_order() {
     for big in [true, false] {
-        let wire = packet(0x4, big, 1).encode();
+        let wire = packet(0x4, big, 1).encode().unwrap();
         assert_eq!(&wire[8..10], &[0xA0, 0xB0], "`Tag` is big-endian, big {big}");
     }
 }
@@ -173,7 +177,7 @@ fn an_element_decodes_alone_under_either_context() {
         assert_eq!(used, wire.len());
         assert_eq!(e.toa, Some(0x0102_0304_0506_0708));
         assert_eq!(e.pulses, [0x1122, 0x3344]);
-        assert_eq!(e.encode_with(ctx(big)), wire);
+        assert_eq!(e.encode_with(ctx(big)).unwrap(), wire);
     }
 }
 
@@ -187,13 +191,10 @@ fn a_checksum_read_in_the_wrong_order_is_refused() {
 }
 
 #[test]
-#[should_panic(
-    expected = "optional field `pf`: whether it is `Some` is not what parameter `mask` states"
-)]
 fn an_element_that_disagrees_with_the_mask_is_refused() {
     let mut m = packet(0x1, true, 1);
     m.elements[0].pf = Some(2.0);
-    let _ = m.encode();
+    assert_eq!(m.encode(), Err(EncodeError::Mismatch { field: "pf", value: 1, stated: 0 }));
 }
 
 /// A `bool` parameter is a flag a `#[when]` tests, and a `bool` field can be passed for one.
@@ -216,12 +217,12 @@ pub struct Notes {
 #[test]
 fn a_flag_parameter_is_tested_and_passed() {
     let le = Notes { big: false, note: Note { a: 0x0102, little_only: Some(0x0304) } };
-    assert_eq!(le.encode(), [0, 0x02, 0x01, 0x04, 0x03]);
-    assert_eq!(Notes::decode(&le.encode()), Ok((le.clone(), 5)));
+    assert_eq!(le.encode().unwrap(), [0, 0x02, 0x01, 0x04, 0x03]);
+    assert_eq!(Notes::decode(&le.encode().unwrap()), Ok((le.clone(), 5)));
 
     let be = Notes { big: true, note: Note { a: 0x0102, little_only: None } };
-    assert_eq!(be.encode(), [1, 0x01, 0x02]);
-    assert_eq!(Notes::decode(&be.encode()), Ok((be.clone(), 3)));
+    assert_eq!(be.encode().unwrap(), [1, 0x01, 0x02]);
+    assert_eq!(Notes::decode(&be.encode().unwrap()), Ok((be.clone(), 3)));
 }
 
 #[test]
@@ -251,7 +252,7 @@ fn a_random_wire_either_errors_or_round_trips() {
         let Ok((value, used)) = DwDataPacket::decode(&wire) else { continue };
         decoded += 1;
         assert!(used <= wire.len(), "wire {i}");
-        let out = value.encode();
+        let out = value.encode().unwrap();
         assert_eq!(out, wire[..used], "wire {i}: the bytes read are the bytes written");
         assert_eq!(DwDataPacket::decode(&out), Ok((value, out.len())), "wire {i}");
     }

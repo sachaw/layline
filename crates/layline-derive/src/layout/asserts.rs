@@ -484,14 +484,10 @@ impl Plan<'_> {
         let root = self.root;
         let guards = self.asserts.range.iter().map(|r| {
             let field = &r.field;
+            let name = field.to_string();
             let (lo, hi) = (Literal::i64_suffixed(r.lo as i64), Literal::i64_suffixed(r.hi as i64));
-            let msg =
-                format!("field `{}`: value is outside `#[range({}..={})]`", r.field, r.lo, r.hi,);
             quote! {
-                {
-                    let __v = #root::WireInt::to_i64(&self.#field);
-                    ::core::assert!((#lo..=#hi).contains(&__v), #msg);
-                }
+                #root::EncodeError::range(#name, #root::WireInt::to_i64(&self.#field), #lo, #hi)?;
             }
         });
         quote! { #(#guards)* }

@@ -93,7 +93,7 @@ fn encode_round_trips_known_and_unknown_alike() {
     assert_eq!(out, raw);
 
     let mut tiny = [0u8; 4];
-    assert_eq!(payload.encode_into(&mut Fixed::new(&mut tiny)), Err(Overflow));
+    assert_eq!(payload.encode_into(&mut Fixed::new(&mut tiny)), Err(Overflow.into()));
 }
 
 #[test]

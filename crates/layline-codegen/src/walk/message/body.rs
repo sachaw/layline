@@ -69,6 +69,8 @@ pub(super) struct Item<'a> {
     pub(super) skip: TokenStream,
     /// The lifetime borrowed fields hold, without the `'`.
     pub(super) lifetime: Option<&'a str>,
+    /// The `Refuses` of each type the bodies encode through.
+    pub(super) via: Vec<TokenStream>,
 }
 
 impl<'a> Item<'a> {
@@ -91,6 +93,7 @@ impl<'a> Item<'a> {
             items: TokenStream::new(),
             checks: Vec::new(),
             lifetime: None,
+            via: Vec::new(),
         }
     }
 }

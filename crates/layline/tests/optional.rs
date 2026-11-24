@@ -37,8 +37,8 @@ const ORIGIN: Origin = Origin { lat: -1000, lon: 200_000 };
 fn present_and_absent_both_round_trip() {
     let none =
         Packet { flags: 0, timestamp: None, origin: None, label: None, payload: 0xDEAD_BEEF };
-    assert_eq!(none.encode(), vec![0x00, 0x00, 0xEF, 0xBE, 0xAD, 0xDE]);
-    assert_eq!(Packet::decode(&none.encode()), Ok((none, 6)));
+    assert_eq!(none.encode().unwrap(), vec![0x00, 0x00, 0xEF, 0xBE, 0xAD, 0xDE]);
+    assert_eq!(Packet::decode(&none.encode().unwrap()), Ok((none, 6)));
 
     let all = Packet {
         flags: 0x07,
@@ -47,7 +47,7 @@ fn present_and_absent_both_round_trip() {
         label: Some("hi".into()),
         payload: 1,
     };
-    let wire = all.encode();
+    let wire = all.encode().unwrap();
     assert_eq!(
         wire,
         vec![
@@ -71,7 +71,7 @@ fn every_combination_of_bits_round_trips() {
             label: (bits & 4 != 0).then(|| String::from("x")),
             payload: 0x5566_7788,
         };
-        let wire = p.encode();
+        let wire = p.encode().unwrap();
         assert_eq!(
             u16::from_le_bytes([wire[0], wire[1]]),
             bits,
@@ -94,7 +94,7 @@ fn every_combination_of_bits_round_trips() {
 #[test]
 fn the_flag_is_back_patched_from_presence() {
     let lying = Packet { flags: 0xFFFF, timestamp: None, origin: None, label: None, payload: 0 };
-    let wire = lying.encode();
+    let wire = lying.encode().unwrap();
     assert_eq!(
         u16::from_le_bytes([wire[0], wire[1]]),
         0xFFF8,
@@ -109,7 +109,7 @@ fn the_flag_is_back_patched_from_presence() {
         label: Some("q".into()),
         payload: 0,
     };
-    let wire = other.encode();
+    let wire = other.encode().unwrap();
     assert_eq!(
         u16::from_le_bytes([wire[0], wire[1]]),
         0x0007,
@@ -130,10 +130,10 @@ struct Mixed {
 #[test]
 fn ungoverned_bits_are_left_alone() {
     let m = Mixed { flags: 0b1010_1110, extra: Some(0xBEEF) };
-    assert_eq!(m.encode(), vec![0b1010_1111, 0xEF, 0xBE]);
+    assert_eq!(m.encode().unwrap(), vec![0b1010_1111, 0xEF, 0xBE]);
 
     let m = Mixed { flags: 0b1010_1111, extra: None };
-    assert_eq!(m.encode(), vec![0b1010_1110]);
+    assert_eq!(m.encode().unwrap(), vec![0b1010_1110]);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn a_flags_word_and_an_optional_body_may_both_be_discovered() {
         tag: Some("ab".into()),
         trailer: 9,
     };
-    let wire = both.encode();
+    let wire = both.encode().unwrap();
     assert_eq!(wire, vec![0x03, 0xAC, 0x02, b'a', b'b', 0, 0, 9]);
     assert_eq!(
         Discovered::decode(&wire),
@@ -190,7 +190,7 @@ fn a_flags_word_and_an_optional_body_may_both_be_discovered() {
     );
 
     let neither = Discovered { flags: Uleb128(0xFF), delta: None, tag: None, trailer: 9 };
-    let wire = neither.encode();
+    let wire = neither.encode().unwrap();
     assert_eq!(wire, vec![0xFC, 0x01, 9], "0xFF with the two governed bits cleared");
     assert_eq!(
         Discovered::decode(&wire),
@@ -224,7 +224,7 @@ fn an_optional_fill_makes_its_message_open_ended() {
     );
 
     let g = Greedy { flags: 0, note: Some("all of it".into()) };
-    assert_eq!(g.encode(), b"\x80all of it".to_vec());
+    assert_eq!(g.encode().unwrap(), b"\x80all of it".to_vec());
     assert_eq!(
         Greedy::decode(b"\x80all of it"),
         Ok((Greedy { flags: 0x80, note: Some("all of it".into()) }, 10))
@@ -264,7 +264,7 @@ fn an_optional_field_inside_a_switch_arm() {
         sample: Sample::Filtered(Reading { flags: 0xF0, sigma: Some(5), value: -2 }),
         crc: 0xAB,
     };
-    let wire = f.encode();
+    let wire = f.encode().unwrap();
     assert_eq!(wire, vec![1, 0xF1, 5, 0, 0xFE, 0xFF, 0xAB]);
     assert_eq!(
         Frame::decode(&wire),
@@ -283,7 +283,7 @@ fn an_optional_field_inside_a_switch_arm() {
         sample: Sample::Filtered(Reading { flags: 0x01, sigma: None, value: 7 }),
         crc: 1,
     };
-    assert_eq!(f.encode(), vec![1, 0x00, 7, 0, 1], "arm and flag both recomputed");
+    assert_eq!(f.encode().unwrap(), vec![1, 0x00, 7, 0, 1], "arm and flag both recomputed");
 }
 
 /// The DS wireless-manager MP sub-packet header.
@@ -328,7 +328,7 @@ fn two_bool_flags_gate_two_optional_fields() {
         dest: Some(0x5A),
         payload: vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
     };
-    let wire = both.encode();
+    let wire = both.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(
         wire,
@@ -353,7 +353,7 @@ fn two_bool_flags_gate_two_optional_fields() {
         dest: None,
         payload: vec![0x11, 0x22, 0x33, 0x44],
     };
-    let wire = neither.encode();
+    let wire = neither.encode().unwrap();
     assert_eq!(wire, vec![0x02, 0x00, 0x11, 0x22, 0x33, 0x44]);
     assert_eq!(WmPacket::decode(&wire), Ok((neither, 6)));
 
@@ -368,7 +368,7 @@ fn two_bool_flags_gate_two_optional_fields() {
         dest: None,
         payload: vec![0x77, 0x88],
     };
-    let wire = seq_only.encode();
+    let wire = seq_only.encode().unwrap();
     assert_eq!(wire, vec![0x01, 0x04, 0x34, 0x12, 0x77, 0x88]);
     assert_eq!(WmPacket::decode(&wire), Ok((seq_only, 6)));
 
@@ -383,7 +383,7 @@ fn two_bool_flags_gate_two_optional_fields() {
         dest: Some(0x5A),
         payload: vec![],
     };
-    let wire = dest_only.encode();
+    let wire = dest_only.encode().unwrap();
     assert_eq!(wire, vec![0x00, 0x08, 0x5A]);
     assert_eq!(WmPacket::decode(&wire), Ok((dest_only, 3)));
 }
@@ -402,7 +402,7 @@ fn the_presence_bits_are_back_patched_and_the_spare_is_not() {
         payload: vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
     };
 
-    let wire = lying.encode();
+    let wire = lying.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(
         wire,
@@ -516,7 +516,7 @@ fn an_optional_field_may_assert_about_its_own_bytes() {
     for sometimes in [None, Some(tag.clone())] {
         let expected = u8::from(sometimes.is_some());
         let m = HoldsAnAssertion { flags: 0, always: tag.clone(), sometimes };
-        let wire = m.encode();
+        let wire = m.encode().unwrap();
         let (back, used) = HoldsAnAssertion::decode(&wire).expect("it round-trips");
         assert_eq!(back.flags, expected, "encode writes the flag from presence");
         assert_eq!(back.always, m.always, "the mandatory record round-trips");
@@ -529,7 +529,7 @@ fn an_optional_field_may_assert_about_its_own_bytes() {
 fn a_present_optional_assertion_reports_its_own_field() {
     let tag = AssertingTag { sig: *b"TAG", a: 7, b: 0x0102 };
     let m = HoldsAnAssertion { flags: 0, always: tag.clone(), sometimes: Some(tag) };
-    let mut wire = m.encode();
+    let mut wire = m.encode().unwrap();
 
     let at = wire.len() - 6;
     wire[at] = b'X';
@@ -551,7 +551,7 @@ fn a_stated_position_on_an_optional_is_checked_and_kept() {
         extra: Option<u8>,
     }
     let m = Stated { flags: 0, stamp: Some(0xBEEF), extra: None };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![0x01, 0xEF, 0xBE], "encode writes the flag, and the field is at byte 1");
     let (back, used) = Stated::decode(&wire).expect("round-trips");
     assert_eq!((back.stamp, back.extra, used), (Some(0xBEEF), None, 3));

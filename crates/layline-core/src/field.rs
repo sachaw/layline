@@ -361,12 +361,20 @@ pub trait Layout: Sized {
         }
     }
 
+    /// Whether encode can refuse a value, as it can when the type declares something a value
+    /// can violate or holds a type that does. The inherent encode a derive writes returns a
+    /// `Result` exactly then; the trait's methods always do.
+    ///
+    /// Read by a holder, since a derive cannot see a field's type.
+    const ENCODE_FALLIBLE: bool = false;
+
     /// Append the [`WIRE_BYTES`](Self::WIRE_BYTES) bytes to `out`.
     ///
     /// # Errors
     ///
-    /// [`Overflow`](crate::Overflow) if there is no room.
-    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::Overflow>;
+    /// [`Overflow`](crate::Overflow) if there is no room. A layout that refuses values returns
+    /// [`EncodeError`](crate::EncodeError), which also names a value its declarations refuse.
+    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::EncodeError>;
 
     /// The low bits owned by an enclosing dispatcher, or zero.
     ///

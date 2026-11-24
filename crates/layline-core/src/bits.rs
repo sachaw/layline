@@ -25,15 +25,23 @@ pub trait BitCodec<const MSB: bool>: Sized {
     /// value is too wide for `Self`.
     fn decode(bytes: &[u8], at_bit: usize) -> Result<(Self, usize), ParseError>;
 
+    /// Whether encode can refuse a value, as it can when the type declares something a value
+    /// can violate or holds a type that does. The inherent encode a derive writes returns a
+    /// `Result` exactly then; the trait's methods always do.
+    ///
+    /// Read by a holder, since a derive cannot see a field's type.
+    const ENCODE_FALLIBLE: bool = false;
+
     /// Write this value to the bit cursor.
     ///
     /// # Errors
     ///
-    /// [`Overflow`](crate::Overflow) if the buffer has no room.
+    /// [`Overflow`](crate::Overflow) if the buffer has no room. A codec that refuses values
+    /// returns [`EncodeError`](crate::EncodeError), which also names a value it cannot encode.
     fn encode<B: crate::Buffer>(
         &self,
         out: &mut BitWriter<'_, B, MSB>,
-    ) -> Result<(), crate::Overflow>;
+    ) -> Result<(), crate::EncodeError>;
 }
 
 /// The low `n` bits set, for `n <= 8`. Avoids `mask64`'s branch in the inner loop.
@@ -364,9 +372,9 @@ mod tests {
         fn encode<B: Buffer>(
             &self,
             out: &mut BitWriter<'_, B, MSB>,
-        ) -> Result<(), crate::Overflow> {
+        ) -> Result<(), crate::EncodeError> {
             out.write(u64::from(self.1), 3)?;
-            out.write(self.0, self.1)
+            Ok(out.write(self.0, self.1)?)
         }
     }
 

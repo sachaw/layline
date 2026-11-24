@@ -11,6 +11,7 @@ mod opt;
 mod patch;
 mod placed;
 mod recursion;
+mod refuse;
 mod repeat;
 mod switch;
 mod table;
@@ -27,6 +28,8 @@ pub(crate) use choice::emit_choice;
 pub use choice::{ChoiceParts, choice_parts};
 use cursor::too_deep;
 use recursion::{names_self, open_ended_expr, unbounded_recursion};
+use refuse::refuses_itself;
+pub use refuse::{known, refusal, signatures};
 use table::covers_table;
 
 use crate::Derive;
@@ -177,6 +180,8 @@ fn lower_message(
         #parse
         #ok((Self { #build }, __hi))
     };
+    let fallible = refusal(refuses_itself(&bytes), &item.via);
+    let buffered = quote!(#root::EncodeError);
     let encode = quote! {
         #bytes_order
         #base
@@ -203,6 +208,12 @@ fn lower_message(
     };
     let (owner, str_ty) = (m.name.as_str(), root.prelude().primitive("str"));
     if let Some(lifetime) = &m.lifetime {
+        let of = {
+            let lifetime =
+                syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
+            quote!(#root::MessageRef<#lifetime>)
+        };
+        let inherent_ref = inherent_encodes(&fallible, &of, None, root);
         let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
         let codec = quote! {
             impl<#lifetime> #root::MessageRef<#lifetime> for #name<#lifetime> {
@@ -213,6 +224,8 @@ fn lower_message(
 
                 #covered
 
+                const ENCODE_FALLIBLE: #bool = #fallible;
+
                 fn decode(body: &#lifetime [#u8]) -> #result<(Self, #usize), #root::ParseError> {
                     let __depth: #u32 = 0;
                     let __ctx = ();
@@ -222,17 +235,24 @@ fn lower_message(
                 fn encode_into<__B: #root::Buffer>(
                     &self,
                     out: &mut __B,
-                ) -> #result<(), #root::Overflow> {
+                ) -> #result<(), #buffered> {
                     let __ctx = ();
                     #encode
                 }
             }
+
+            #[automatically_derived]
+            impl<#lifetime> #name<#lifetime> {
+                #inherent_ref
+            }
         };
         return Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows));
     }
+    let inherent =
+        inherent_encodes(&fallible, &quote!(#root::Message), Some(!m.needs.is_empty()), root);
     let (decode, encode, held) = match &m.endian_from {
         None => (decode, encode, quote!()),
-        Some(param) => held_order(&name, param, decode, encode, root),
+        Some(param) => held_order(&name, param, decode, encode, &buffered, root),
     };
     let codec = quote! {
         #ctx_decl
@@ -246,6 +266,8 @@ fn lower_message(
 
             #params
 
+            const ENCODE_FALLIBLE: #bool = #fallible;
+
             fn decode_with_nested(
                 body: &[#u8],
                 __depth: #u32,
@@ -258,15 +280,125 @@ fn lower_message(
                 &self,
                 out: &mut __B,
                 __ctx: Self::Ctx,
-            ) -> #result<(), #root::Overflow> {
+            ) -> #result<(), #buffered> {
                 #encode
             }
+        }
+
+        #[automatically_derived]
+        impl #name {
+            #inherent
         }
 
         #held
     };
 
     Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows))
+}
+
+/// The inherent encodes of an item whose `ENCODE_FALLIBLE` is `fallible`, shadowing the trait
+/// `of`'s: they return `Overflow` alone and a bare vector when it is `false`.
+///
+/// `needs` is `Some` for a [`Message`](crate::MessageDef), saying whether it takes parameters,
+/// and `None` for a borrowing message or a catalogue, which take none.
+pub(super) fn inherent_encodes(
+    fallible: &TokenStream,
+    of: &TokenStream,
+    needs: Option<bool>,
+    root: &Root,
+) -> TokenStream {
+    let vec = quote!(#root::__private::Vec<::core::primitive::u8>);
+    let (into, _) = refuse::signatures(fallible, &quote!(()), root);
+    let (_, bytes) = refuse::signatures(fallible, &vec, root);
+    let fin =
+        quote!(<#root::__private::Fallibility<{ #fallible }> as #root::__private::Buffers>::finish);
+    let fin_vec = quote! {
+        <#root::__private::Fallibility<{ #fallible }> as #root::__private::Encodes<#vec>>::finish
+    };
+    let errors = match refuse::known(fallible) {
+        Some(false) => "# Errors\n\n`Overflow` if `out` has no room.",
+        Some(true) => {
+            "# Errors\n\n`EncodeError`: a full buffer, or a value the type's declarations refuse."
+        }
+        None => {
+            "# Errors\n\n`Overflow` if `out` has no room, or, when a held type refuses values, \
+                 `EncodeError` naming that too."
+        }
+    };
+    let vec_doc = match refuse::known(fallible) {
+        Some(false) => "",
+        _ => "\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse.",
+    };
+    let into_doc = format!("Append the wire bytes to `out`.\n\n{errors}");
+    // A `Result` is already `#[must_use]`.
+    let must_use = (refuse::known(fallible) == Some(false)).then(|| quote!(#[must_use]));
+    let vec_doc = format!("The wire bytes, in a new vector.{vec_doc}");
+    match needs {
+        None => quote! {
+            #[doc = #into_doc]
+            #[inline]
+            pub fn encode_into<__B: #root::Buffer>(
+                &self,
+                out: &mut __B,
+            ) -> ::core::result::Result<(), #into> {
+                #fin(<Self as #of>::encode_into(self, out))
+            }
+
+            #root::__private::alloc_only! {
+                #[doc = #vec_doc]
+                #[inline]
+                #must_use
+                pub fn encode(&self) -> #bytes {
+                    #fin_vec(<Self as #of>::encode(self))
+                }
+            }
+        },
+        Some(with) => {
+            let plain = (!with).then(|| {
+                quote! {
+                    #[doc = #into_doc]
+                    #[inline]
+                    pub fn encode_into<__B: #root::Buffer>(
+                        &self,
+                        out: &mut __B,
+                    ) -> ::core::result::Result<(), #into> {
+                        #fin(<Self as #of>::encode_into_with(self, out, ()))
+                    }
+
+                    #root::__private::alloc_only! {
+                        #[doc = #vec_doc]
+                        #[inline]
+                        #must_use
+                        pub fn encode(&self) -> #bytes {
+                            #fin_vec(<Self as #of>::encode_with(self, ()))
+                        }
+                    }
+                }
+            });
+            quote! {
+                #[doc = #into_doc]
+                #[inline]
+                pub fn encode_into_with<__B: #root::Buffer>(
+                    &self,
+                    out: &mut __B,
+                    ctx: <Self as #of>::Ctx,
+                ) -> ::core::result::Result<(), #into> {
+                    #fin(<Self as #of>::encode_into_with(self, out, ctx))
+                }
+
+                #root::__private::alloc_only! {
+                    #[doc = #vec_doc]
+                    #[inline]
+                    #must_use
+                    pub fn encode_with(&self, ctx: <Self as #of>::Ctx) -> #bytes {
+                        #fin_vec(<Self as #of>::encode_with(self, ctx))
+                    }
+                }
+
+                #plain
+            }
+        }
+    }
 }
 
 /// `type __O = Le;` or `Be`: the order a body with a fixed `endian` reads and writes in, if
@@ -296,6 +428,7 @@ fn held_order(
     param: &str,
     decode: TokenStream,
     encode: TokenStream,
+    buffered: &TokenStream,
     root: &Root,
 ) -> (TokenStream, TokenStream, TokenStream) {
     let Prelude { result, u8, u32, usize, .. } = root.prelude();
@@ -321,7 +454,7 @@ fn held_order(
                 &self,
                 out: &mut __B,
                 __ctx: <Self as #root::Message>::Ctx,
-            ) -> #result<(), #root::Overflow> {
+            ) -> #result<(), #buffered> {
                 #encode
             }
         }

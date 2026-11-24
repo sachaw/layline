@@ -5,14 +5,14 @@ use quote::{quote, quote_spanned};
 
 use layline_codegen::{BitOrder, Root};
 
-use super::access::{fits_check, sign_extend};
+use super::access::{fits_check, refuses_width, sign_extend};
 use super::declared::reading_of;
 use super::field::word_field;
 use super::{Packed, Reading};
 
 /// The keys a group takes after `#[bits(N, ..)]`.
 pub struct GroupKeys {
-    /// Encode keeps the low bits of a value wider than its field, rather than panicking.
+    /// Encode keeps the low bits of a value wider than its field, rather than refusing it.
     pub truncate: bool,
     /// With `msb`, the first field takes the most significant bits.
     pub order: BitOrder,
@@ -76,6 +76,10 @@ pub fn group_codec(
     let mut checks = Vec::new();
     let mut reads = Vec::new();
     let mut writes = Vec::new();
+    // What `try_raw` refuses: widths, and each codec field's own refusal.
+    let mut refusals = Vec::new();
+    let mut via = Vec::new();
+    let mut own = false;
     let mut offset = 0u32;
     for f in fields {
         let start = match keys.order {
@@ -109,8 +113,17 @@ pub fn group_codec(
 
         let value = quote! { self.#name };
         if !keys.truncate {
-            writes.push(fits_check(&p, &value, name, root));
+            refusals.push(fits_check(&p, &value, name, root));
+            if p.reading == Reading::Codec {
+                let field = name.to_string();
+                refusals.push(quote! {
+                    <#ty as #root::FieldCodec>::try_raw(&#value)
+                        .map_err(|__e| __e.named(#field))?;
+                });
+                via.push(quote!(<#ty as #root::FieldCodec>::ENCODE_FALLIBLE));
+            }
         }
+        own |= !keys.truncate && refuses_width(&p);
         let raw = match p.reading {
             Reading::Uint(64) => quote! { #value },
             Reading::Uint(_) => quote! { #value as ::core::primitive::u64 },
@@ -161,17 +174,48 @@ pub fn group_codec(
         "Decode from the low {bits} bits of `bits`. Higher bits are not part of the group, and \
          are ignored."
     );
-    let to_doc = format!("The group's {bits} bits, as `FieldCodec::to_raw` gives them.");
-    let truncates = if keys.truncate {
-        quote!()
+    let fallible = layline_codegen::__derive::refusal(own, &via);
+    let plain = !own && via.is_empty();
+    let to_doc = if plain {
+        format!("The group's {bits} bits, as `FieldCodec::to_raw` gives them.")
     } else {
-        quote! {
-            ///
-            /// # Panics
-            ///
-            /// If a field's value does not fit its width.
-        }
+        format!(
+            "The group's {bits} bits, as `FieldCodec::try_raw` gives them.\n\n\
+             # Errors\n\n\
+             `EncodeError` if a field's value does not fit its width."
+        )
     };
+    let (to_ret, to_body, must_use) = if plain {
+        (quote!(::core::primitive::#word), narrow.clone(), quote!(#[must_use]))
+    } else {
+        let narrowed =
+            if reg == "u64" { quote!(__raw) } else { quote!(__raw as ::core::primitive::#word) };
+        (
+            layline_codegen::__derive::signatures(
+                &fallible,
+                &quote!(::core::primitive::#word),
+                root,
+            )
+            .1,
+            quote! {
+                <#root::__private::Fallibility<{ #fallible }> as #root::__private::Encodes<
+                    ::core::primitive::#word,
+                >>::finish(
+                    <Self as #root::FieldCodec>::try_raw(self).map(|__raw| #narrowed),
+                )
+            },
+            quote!(),
+        )
+    };
+    let try_raw = (!plain).then(|| {
+        quote! {
+            #[inline]
+            fn try_raw(&self) -> ::core::result::Result<::core::primitive::u64, #root::EncodeError> {
+                #(#refusals)*
+                ::core::result::Result::Ok(<Self as #root::FieldCodec>::to_raw(self))
+            }
+        }
+    });
     let words = quote! {
         #[automatically_derived]
         impl #ident {
@@ -183,11 +227,10 @@ pub fn group_codec(
             }
 
             #[doc = #to_doc]
-            #truncates
             #[inline]
-            #[must_use]
-            pub fn to_bits(&self) -> ::core::primitive::#word {
-                #narrow
+            #must_use
+            pub fn to_bits(&self) -> #to_ret {
+                #to_body
             }
         }
     };
@@ -200,6 +243,8 @@ pub fn group_codec(
         impl #root::FieldCodec for #ident {
             const BITS: ::core::primitive::u32 = #bits;
 
+            const ENCODE_FALLIBLE: ::core::primitive::bool = #fallible;
+
             #[inline]
             fn from_raw(raw: ::core::primitive::u64) -> Self {
                 Self { #(#reads)* }
@@ -211,6 +256,8 @@ pub fn group_codec(
                 #(#writes)*
                 __bits
             }
+
+            #try_raw
         }
     })
 }

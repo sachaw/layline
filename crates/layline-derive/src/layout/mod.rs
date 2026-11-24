@@ -57,7 +57,7 @@ struct Plan<'a> {
     items: Vec<Item>,
     asserts: Asserts,
     internal: Internal,
-    /// Encode keeps the low bits of a value wider than its field, rather than panicking.
+    /// Encode keeps the low bits of a value wider than its field, rather than refusing it.
     truncate: bool,
 }
 
@@ -219,6 +219,33 @@ impl Plan<'_> {
             .collect();
         (!nested.is_empty()).then(|| quote!(#(#nested)||*))
     }
+
+    /// Whether `encode` returns a `Result`, as a `bool` expression: `true` for a layout that
+    /// refuses a value itself (a `#[range]`, or without `truncate` an integer narrower than its
+    /// type), the `||` of the `ENCODE_FALLIBLE` of the layouts and codecs it holds, and `None`
+    /// for one that encodes every value. The encode twin of [`fallible`](Self::fallible).
+    fn encode_fallible(&self) -> Option<TokenStream> {
+        let own = self.asserts.ranged()
+            || (!self.truncate && self.items.iter().any(|item| refuses_width(&item.body)));
+        let root = self.root;
+        let mut via = Vec::new();
+        for item in &self.items {
+            held_encodes(&item.body, self.truncate, root, &mut via);
+        }
+        if !own && via.is_empty() {
+            return None;
+        }
+        Some(layline_codegen::__derive::refusal(own, &via))
+    }
+}
+
+/// Whether a body holds an integer narrower than its type, which a value can overflow.
+fn refuses_width(body: &Body) -> bool {
+    match body {
+        Body::Packed(p) => access::refuses_width(p),
+        Body::Repeat { body, .. } => refuses_width(body),
+        Body::Nested { .. } => false,
+    }
 }
 
 /// The layout a body nests, alone or as array elements.
@@ -227,6 +254,19 @@ fn nested_ty(body: &Body) -> Option<&syn::Type> {
         Body::Nested { ty, .. } => Some(ty),
         Body::Repeat { body, .. } => nested_ty(body),
         Body::Packed(_) => None,
+    }
+}
+
+/// The `ENCODE_FALLIBLE` of each layout and codec a body holds. A `truncate` layout keeps a
+/// codec's low bits, so only its nested layouts count.
+fn held_encodes(body: &Body, truncate: bool, root: &Root, via: &mut Vec<TokenStream>) {
+    match body {
+        Body::Nested { ty, .. } => via.push(quote!(<#ty as #root::Layout>::ENCODE_FALLIBLE)),
+        Body::Packed(Packed { ty, reading: Reading::Codec, .. }) if !truncate => {
+            via.push(quote!(<#ty as #root::FieldCodec>::ENCODE_FALLIBLE));
+        }
+        Body::Repeat { body, .. } => held_encodes(body, truncate, root, via),
+        Body::Packed(_) => {}
     }
 }
 

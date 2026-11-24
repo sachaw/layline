@@ -6,7 +6,16 @@ use quote::{format_ident, quote};
 use layline_codegen::Root;
 
 use super::access::{Place, Writing};
-use super::{Plan, body_ty};
+use super::{Body, Plan, body_ty};
+
+/// The nested layout a body holds, alone or in an array.
+fn nested_leaf(body: &Body) -> Option<&syn::Type> {
+    match body {
+        Body::Nested { ty, .. } => Some(ty),
+        Body::Repeat { body, .. } => nested_leaf(body),
+        Body::Packed(_) => None,
+    }
+}
 
 impl Plan<'_> {
     pub(super) fn view_type(&self) -> TokenStream {
@@ -23,6 +32,28 @@ impl Plan<'_> {
             let write = self.write(&item.body, item.phys_bit, &writing, &quote!(value));
             let get_doc = format!("Read `{name}`.");
             let set_doc = format!("Write `{name}` in place.");
+            // A nested layout writes through its own encode, so the setter refuses what it does.
+            let (ret, write) = match nested_leaf(&item.body) {
+                None => (quote!(), write),
+                Some(child) => {
+                    let root = self.root;
+                    let fallible = quote!(<#child as #root::Layout>::ENCODE_FALLIBLE);
+                    let (_, ret) =
+                        layline_codegen::__derive::signatures(&fallible, &quote!(()), root);
+                    (
+                        quote!(-> #ret),
+                        quote! {
+                            let mut __set = || -> ::core::result::Result<(), #root::EncodeError> {
+                                #write
+                                ::core::result::Result::Ok(())
+                            };
+                            <#root::__private::Fallibility<{ #fallible }> as #root::__private::Encodes<()>>::finish(
+                                __set(),
+                            )
+                        },
+                    )
+                }
+            };
             quote! {
                 #[doc = #get_doc]
                 #[inline]
@@ -32,7 +63,7 @@ impl Plan<'_> {
                 }
                 #[doc = #set_doc]
                 #[inline]
-                pub fn #setter(&mut self, value: #ty) {
+                pub fn #setter(&mut self, value: #ty) #ret {
                     #write
                 }
             }
@@ -40,9 +71,10 @@ impl Plan<'_> {
 
         let names: Vec<&syn::Ident> = self.items.iter().map(|item| &item.ident).collect();
         let checks = self.view_checks(&place);
+        let refuses = self.encode_fallible().is_some();
         view_shell(
             &self.vis,
-            owned,
+            (owned, refuses),
             &view,
             self.wire_bytes,
             &names,
@@ -166,7 +198,7 @@ impl Plan<'_> {
 
 fn view_shell(
     vis: &syn::Visibility,
-    owned: &syn::Ident,
+    (owned, refuses): (&syn::Ident, bool),
     view: &syn::Ident,
     wire_bytes: usize,
     field_names: &[&syn::Ident],
@@ -174,6 +206,29 @@ fn view_shell(
     root: &Root,
 ) -> TokenStream {
     let view_str = view.to_string();
+    // A view holds encoded bytes, so it comes from an owned record its encode refuses only by
+    // `TryFrom`.
+    let from_owned = if refuses {
+        quote! {
+            #[automatically_derived]
+            impl ::core::convert::TryFrom<&#owned> for #view {
+                type Error = #root::EncodeError;
+
+                fn try_from(owned: &#owned) -> ::core::result::Result<Self, Self::Error> {
+                    ::core::result::Result::Ok(Self(owned.__layline_encode()?))
+                }
+            }
+        }
+    } else {
+        quote! {
+            #[automatically_derived]
+            impl ::core::convert::From<&#owned> for #view {
+                fn from(owned: &#owned) -> Self {
+                    Self(owned.encode())
+                }
+            }
+        }
+    };
     let debug_fields = field_names.iter().map(|name| {
         let name_str = name.to_string();
         quote! { .field(#name_str, &self.#name()) }
@@ -263,12 +318,7 @@ fn view_shell(
             }
         }
 
-        #[automatically_derived]
-        impl ::core::convert::From<&#owned> for #view {
-            fn from(owned: &#owned) -> Self {
-                Self(owned.encode())
-            }
-        }
+        #from_owned
 
         #[automatically_derived]
         impl ::core::fmt::Debug for #view {

@@ -262,6 +262,8 @@ fn lower_choice(
     let too_deep = too_deep(root);
     let parse_order = super::fixed_order(c.endian, &decode_arms, root);
     let bytes_order = super::fixed_order(c.endian, &encode_arms, root);
+    let fallible = super::refuse::refusal(super::refuse::refuses_itself(&encode_arms), &item.via);
+    let inherent = super::inherent_encodes(&fallible, &quote!(#root::Choice), None, root);
     let codec = quote! {
         impl #root::Choice for #name {
             const NAME: &'static #str_ty = #owner;
@@ -274,6 +276,8 @@ fn lower_choice(
             #covered
 
             const OPEN_ENDED: #bool = #open_ended;
+
+            const ENCODE_FALLIBLE: #bool = #fallible;
 
             fn decode_with_nested(
                 discriminant: #i64,
@@ -299,7 +303,7 @@ fn lower_choice(
             fn encode_into<__B: #root::Buffer>(
                 &self,
                 out: &mut __B,
-            ) -> #result<(), #root::Overflow> {
+            ) -> #result<(), #root::EncodeError> {
                 #bytes_order
                 match self {
                     #encode_arms
@@ -307,6 +311,11 @@ fn lower_choice(
                 }
                 #ok(())
             }
+        }
+
+        #[automatically_derived]
+        impl #name {
+            #inherent
         }
     };
 

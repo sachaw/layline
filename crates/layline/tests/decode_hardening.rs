@@ -65,7 +65,7 @@ struct Sought {
 #[test]
 fn a_checksum_from_a_sought_record_covers_the_bytes_encode_covered() {
     let m = Sought { off: 0, entry: Entry { value: 0x1234 }, lrc: 0 };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, [1, 0x34, 0x12, 0x34 ^ 0x12]);
     let (back, used) = Sought::decode(&wire).expect("reads back");
     assert_eq!((back.entry, back.lrc, used), (Entry { value: 0x1234 }, 0x26, 4));
@@ -125,7 +125,7 @@ fn a_measured_record_round_trips_with_the_size_encode_stamped() {
         a: Some(Block { n: 2, body: vec![3, 4] }),
         b: Some(Weightless { data: vec![5] }),
     };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, [4, 3, 7, 1, 2, 3, 4, 5]);
     assert_eq!(Directory::decode(&wire).expect("reads back").0.b, m.b);
 }
@@ -186,7 +186,7 @@ struct Empties {
 fn a_counted_run_of_empty_messages_reads_back() {
     let m =
         Empties { k: 0, stride: 0, items: vec![Sized0 { data: vec![] }, Sized0 { data: vec![] }] };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, [2, 0]);
     let (back, used) = Empties::decode(&wire).expect("reads back");
     assert_eq!((back.items, used), (m.items, 2));

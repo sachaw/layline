@@ -45,6 +45,7 @@ impl Walk<'_> {
         let cty: syn::Path = syn::parse_str(choice).map_err(|_| {
             Error::Refused(format!("{owner}: switch type `{choice}` is not a valid type path"))
         })?;
+        item.via.push(quote!(<#cty as #root::Choice>::ENCODE_FALLIBLE));
         let d = doc_attr(doc);
         self.public_fields.extend(quote! { #d pub #ident: #cty, });
         self.binds.push(Bind { name: ident.clone(), ty: quote!(#cty), value: quote!(#ident) });
@@ -104,31 +105,17 @@ impl Walk<'_> {
         let held = own.get(field);
         let filled = match window {
             Some(Len::Bytes(n)) => {
-                let lit = Literal::usize_unsuffixed(*n);
-                let msg =
-                    format!("union `{field}` is {n} bytes and its arm did not fill it exactly");
-                quote! { ::core::assert!(out.len() - __chosen == #lit, #msg); }
+                let lit = Literal::i64_unsuffixed(*n as i64);
+                quote! { #root::EncodeError::agree(#field, (out.len() - __chosen) as #i64, #lit)?; }
             }
             _ => quote!(),
         };
-        let (stated, msg) = match on {
+        let stated = match on {
             Discriminant::Field(f) => {
                 let n = self.held(f, own);
-                (
-                    quote!(#root::WireInt::to_i64(&#n)),
-                    format!(
-                        "field `{f}`: switch `{field}` holds the open arm, but the catalogue defines an arm \
-                         for this value of `{f}`. Decode would read that arm instead"
-                    ),
-                )
+                quote!(#root::WireInt::to_i64(&#n))
             }
-            Discriminant::BodyLength => (
-                quote!((out.len() - __chosen) as #i64),
-                format!(
-                    "field `{field}`: the open arm's byte length selects a defined arm. \
-                     Decode would read that arm instead"
-                ),
-            ),
+            Discriminant::BodyLength => quote!((out.len() - __chosen) as #i64),
         };
         // A parameter the holder writes: the arm and its window must agree with it.
         let mut agree = TokenStream::new();
@@ -136,38 +123,31 @@ impl Walk<'_> {
             && self.is_param(f)
         {
             let n = self.held(f, own);
-            let msg = format!(
-                "field `{field}`: the arm's discriminant is not parameter `{f}`, which the holder \
-                 writes. Decode would read the arm `{f}` selects"
-            );
             agree.extend(quote! {
                 if let ::core::option::Option::Some(__d) = #root::Choice::discriminant(&#held) {
-                    ::core::assert!(__d == #root::WireInt::to_i64(&#n), #msg);
+                    #root::EncodeError::agree(#field, __d, #root::WireInt::to_i64(&#n))?;
                 }
             });
         }
         if let Some(Len::Field { by, .. }) = window
             && let Some(stated) = self.param_number(by)
         {
-            let msg = format!(
-                "field `{field}`: the arm's byte length is not what parameter `{}` states. \
-                 Decode would read a different window",
-                by.field
-            );
             agree.extend(quote! {
-                ::core::assert!((out.len() - __chosen) as #i64 == #stated, #msg);
+                #root::EncodeError::agree(#field, (out.len() - __chosen) as #i64, #stated)?;
             });
         }
+        let err = self.root.prelude().err;
         self.byte_steps.extend(quote! {
             let __chosen = out.len();
             #root::Choice::encode_into(&#held, out)?;
             #filled
             #agree
-            ::core::assert!(
-                #root::Choice::discriminant(&#held).is_some()
-                    || !<#cty as #root::Choice>::defines(#stated),
-                #msg
-            );
+            if #root::Choice::discriminant(&#held).is_none() {
+                let __stated = #stated;
+                if <#cty as #root::Choice>::defines(__stated) {
+                    return #err(#root::EncodeError::Claimed { field: #field, value: __stated });
+                }
+            }
         });
 
         match window {

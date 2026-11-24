@@ -6,7 +6,7 @@ use quote::quote;
 use super::body::{Bind, Item, Own, Walk};
 use super::cursor::{consumed_nothing, take};
 use super::env::Env;
-use super::patch::{Target, derived_value, fits, too_narrow};
+use super::patch::{Target, derived_value, fits};
 use super::table::{Row, deferred_type, span_of_kind};
 use super::text::{text_decode, text_unpad, text_write};
 use crate::root::Prelude;
@@ -165,12 +165,13 @@ fn value_write_derived(
     };
     let p = path(ty);
     let n = derived_value(d, own, field, root);
-    let fits = fits(Target::Field(&quote!(#p), 0), &n, &too_narrow(field, d.what()), root);
+    let fits = fits(Target::Field(&quote!(#p), 0), &n, field, root);
     Ok(quote! {
         {
             #fits
             let __derived = <#p as #root::WireInt>::from_i64(#n);
-            #root::VarCodec::encode(&__derived, out)?;
+            <#p as #root::VarCodec>::encode(&__derived, out)
+                .map_err(|__e| __e.named(#field))?;
         }
     })
 }
@@ -185,9 +186,13 @@ pub(super) fn value_write(
     root: &Root,
 ) -> Result<TokenStream, Error> {
     match kind {
-        Kind::Var { .. } => Ok(quote! {
-            #root::VarCodec::encode(#by_ref, out)?;
-        }),
+        Kind::Var { ty } => {
+            let p = path(ty);
+            Ok(quote! {
+                <#p as #root::VarCodec>::encode(#by_ref, out)
+                    .map_err(|__e| __e.named(#field))?;
+            })
+        }
         Kind::Msg { ty, .. } => {
             // `&Box<T>` coerces to `&T`.
             let p = path(ty);
@@ -255,6 +260,7 @@ impl Walk<'_> {
         };
         let ident = ident(field);
         let ty = kind_ty(kind, self.root);
+        item.via.extend(super::refuse::held_refusal(kind, self.owner, false, self.root));
         let d = doc_attr(doc);
         self.public_fields.extend(quote! { #d pub #ident: #ty, });
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });
@@ -283,18 +289,15 @@ impl Walk<'_> {
         let write = match kind {
             Kind::Text { len: Len::Field { by, .. }, .. } => match self.param_number(by) {
                 Some(stated) => {
-                    let msg = format!(
-                        "field `{field}`: the text's byte length is not what parameter `{}` \
-                         states. Decode would read a different string",
-                        by.field
-                    );
+                    let root = self.root;
                     quote! {
                         let __text_start = out.len();
                         #write
-                        ::core::assert!(
-                            (out.len() - __text_start) as ::core::primitive::i64 == #stated,
-                            #msg
-                        );
+                        #root::EncodeError::agree(
+                            #field,
+                            (out.len() - __text_start) as ::core::primitive::i64,
+                            #stated,
+                        )?;
                     }
                 }
                 None => write,

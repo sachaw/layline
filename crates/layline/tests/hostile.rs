@@ -30,7 +30,7 @@ fn survives<T: Message<Ctx = ()> + PartialEq + core::fmt::Debug>(seed: u64) -> u
         decoded += 1;
         assert!(used <= wire.len(), "wire {i}: consumed {used} of {}", wire.len());
 
-        let out = value.encode();
+        let out = value.encode().unwrap();
         let mut room = vec![0u8; out.len()];
         let mut fixed = Fixed::new(&mut room);
         assert_eq!(value.encode_into(&mut fixed), Ok(()), "wire {i}: the exact length overflowed");
@@ -39,7 +39,7 @@ fn survives<T: Message<Ctx = ()> + PartialEq + core::fmt::Debug>(seed: u64) -> u
             let mut room = vec![0u8; out.len() - 1];
             assert_eq!(
                 value.encode_into(&mut Fixed::new(&mut room)),
-                Err(Overflow),
+                Err(Overflow.into()),
                 "wire {i}: one byte short and the encode returned"
             );
         }
@@ -203,7 +203,7 @@ fn a_checksum_over_an_earlier_field() {
 
 #[test]
 fn a_flipped_byte_under_a_checksum_is_refused() {
-    let good = Checked { len: 3, body: vec![1, 2, 3], crc: 0 }.encode();
+    let good = Checked { len: 3, body: vec![1, 2, 3], crc: 0 }.encode().unwrap();
     assert_eq!(Checked::decode(&good).expect("encode writes the check value").1, good.len());
     for i in 0..good.len() {
         let mut bad = good.clone();

@@ -1,5 +1,5 @@
 //! MSB-first variable-length quantities.
-use crate::{Buffer, Overflow, ParseError, VarCodec, WireInt};
+use crate::{Buffer, EncodeError, ParseError, VarCodec, WireInt};
 
 /// An unsigned variable-length quantity of at most `N` bytes, as in MIDI files and JEL.
 ///
@@ -23,11 +23,13 @@ use crate::{Buffer, Overflow, ParseError, VarCodec, WireInt};
 ///
 /// // A fifth byte is past the cap.
 /// assert!(Vlq::<4>::decode(&[0x81, 0x80, 0x80, 0x80, 0x00]).is_err());
+///
+/// // A value above `MAX` would need a fifth byte, so encode refuses it.
+/// assert!(Vlq::<4>(1 << 28).encode(&mut out).is_err());
 /// ```
 ///
-/// # Panics
-///
-/// Encode panics on a value above [`MAX`](Self::MAX), rather than write bytes that decode refuses.
+/// Encode refuses a value above [`MAX`](Self::MAX) as [`Unfit`](EncodeError::Unfit), rather
+/// than write bytes that decode refuses.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Vlq<const N: usize>(pub u64);
 
@@ -54,6 +56,8 @@ impl<const N: usize> From<Vlq<N>> for u64 {
 }
 
 impl<const N: usize> VarCodec for Vlq<N> {
+    const ENCODE_FALLIBLE: bool = true;
+
     fn decode(bytes: &[u8]) -> Result<(Self, usize), ParseError> {
         let cap = Self::BYTES;
         let mut value = 0u64;
@@ -69,13 +73,14 @@ impl<const N: usize> VarCodec for Vlq<N> {
         Err(ParseError::Short { need_bytes: bytes.len() + 1, got_bytes: bytes.len(), at: 0 })
     }
 
-    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), Overflow> {
-        assert!(
-            self.0 <= Self::MAX,
-            "Vlq<{N}>: {} needs more than {N} bytes. The largest is {}",
-            self.0,
-            Self::MAX,
-        );
+    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), EncodeError> {
+        if self.0 > Self::MAX {
+            return Err(EncodeError::Unfit {
+                field: "Vlq",
+                value: i128::from(self.0),
+                bits: 7 * Self::BYTES as u32,
+            });
+        }
         let mut bytes = [0u8; 9];
         let mut first = bytes.len();
         let mut rest = self.0;
@@ -85,7 +90,7 @@ impl<const N: usize> VarCodec for Vlq<N> {
             bytes[first] = (rest & 0x7F) as u8 | more;
             rest >>= 7;
             if rest == 0 {
-                return out.push(&bytes[first..]);
+                return Ok(out.push(&bytes[first..])?);
             }
         }
     }
@@ -104,7 +109,7 @@ impl<const N: usize> WireInt for Vlq<N> {
 #[cfg(test)]
 mod tests {
     use super::Vlq;
-    use crate::{Fixed, ParseError, VarCodec};
+    use crate::{Buffer, EncodeError, Fixed, ParseError, VarCodec};
 
     fn wire<const N: usize>(v: u64) -> ([u8; 9], usize) {
         let mut room = [0u8; 9];
@@ -173,8 +178,24 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Vlq<4>: 268435456 needs more than 4 bytes")]
-    fn encode_refuses_a_value_past_the_cap() {
-        let _ = wire::<4>(1 << 28);
+    fn encode_refuses_a_value_past_the_cap_and_writes_nothing() {
+        let mut room = [0u8; 9];
+        let mut out = Fixed::new(&mut room);
+        assert_eq!(
+            Vlq::<4>(1 << 28).encode(&mut out),
+            Err(EncodeError::Unfit { field: "Vlq", value: 1 << 28, bits: 28 })
+        );
+        assert_eq!(out.written(), &[]);
+        assert_eq!(
+            Vlq::<1>(u64::MAX).encode(&mut out),
+            Err(EncodeError::Unfit { field: "Vlq", value: i128::from(u64::MAX), bits: 7 })
+        );
+    }
+
+    #[test]
+    fn a_full_buffer_is_an_overflow() {
+        let mut room = [0u8; 1];
+        let mut out = Fixed::new(&mut room);
+        assert_eq!(Vlq::<4>(128).encode(&mut out), Err(EncodeError::Overflow));
     }
 }

@@ -280,9 +280,43 @@ fn newtype(
         )
     } else if inner == 64 {
         // No cast, to avoid `clippy::unnecessary_cast` in user code.
-        (quote!(Self(#masked)), quote!(self.0))
+        (quote!(Self(#masked)), width.mask(quote!(self.0)))
     } else {
-        (quote!(Self((#masked) as #ty)), quote!(self.0 as ::core::primitive::u64))
+        (quote!(Self((#masked) as #ty)), width.mask(quote!((self.0 as ::core::primitive::u64))))
+    };
+
+    // A value wider than `bits` would not decode back, so encode refuses it.
+    let (refuses, try_raw) = if bits < inner {
+        let name = ident.to_string();
+        let fits = if signed {
+            let (lo, hi) = (-(1i64 << (bits - 1)), (1i64 << (bits - 1)) - 1);
+            let (lo, hi) =
+                (proc_macro2::Literal::i64_suffixed(lo), proc_macro2::Literal::i64_suffixed(hi));
+            quote!((#lo..=#hi).contains(&(self.0 as ::core::primitive::i64)))
+        } else {
+            quote!((self.0 as ::core::primitive::u64) >> #bits == 0)
+        };
+        (
+            quote!(
+                const ENCODE_FALLIBLE: ::core::primitive::bool = true;
+            ),
+            quote! {
+                #[inline]
+                fn try_raw(&self) -> ::core::result::Result<::core::primitive::u64, #root::EncodeError> {
+                    if #fits {
+                        ::core::result::Result::Ok(<Self as #root::FieldCodec>::to_raw(self))
+                    } else {
+                        ::core::result::Result::Err(#root::EncodeError::Unfit {
+                            field: #name,
+                            value: self.0 as ::core::primitive::i128,
+                            bits: #bits,
+                        })
+                    }
+                }
+            },
+        )
+    } else {
+        (quote!(), quote!())
     };
 
     let wire_int = wire_int_impl(ident, root);
@@ -290,6 +324,8 @@ fn newtype(
         #[automatically_derived]
         impl #root::FieldCodec for #ident {
             const BITS: ::core::primitive::u32 = #bits;
+
+            #refuses
 
             #[inline]
             fn from_raw(raw: ::core::primitive::u64) -> Self {
@@ -300,6 +336,8 @@ fn newtype(
             fn to_raw(&self) -> ::core::primitive::u64 {
                 #unwrap
             }
+
+            #try_raw
         }
 
         #wire_int
@@ -605,8 +643,39 @@ fn expand_enum(
         } else {
             quote!(*raw as ::core::primitive::u64)
         };
+        let carried = if open.collection > bits { width.mask(quote!((#carried))) } else { carried };
         quote!(Self::#id(raw) => #carried,)
     });
+
+    // An `#[other]` value wider than `bits` would not decode back, so encode refuses it.
+    let (refuses, try_raw) = match &open {
+        Some(open) if open.collection > bits => {
+            let (id, name) = (open.ident, ident.to_string());
+            (
+                quote!(
+                    const ENCODE_FALLIBLE: ::core::primitive::bool = true;
+                ),
+                quote! {
+                    #[inline]
+                    fn try_raw(
+                        &self,
+                    ) -> ::core::result::Result<::core::primitive::u64, #root::EncodeError> {
+                        match self {
+                            Self::#id(raw) if (*raw as ::core::primitive::u64) >> #bits != 0 => {
+                                ::core::result::Result::Err(#root::EncodeError::Unfit {
+                                    field: #name,
+                                    value: *raw as ::core::primitive::i128,
+                                    bits: #bits,
+                                })
+                            }
+                            _ => ::core::result::Result::Ok(<Self as #root::FieldCodec>::to_raw(self)),
+                        }
+                    }
+                },
+            )
+        }
+        _ => (quote!(), quote!()),
+    };
 
     let raw = width.mask(quote!(raw));
     let wire_int = wire_int_impl(ident, root);
@@ -615,6 +684,8 @@ fn expand_enum(
         #[automatically_derived]
         impl #root::FieldCodec for #ident {
             const BITS: ::core::primitive::u32 = #bits;
+
+            #refuses
 
             #[inline]
             fn from_raw(raw: ::core::primitive::u64) -> Self {
@@ -631,6 +702,8 @@ fn expand_enum(
                     #encode_tail
                 }
             }
+
+            #try_raw
         }
 
         #wire_int

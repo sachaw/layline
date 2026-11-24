@@ -293,7 +293,7 @@ fn a_refused_element_names_what_a_refused_field_names() {
     one[0] = b'X';
     let from_value = OneRecord::decode(&one).expect_err("the magic is wrong");
 
-    let mut many = ManyRecords { n: 0, items: vec![good.clone(), good] }.encode();
+    let mut many = ManyRecords { n: 0, items: vec![good.clone(), good] }.encode().unwrap();
     many[9] = b'X';
     let from_element = ManyRecords::decode(&many).expect_err("the magic is wrong");
 
@@ -343,7 +343,7 @@ fn a_message_states_the_constant_its_format_fixes() {
     }
 
     let good = Packet { tag: *b"SEAL", n: 2, items: vec![7, 9] };
-    let wire = good.encode();
+    let wire = good.encode().unwrap();
     assert_eq!(Packet::decode(&wire).expect("round trip"), (good, wire.len()));
 
     let mut bad = wire.clone();

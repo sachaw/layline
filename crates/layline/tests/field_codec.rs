@@ -175,12 +175,12 @@ fn derived_codecs_carry_their_fields_through_a_layout() {
         urgent: true,
         spare_21: 0b101,
     };
-    assert_eq!(Contact::decode(&c.encode()), c);
+    assert_eq!(Contact::decode(&c.encode().unwrap()), c);
 
     for hi in 0..=0xFFu8 {
         for lo in [0x00u8, 0x5A, 0xA5, 0xFF] {
             let wire = [lo, hi, lo ^ hi];
-            assert_eq!(Contact::decode(&wire).encode(), wire, "{wire:02X?}");
+            assert_eq!(Contact::decode(&wire).encode().unwrap(), wire, "{wire:02X?}");
         }
     }
 
@@ -257,7 +257,7 @@ fn a_catalogue_can_be_a_discriminant() {
     assert_eq!(used, 3);
     assert_eq!(got.kind, Kind::Data);
     assert_eq!(got.body, Body::Data(Payload { word: 0xBEEF }));
-    assert_eq!(got.encode(), wire);
+    assert_eq!(got.encode().unwrap(), wire);
 }
 
 #[test]
@@ -266,13 +266,13 @@ fn an_unlisted_discriminant_reaches_the_unknown_arm() {
     let (got, _) = Framed::decode(&wire).expect("parses");
     assert_eq!(got.kind, Kind::Other(7));
     assert_eq!(got.body, Body::Unknown(vec![0xAA]));
-    assert_eq!(got.encode(), wire);
+    assert_eq!(got.encode().unwrap(), wire);
 }
 
 #[test]
 fn the_discriminant_is_written_from_the_arm_held_not_from_the_field() {
     let wrong = Framed { kind: Kind::Ping, body: Body::Data(Payload { word: 1 }) };
-    assert_eq!(wrong.encode()[0], 1);
+    assert_eq!(wrong.encode().unwrap()[0], 1);
 }
 
 #[test]
@@ -282,12 +282,12 @@ fn a_catalogue_can_be_a_count() {
     assert_eq!(used, 5);
     assert_eq!(got.how_many, Count(2));
     assert_eq!(got.items, vec![Payload { word: 1 }, Payload { word: 2 }]);
-    assert_eq!(got.encode(), wire);
+    assert_eq!(got.encode().unwrap(), wire);
 
     let mut m = Counted { how_many: Count(9), items: vec![Payload { word: 7 }] };
-    assert_eq!(m.encode()[0], 1);
+    assert_eq!(m.encode().unwrap()[0], 1);
     m.items.clear();
-    assert_eq!(m.encode()[0], 0);
+    assert_eq!(m.encode().unwrap()[0], 0);
 }
 
 #[derive(FieldCodec, Debug, Clone, Copy, PartialEq, Eq)]
@@ -322,7 +322,7 @@ fn a_narrow_signed_codec_extends_from_its_declared_width() {
 fn a_signed_codec_sits_in_a_bit_container() {
     for raw in [0i16, 1, -1, i16::MAX, i16::MIN, -1234, 4095] {
         let there = Reading { millivolts: Millivolt(raw), trim: Trim(-5), spare: 0 };
-        assert_eq!(Reading::decode(&there.encode()), there, "{raw}");
+        assert_eq!(Reading::decode(&there.encode().unwrap()), there, "{raw}");
     }
 }
 
@@ -353,14 +353,14 @@ fn an_arm_can_carry_nothing() {
     assert_eq!(used, 4);
     assert_eq!(got.train, Train::Simple(Payload { word: 0x1234 }));
     assert_eq!(got.tail, 0x99);
-    assert_eq!(got.encode(), with);
+    assert_eq!(got.encode().unwrap(), with);
 
     let without = [0x01, 0x99];
     let (got, used) = Pulse::decode(&without).expect("parses");
     assert_eq!(used, 2);
     assert_eq!(got.train, Train::None);
     assert_eq!(got.tail, 0x99);
-    assert_eq!(got.encode(), without);
+    assert_eq!(got.encode().unwrap(), without);
 }
 
 /// Rust numbers these 0, 1, 5, 6: the first variant is zero and each implicit one follows the

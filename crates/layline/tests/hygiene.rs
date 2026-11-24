@@ -241,7 +241,7 @@ mod shadowed {
             nested: alloc::boxed::Box::new(Item { n: 1, v: alloc::vec![-1] }),
             tail: Tail { kind: 5, v: alloc::vec![256, -2] },
         };
-        let bytes = m.encode();
+        let bytes = m.encode().unwrap();
         let (back, used) = Body::decode(&bytes).unwrap();
         assert_eq!(used, bytes.len());
         assert_eq!(back.head.n, 3);
@@ -254,7 +254,7 @@ mod shadowed {
         assert_eq!(back.arm, m.arm);
         assert_eq!(back.nested, m.nested);
         assert_eq!(back.tail, m.tail);
-        assert_eq!(back.encode(), bytes);
+        assert_eq!(back.encode().unwrap(), bytes);
 
         let (r, used) = Rest::decode(&[1, 2, 3, 4, 5]).unwrap();
         assert_eq!((r.rest, used), (alloc::vec![2, 3, 4, 5], 5));
@@ -265,8 +265,11 @@ mod shadowed {
         assert_eq!(frame.encode_into(&mut out), ::core::result::Result::Ok(()));
         let wire = out.into_written();
         assert_eq!(<Frame as layline::Dispatch>::decode(wire[0] & 0b111, wire), frame);
-        assert_eq!(Packed::decode(&Packed { a: -1, b: 100 }.encode()), Packed { a: -1, b: 100 });
-        assert_eq!(Word::decode(&Word { lo: 7, hi: -9 }.encode()), Word { lo: 7, hi: -9 });
+        assert_eq!(
+            Packed::decode(&Packed { a: -1, b: 100 }.encode().unwrap()),
+            Packed { a: -1, b: 100 }
+        );
+        assert_eq!(Word::decode(&Word { lo: 7, hi: -9 }.encode().unwrap()), Word { lo: 7, hi: -9 });
     }
 }
 
@@ -334,11 +337,11 @@ mod types {
     #[test]
     fn a_checksum_and_a_codec_expand_under_the_shadows() {
         let m = Checked { magic: 0xABCD, len: 0, payload: alloc::vec![1, 2, 3], crc: 0, lrc: 0 };
-        let bytes = m.encode();
+        let bytes = m.encode().unwrap();
         let (back, used) = Checked::decode(&bytes).unwrap();
         assert_eq!(used, bytes.len());
         assert_eq!(back.payload, m.payload);
-        assert_eq!(back.encode(), bytes);
+        assert_eq!(back.encode().unwrap(), bytes);
         assert_eq!(<Track as layline::FieldCodec>::to_raw(&Track(0x7FFF)), 0x7FFF);
         assert_eq!(<Quadrant as layline::FieldCodec>::from_raw(2), Quadrant::S);
     }
@@ -359,5 +362,5 @@ fn a_field_may_be_named_body() {
     let wire = vec![2, 0xAA, 0xBB, 2, 0x22, 0x11, 0x44, 0x33];
     let frame = Frame { n: 2, body: vec![0xAA, 0xBB], m: 2, tags: vec![0x1122, 0x3344] };
     assert_eq!(Frame::decode(&wire), Ok((frame.clone(), wire.len())));
-    assert_eq!(frame.encode(), wire);
+    assert_eq!(frame.encode().unwrap(), wire);
 }

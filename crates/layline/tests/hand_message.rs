@@ -3,7 +3,7 @@
 #![cfg(feature = "derive")]
 
 use layline::table::{By, SegmentDef, Span, Start};
-use layline::{Buffer, Choice, Message, Overflow, ParseError};
+use layline::{Buffer, Choice, EncodeError, Message, ParseError};
 
 #[derive(Debug, Clone, PartialEq)]
 struct Blob(Vec<u8>);
@@ -36,9 +36,16 @@ impl Message for Blob {
         Ok((Blob(data.to_vec()), 1 + n))
     }
 
-    fn encode_into_with<B: Buffer>(&self, out: &mut B, _ctx: ()) -> Result<(), Overflow> {
-        out.push(&[u8::try_from(self.0.len()).expect("a blob is at most 255 bytes")])?;
-        out.push(&self.0)
+    const ENCODE_FALLIBLE: bool = true;
+
+    fn encode_into_with<B: Buffer>(&self, out: &mut B, _ctx: ()) -> Result<(), EncodeError> {
+        let n = u8::try_from(self.0.len()).map_err(|_| EncodeError::Unfit {
+            field: "Blob",
+            value: self.0.len() as i128,
+            bits: 8,
+        })?;
+        out.push(&[n])?;
+        Ok(out.push(&self.0)?)
     }
 }
 
@@ -75,7 +82,7 @@ fn a_hand_written_message_nests_switches_and_fills() {
         body: Body::Blob(blob(b"xyz")),
         rest: vec![blob(b""), blob(b"q")],
     };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![1, 2, b'a', b'b', 3, b'x', b'y', b'z', 0, 1, b'q']);
 
     let (back, used) = Packet::decode(&wire).expect("decodes");
@@ -83,7 +90,7 @@ fn a_hand_written_message_nests_switches_and_fills() {
     assert_eq!(back, m);
 
     let m = Packet { kind: 0, first: blob(b""), body: Body::Byte(7), rest: vec![] };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![2, 0, 7]);
     assert_eq!(Packet::decode(&wire).expect("decodes").0, Packet { kind: 2, ..m });
 }

@@ -31,48 +31,46 @@ pub(super) fn derived_value(d: &Derived, own: Own, field: &str, root: &Root) -> 
     match d {
         Derived::Count { of, scale, offset, cap } => {
             let coll = own.get(of);
-            affine_inverse(quote!(#coll.len()), (*scale, *offset), *cap, (field, d.what()), root)
+            let cap = cap.map(|cap| (cap, of.as_str()));
+            affine_inverse(quote!(#coll.len()), (*scale, *offset), cap, field, root)
         }
         Derived::Squared { of, scale, offset, cap } => {
             let coll = own.get(of);
             let capped = cap.map(|cap| {
                 let lit = Literal::usize_unsuffixed(cap);
-                let msg = format!(
-                    "field `{field}`: the square collection's length passes its cap of {cap}"
-                );
-                quote! { ::core::assert!(__len <= #lit, #msg); }
+                quote! { #root::EncodeError::cap(#of, __len, #lit)?; }
             });
+            let Prelude { i64, err, .. } = root.prelude();
             let order = quote! {
                 {
                     let __len = #coll.len();
                     #capped
                     let __side = __len.isqrt();
-                    ::core::assert!(
-                        __side * __side == __len,
-                        "a square collection needs n * n elements, and \
-                         no whole number squares to its length"
-                    );
+                    if __side * __side != __len {
+                        return #err(#root::EncodeError::Inexact {
+                            field: #field,
+                            value: __len as #i64,
+                        });
+                    }
                     __side
                 }
             };
-            affine_inverse(order, (*scale, *offset), None, (field, d.what()), root)
+            affine_inverse(order, (*scale, *offset), None, field, root)
         }
         Derived::TextLen { of, codec, scale, offset, cap } => {
             let text = own.get(of);
             let n = text_wire_len(codec, quote!(#text.as_str()), root);
-            affine_inverse(n, (*scale, *offset), *cap, (field, d.what()), root)
+            let cap = cap.map(|cap| (cap, of.as_str()));
+            affine_inverse(n, (*scale, *offset), cap, field, root)
         }
         Derived::Offset { .. } | Derived::ByteLen { .. } => reserved(),
-        Derived::Stride { elem, scale, offset } => affine_inverse(
-            element_width(elem, root),
-            (*scale, *offset),
-            None,
-            (field, d.what()),
-            root,
-        ),
+        Derived::Stride { elem, scale, offset } => {
+            affine_inverse(element_width(elem, root), (*scale, *offset), None, field, root)
+        }
         Derived::ArmLen { of, scale, offset, cap } => {
             let arm = arm_ident(of);
-            affine_inverse(quote!(#arm), (*scale, *offset), *cap, (field, d.what()), root)
+            let cap = cap.map(|cap| (cap, of.as_str()));
+            affine_inverse(quote!(#arm), (*scale, *offset), cap, field, root)
         }
         Derived::Discriminant { of, field } => {
             let body = own.get(of);
@@ -147,14 +145,6 @@ impl SlotOf {
             }
         }
     }
-
-    /// The derivation this slot holds, as [`Derived::what`] names it.
-    fn claim(self, record: bool) -> &'static str {
-        match self {
-            SlotOf::Position => Derived::Offset { of: String::new(), record }.what(),
-            SlotOf::Length => Derived::ByteLen { of: String::new(), record }.what(),
-        }
-    }
 }
 
 /// The local holding a windowed switch's encoded length in bytes.
@@ -201,7 +191,7 @@ pub(super) fn stamp_slot(
              {article} {what} field must be a fixed-width integer in a block"
         )));
     };
-    Ok(fill_reserved(owner, slot, field, of.claim(record), value, root))
+    Ok(fill_reserved(owner, slot, field, value, root))
 }
 
 /// The number a reserved field holds until it is stamped: zero, or the nearest end of its
@@ -216,40 +206,31 @@ pub(super) fn placeholder(range: Option<crate::Range>) -> TokenStream {
     quote!(#held)
 }
 
-/// Asserts the stamped number `value` is inside the field's `#[range]`, as the block's encode
-/// asserts every other field's.
-fn in_range(field: &str, r: crate::Range, value: &TokenStream) -> TokenStream {
-    let lo = r.lo.map_or_else(String::new, |lo| lo.to_string());
-    let hi = r.hi.map_or_else(String::new, |hi| format!("={hi}"));
-    let msg = format!("field `{field}`: value is outside `#[range({lo}..{hi})]`");
-    let lo = r.lo.map(Literal::i64_suffixed);
-    let hi = r.hi.map(Literal::i64_suffixed);
-    // `contains` avoids `clippy::manual_range_contains` in user code.
-    let test = match (lo, hi) {
-        (Some(lo), Some(hi)) => quote!((#lo..=#hi).contains(&#value)),
-        (Some(lo), None) => quote!((#lo..).contains(&#value)),
-        (None, Some(hi)) => quote!((..=#hi).contains(&#value)),
-        (None, None) => return quote!(),
-    };
-    quote! { ::core::assert!(#test, #msg); }
+/// Refuses a stamped number `value` outside the field's `#[range]`, as the block's encode refuses
+/// every other field's.
+fn in_range(field: &str, r: crate::Range, value: &TokenStream, root: &Root) -> TokenStream {
+    if r.lo.is_none() && r.hi.is_none() {
+        return quote!();
+    }
+    let lo = Literal::i64_suffixed(r.lo.unwrap_or(i64::MIN));
+    let hi = Literal::i64_suffixed(r.hi.unwrap_or(i64::MAX));
+    quote! { #root::EncodeError::range(#field, #value, #lo, #hi)?; }
 }
 
-/// Overwrite a slot's placeholder with `value`, panicking if the field is too narrow.
+/// Overwrite a slot's placeholder with `value`, refusing a number the field is too narrow for.
 pub(super) fn fill_reserved(
     owner: &str,
     slot: &Slot,
     field: &str,
-    claim: &str,
     value: &TokenStream,
     root: &Root,
 ) -> TokenStream {
     let Slot { mark, width_bytes, write, .. } = slot;
     let width = Literal::usize_unsuffixed(*width_bytes);
-    let narrow = too_narrow(field, claim);
     let fill = match write {
         SlotWrite::Scalar { ty, range } => {
-            let fits = fits(Target::Field(ty, 0), &quote!(__len), &narrow, root);
-            let ranged = range.map(|r| in_range(field, r, &quote!(__len)));
+            let fits = fits(Target::Field(ty, 0), &quote!(__len), field, root);
+            let ranged = range.map(|r| in_range(field, r, &quote!(__len), root));
             quote! {
                 #fits
                 #ranged
@@ -261,21 +242,24 @@ pub(super) fn fill_reserved(
         SlotWrite::Nested { value: held, ty, outer, name } => {
             let (get, get_mut) = nested_accessors(owner, outer, name);
             let into = Target::Nested { get: quote!(#get(&#held)), child: ty, name };
-            let fits = fits(into, &quote!(__len), &narrow, root);
+            let fits = fits(into, &quote!(__len), field, root);
             // Stamp the child the block wrote, not a copy of it: a second stamp into the same
             // child re-encodes it with the first one's number still in place.
             quote! {
                 #fits
                 *#get_mut(&mut #held) = #root::WireInt::from_i64(__len);
-                out.written_mut()[#mark..#mark + #width].copy_from_slice(&#held.encode());
+                <#ty as #root::Layout>::encode_into(
+                    &#held,
+                    &mut #root::Fixed::new(&mut out.written_mut()[#mark..#mark + #width]),
+                )?;
             }
         }
         SlotWrite::Check { sub, field: inner, ty } => {
-            let fits = fits(Target::Field(ty, 0), &quote!(__len), &narrow, root);
+            let fits = fits(Target::Field(ty, 0), &quote!(__len), field, root);
             quote! {
                 #fits
                 let __ck = #sub { #inner: <#ty as #root::WireInt>::from_i64(__len) };
-                out.written_mut()[#mark..#mark + #width].copy_from_slice(&__ck.encode_in::<__O>());
+                out.written_mut()[#mark..#mark + #width].copy_from_slice(&__ck.encode_in::<__O>()?);
             }
         }
     };
@@ -369,35 +353,31 @@ pub(super) fn nested_accessors(owner: &str, outer: &str, inner: &str) -> (Ident,
 
 /// The value of `field` where `field * scale + offset` equals `source`.
 ///
-/// Encode panics where decode could not read it back: no whole solution, or above `cap`.
+/// Encode refuses where decode could not read it back: no whole solution, or above the `cap` the
+/// collection or text named with it declares.
 pub(super) fn affine_inverse(
     source: TokenStream,
     (scale, offset): (u32, i32),
-    cap: Option<usize>,
-    (field, what): (&str, &str),
+    cap: Option<(usize, &str)>,
+    field: &str,
     root: &Root,
 ) -> TokenStream {
-    let Prelude { i64, .. } = root.prelude();
-    let capped = cap.map(|cap| {
+    let Prelude { i64, err, .. } = root.prelude();
+    let capped = cap.map(|(cap, of)| {
         let lit = Literal::usize_unsuffixed(cap);
-        let msg =
-            format!("field `{field}`: the {what} passes its cap of {cap}, and decode refuses it");
-        quote! { ::core::assert!(__source <= #lit, #msg); }
+        quote! { #root::EncodeError::cap(#of, __source, #lit)?; }
     });
     let (s, o) = (i64::from(scale), i64::from(offset));
     let stated = match (scale, offset) {
         (1, 0) => quote!(__source as #i64),
         (1, _) => quote!(__source as #i64 - #o),
-        _ => {
-            let msg = format!(
-                "field `{field}` cannot state the {what} exactly: no whole `{field} * {scale} + {offset}` equals it"
-            );
-            quote! {{
-                let __n = __source as #i64 - #o;
-                ::core::assert!(__n % #s == 0, #msg);
-                __n / #s
-            }}
-        }
+        _ => quote! {{
+            let __n = __source as #i64 - #o;
+            if __n % #s != 0 {
+                return #err(#root::EncodeError::Inexact { field: #field, value: __source as #i64 });
+            }
+            __n / #s
+        }},
     };
     quote! {{
         let __source = #source;
@@ -421,31 +401,22 @@ pub(super) enum Target<'a> {
     },
 }
 
-/// Assert that `value` reads back unchanged from the field.
-pub(super) fn fits(into: Target<'_>, value: &TokenStream, msg: &str, root: &Root) -> TokenStream {
+/// Refuse a `value` that does not read back unchanged from `field`.
+pub(super) fn fits(into: Target<'_>, value: &TokenStream, field: &str, root: &Root) -> TokenStream {
     match into {
         Target::Field(ty, width) => {
             let width = Literal::u32_unsuffixed(width as u32);
             quote! {
-                ::core::assert!(#root::__private::fits_in_field::<#ty>(#value, #width), #msg);
+                #root::EncodeError::fit::<#ty>(#field, #value, #width)?;
             }
         }
         Target::Nested { get, child, name } => quote! {
-            ::core::assert!(
-                #root::WireInt::__fits_in_field(
-                    #get,
-                    #value,
-                    #root::table::field_width(<#child as #root::Layout>::FIELDS, #name),
-                ),
-                #msg
-            );
+            #root::EncodeError::fit_as(
+                #get,
+                #field,
+                #value,
+                #root::table::field_width(<#child as #root::Layout>::FIELDS, #name),
+            )?;
         },
     }
-}
-
-/// The refusal for a derived number its field is too narrow to hold.
-pub(super) fn too_narrow(field: &str, what: &str) -> String {
-    format!(
-        "field `{field}` is too narrow for the {what} the wire derives it from. Widen the field"
-    )
 }

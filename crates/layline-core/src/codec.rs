@@ -7,11 +7,27 @@ pub trait FieldCodec: Sized {
     /// Width in bits, `1..=64`.
     const BITS: u32;
 
+    /// Whether encode can refuse a value, as it can when the type declares something a value
+    /// can violate or holds a type that does. The inherent encode a derive writes returns a
+    /// `Result` exactly then; the trait's methods always do.
+    ///
+    /// Read by a holder, since a derive cannot see a field's type.
+    const ENCODE_FALLIBLE: bool = false;
+
     /// Decode from raw bits.
     fn from_raw(raw: u64) -> Self;
 
-    /// The raw bits.
+    /// The raw bits, keeping only the low [`BITS`](Self::BITS).
     fn to_raw(&self) -> u64;
+
+    /// The raw bits, or why they would not decode back to this value. Encode calls it.
+    ///
+    /// # Errors
+    ///
+    /// [`EncodeError`](crate::EncodeError), for a codec that refuses values.
+    fn try_raw(&self) -> Result<u64, crate::EncodeError> {
+        Ok(self.to_raw())
+    }
 }
 
 impl FieldCodec for bool {

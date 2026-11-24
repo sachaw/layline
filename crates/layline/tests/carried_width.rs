@@ -94,7 +94,7 @@ fn a_signed_carried_width_sign_extends_through_the_wire() {
             trim,
             spare: 0,
         };
-        let wire = msg.encode();
+        let wire = msg.encode().unwrap();
         assert_eq!(Sample::decode(&wire), msg, "round trip at raw {raw}");
         let want = if raw < 32 { raw as i64 } else { raw as i64 - 64 };
         assert_eq!(trim.get(), want, "sign extension at raw {raw}");

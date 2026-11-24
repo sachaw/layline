@@ -22,7 +22,7 @@ pub struct Word {
 #[test]
 fn a_layout_with_raw_names_round_trips_through_its_overlay() {
     let mut word = Word { r#loop: 0x3, r#match: 0xA };
-    assert_eq!(word.encode(), [0xA3]);
+    assert_eq!(word.encode().unwrap(), [0xA3]);
     assert_eq!(Word::decode(&[0xA3]), word);
     assert_eq!(word.r#type(), Nib(3));
     word.set_type(Nib(5));
@@ -55,7 +55,7 @@ mod message {
     fn a_message_with_raw_names_round_trips() {
         let packet =
             Packet { r#type: 2, r#match: Body::r#enum(0x0102), r#in: 3, r#loop: vec![7, 8, 9] };
-        let wire = packet.encode();
+        let wire = packet.encode().unwrap();
         assert_eq!(wire, [2, 0x02, 0x01, 3, 7, 8, 9]);
         assert_eq!(Packet::decode(&wire).expect("decodes"), (packet, wire.len()));
     }

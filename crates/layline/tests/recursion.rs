@@ -79,7 +79,7 @@ fn a_three_deep_constructed_element_round_trips_to_the_octets_ber_prints() {
         0x04, 0x02, 0xDE, 0xAD,
         0x01, 0x01, 0xFF,
     ];
-    assert_eq!(tree.encode(), wire, "the octets X.690 prints");
+    assert_eq!(tree.encode().unwrap(), wire, "the octets X.690 prints");
     assert_eq!(wire.len(), 14);
 
     let (back, used) = Element::decode(&wire).expect("parses");
@@ -110,7 +110,7 @@ fn a_three_deep_constructed_element_round_trips_to_the_octets_ber_prints() {
     let Content::Primitive(bool_) = &outer.children[1].content else { panic!("primitive") };
     assert_eq!(bool_.value, vec![0xFF]);
 
-    assert_eq!(back.encode(), wire);
+    assert_eq!(back.encode().unwrap(), wire);
 }
 
 #[test]
@@ -143,13 +143,13 @@ fn a_lie_at_every_level_does_not_reach_the_wire() {
         0x04, 0x02, 0xDE, 0xAD,
         0x01, 0x01, 0xFF,
     ];
-    assert_eq!(tree.encode(), wire, "all eight derived numbers recomputed");
+    assert_eq!(tree.encode().unwrap(), wire, "all eight derived numbers recomputed");
 }
 
 #[test]
 fn an_empty_constructed_element_is_the_base_case() {
     let empty = ctor(16, vec![]);
-    assert_eq!(empty.encode(), vec![0x30, 0x00]);
+    assert_eq!(empty.encode().unwrap(), vec![0x30, 0x00]);
     let (back, used) = Element::decode(&[0x30, 0x00]).expect("parses");
     assert_eq!(used, 2);
     let Content::Constructed(c) = &back.content else { panic!("constructed") };
@@ -217,7 +217,7 @@ fn a_deep_but_legal_chain_still_parses() {
         here = child;
     }
     assert_eq!(depth, levels);
-    assert_eq!(back.encode(), wire, "encode returns the input bytes");
+    assert_eq!(back.encode().unwrap(), wire, "encode returns the input bytes");
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn a_chain_past_the_bound_is_a_clean_error() {
 fn breadth_is_not_depth() {
     let children: Vec<Element> = (0..80).map(|_| prim(2, &[0x2A])).collect();
     let wide = Constructed { len: 0, children };
-    let bytes = wide.encode();
+    let bytes = wide.encode().unwrap();
     assert_eq!(bytes.len(), 1 + 3 * 80, "one length octet, then eighty elements");
     assert_eq!(bytes[0], 240);
     let (back, _) =
@@ -256,7 +256,7 @@ fn a_message_may_hold_exactly_one_of_itself_behind_a_box() {
             next: Some(Box::new(Link { flags: 0x83, next: None })),
         })),
     };
-    assert_eq!(chain.encode(), vec![0x81, 0x82, 0x03]);
+    assert_eq!(chain.encode().unwrap(), vec![0x81, 0x82, 0x03]);
 
     let (back, used) = Link::decode(&[0x81, 0x82, 0x03]).expect("parses");
     assert_eq!(used, 3);

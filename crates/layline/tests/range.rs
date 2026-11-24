@@ -2,7 +2,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Layout, Message, ParseError};
+use layline::{EncodeError, Layout, Message, ParseError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Layout)]
 #[layout(bytes = 4, endian = be)]
@@ -16,7 +16,7 @@ struct Reading {
 fn a_value_inside_the_range_decodes() {
     let got = Reading::decode(&[0x00, 0xFF, 0xBE, 0xEF]).expect("255 is admitted");
     assert_eq!((got.count, got.value), (255, 0xBEEF));
-    assert_eq!(got.encode(), [0x00, 0xFF, 0xBE, 0xEF]);
+    assert_eq!(got.encode().unwrap(), [0x00, 0xFF, 0xBE, 0xEF]);
 }
 
 #[test]
@@ -44,9 +44,11 @@ fn a_signed_range_is_checked_at_both_ends() {
 }
 
 #[test]
-#[should_panic(expected = "outside `#[range(0..=255)]`")]
 fn encode_refuses_what_decode_would() {
-    let _ = Reading { count: 300, value: 0 }.encode();
+    assert_eq!(
+        Reading { count: 300, value: 0 }.encode(),
+        Err(EncodeError::OutOfRange { field: "count", value: 300, lo: 0, hi: 255 })
+    );
 }
 
 /// The annotated `Result` fails to compile if `decode` becomes infallible.

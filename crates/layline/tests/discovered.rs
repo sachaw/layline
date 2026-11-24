@@ -5,7 +5,7 @@
 #[path = "support/text.rs"]
 mod codecs;
 
-use layline::{Buffer, Message, Overflow, ParseError, VarCodec};
+use layline::{Buffer, EncodeError, Message, ParseError, VarCodec};
 use layline_core::num::{Sleb128, Uleb128, unzigzag, zigzag};
 
 /// Protobuf `sint64`: zigzag over a varint.
@@ -18,7 +18,7 @@ impl VarCodec for Delta {
         Ok((Self(unzigzag(raw.0)), used))
     }
 
-    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), Overflow> {
+    fn encode<B: Buffer>(&self, out: &mut B) -> Result<(), EncodeError> {
         Uleb128(zigzag(self.0)).encode(out)
     }
 }
@@ -86,7 +86,7 @@ struct CappedFill {
 #[test]
 fn a_cap_bounds_a_fill_of_self_delimiting_elements() {
     let three = CappedFill { kind: 1, deltas: vec![Uleb128(1), Uleb128(2), Uleb128(3)] };
-    assert_eq!(CappedFill::decode(&three.encode()).unwrap().0, three);
+    assert_eq!(CappedFill::decode(&three.encode().unwrap()).unwrap().0, three);
 
     // Encode refuses a fourth element, so the hostile wire is written by hand: a kind, then four.
     assert_eq!(
@@ -98,7 +98,7 @@ fn a_cap_bounds_a_fill_of_self_delimiting_elements() {
 #[test]
 fn fill_reads_self_delimiting_elements_until_the_body_runs_out() {
     let m = Filled { kind: 7, deltas: vec![Sleb128(-2), Sleb128(127), Sleb128(0), Sleb128(-129)] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(bytes, vec![
         7,
@@ -116,7 +116,7 @@ fn fill_reads_self_delimiting_elements_until_the_body_runs_out() {
 #[test]
 fn a_counted_repeat_of_varints_back_patches_its_count() {
     let m = Counted { n: 999, values: vec![Uleb128(0), Uleb128(128), Uleb128(12857)] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(bytes, vec![
         3, 0,        //
@@ -142,21 +142,23 @@ struct Terminated {
 #[test]
 fn a_nul_terminated_string_round_trips() {
     let m = Terminated { kind: 1, name: String::from("hello"), checksum: 0xAB };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     assert_eq!(bytes, b"\x01hello\0\xAB".to_vec());
     let (back, used) = Terminated::decode(&bytes).expect("parses");
     assert_eq!(used, bytes.len());
     assert_eq!(back, m);
 
     let empty = Terminated { kind: 0, name: String::new(), checksum: 0 };
-    assert_eq!(empty.encode(), vec![0, 0, 0]);
-    assert_eq!(Terminated::decode(&empty.encode()).unwrap().0, empty);
+    assert_eq!(empty.encode().unwrap(), vec![0, 0, 0]);
+    assert_eq!(Terminated::decode(&empty.encode().unwrap()).unwrap().0, empty);
 }
 
 #[test]
-#[should_panic(expected = "field `name`: the text contains its terminator byte 0x00")]
 fn a_terminator_inside_the_value_is_refused() {
-    let _ = Terminated { kind: 0, name: String::from("ab\0cd"), checksum: 0 }.encode();
+    assert_eq!(
+        Terminated { kind: 0, name: String::from("ab\0cd"), checksum: 0 }.encode(),
+        Err(EncodeError::Delimiter { field: "name", byte: 0 })
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -181,20 +183,24 @@ fn a_nul_padded_fixed_run_round_trips_the_bytes() {
         let (m, used) = FixedRun::decode(&buf).expect("parses");
         assert_eq!(used, 10);
         assert_eq!(m.value, 0x1234);
-        assert_eq!(m.encode(), buf, "the bytes survive the trip: {wire:?}");
+        assert_eq!(m.encode().unwrap(), buf, "the bytes survive the trip: {wire:?}");
     }
 }
 
 #[test]
-#[should_panic(expected = "field `tag`: the text is longer than its 8 bytes")]
 fn a_text_longer_than_its_run_is_refused() {
-    let _ = FixedRun { tag: String::from("ABCDEFGHIJ"), value: 0 }.encode();
+    assert_eq!(
+        FixedRun { tag: String::from("ABCDEFGHIJ"), value: 0 }.encode(),
+        Err(EncodeError::OverCap { field: "tag", len: 10, cap: 8 })
+    );
 }
 
 #[test]
-#[should_panic(expected = "field `tag`: the text ends in a zero byte")]
 fn a_text_ending_in_the_padding_byte_is_refused() {
-    let _ = FixedRun { tag: String::from("AB\0"), value: 0 }.encode();
+    assert_eq!(
+        FixedRun { tag: String::from("AB\0"), value: 0 }.encode(),
+        Err(EncodeError::Delimiter { field: "tag", byte: 0 })
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -208,7 +214,7 @@ struct Prefixed {
 #[test]
 fn a_length_prefix_is_back_patched_from_the_text() {
     let m = Prefixed { len: 999, body: String::from("héllo") };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     assert_eq!(&bytes[..2], &[6, 0], "six *bytes*, five characters");
     assert_eq!(&bytes[2..], "héllo".as_bytes());
 
@@ -228,7 +234,7 @@ fn len_on_a_string_takes_the_affine_form_and_a_cap() {
     }
 
     let r = Record { words: 0, name: "ABCD".into() };
-    let wire = r.encode();
+    let wire = r.encode().unwrap();
     assert_eq!(wire, vec![2, b'A', b'B', b'C', b'D'], "four bytes is two words");
     assert_eq!(Record::decode(&wire).expect("parses").0.name, "ABCD");
 
@@ -258,19 +264,19 @@ struct Ascii {
 fn latin1_maps_every_byte_to_a_code_point() {
     let (m, _) = Latin::decode(&[0xC9, 0x74, 0xE9, 0x00]).expect("parses");
     assert_eq!(m.label, "Été");
-    assert_eq!(m.encode(), vec![0xC9, 0x74, 0xE9, 0x00], "and back to the same bytes");
+    assert_eq!(m.encode().unwrap(), vec![0xC9, 0x74, 0xE9, 0x00], "and back to the same bytes");
 
-    assert!(core::str::from_utf8(&m.encode()[..3]).is_err());
+    assert!(core::str::from_utf8(&m.encode().unwrap()[..3]).is_err());
 
     let wide = Latin { label: String::from("→") };
-    assert_eq!(wide.encode(), vec![b'?', 0, 0, 0]);
+    assert_eq!(wide.encode().unwrap(), vec![b'?', 0, 0, 0]);
 }
 
 #[test]
 fn ascii_rejects_a_high_byte() {
     let m = Ascii { n: 0, word: String::from("ok") };
-    assert_eq!(m.encode(), vec![2, b'o', b'k']);
-    assert_eq!(Ascii::decode(&m.encode()).unwrap().0, Ascii { n: 2, ..m });
+    assert_eq!(m.encode().unwrap(), vec![2, b'o', b'k']);
+    assert_eq!(Ascii::decode(&m.encode().unwrap()).unwrap().0, Ascii { n: 2, ..m });
     assert_eq!(Ascii::decode(&[1, 0xE9]), Err(ParseError::Malformed { field: "word", at: 1 }));
 }
 
@@ -287,7 +293,7 @@ struct Table {
 fn a_repeat_of_terminated_strings_is_a_string_table() {
     let m =
         Table { n: 0, names: vec![String::from("alpha"), String::from(""), String::from("beta")] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     assert_eq!(bytes, b"\x03alpha\0\0beta\0".to_vec());
     let (back, used) = Table::decode(&bytes).expect("parses");
     assert_eq!(used, bytes.len());
@@ -369,7 +375,7 @@ fn a_filling_run_can_be_bounded() {
     }
 
     let three = Bounded { tag: 1, items: vec![7, 8, 9] };
-    let wire = three.encode();
+    let wire = three.encode().unwrap();
     assert_eq!(Bounded::decode(&wire).expect("three fit"), (three, wire.len()));
 
     let mut over = wire.clone();
@@ -398,7 +404,7 @@ fn a_rest_can_refuse_a_longer_body() {
     }
 
     let three = Capped { tag: 1, tail: vec![7, 8, 9] };
-    let wire = three.encode();
+    let wire = three.encode().unwrap();
     assert_eq!(Capped::decode(&wire).expect("three fit"), (three, wire.len()));
     assert!(
         matches!(

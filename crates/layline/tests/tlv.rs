@@ -72,13 +72,13 @@ fn every_arm_round_trips() {
         (entry(7, Value::Unknown(Vec::new())), vec![0x07, 0x00]),
     ];
     for (e, wire) in cases {
-        assert_eq!(e.encode(), wire, "{e:?} encodes");
+        assert_eq!(e.encode().unwrap(), wire, "{e:?} encodes");
         let (back, used) = Entry::decode(&wire).expect("parses");
         assert_eq!(used, wire.len(), "`used` is the window plus the header");
         assert_eq!(back.tag, e.tag);
         assert_eq!(back.value, e.value);
         assert_eq!(back.len, Uleb128((wire.len() - 2) as u64), "the length is what was written");
-        assert_eq!(back.encode(), wire, "and a second trip is a fixed point");
+        assert_eq!(back.encode().unwrap(), wire, "and a second trip is a fixed point");
     }
 }
 
@@ -92,7 +92,7 @@ fn an_unknown_entry_in_the_middle_survives_and_swallows_nothing() {
             entry(2, label("after")),
         ],
     };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
 
     #[rustfmt::skip]
     let head = vec![
@@ -110,7 +110,7 @@ fn an_unknown_entry_in_the_middle_survives_and_swallows_nothing() {
     assert_eq!(back.entries.len(), 3, "the entry after the unknown one survives");
     assert_eq!(back.entries[1].value, Value::Unknown(vec![0x5A; 200]));
     assert_eq!(back.entries[2].value, label("after"));
-    assert_eq!(back.encode(), bytes, "byte for byte, the unknown entry included");
+    assert_eq!(back.encode().unwrap(), bytes, "byte for byte, the unknown entry included");
 
     assert!(List::decode(&[3]).expect("empty list").0.entries.is_empty());
 }
@@ -118,20 +118,20 @@ fn an_unknown_entry_in_the_middle_survives_and_swallows_nothing() {
 #[test]
 fn the_length_is_back_patched_from_the_arm() {
     let lying = Entry { tag: Uleb128(2), len: Uleb128(999), value: label("abc") };
-    assert_eq!(lying.encode(), vec![0x02, 0x04, 0x03, b'a', b'b', b'c'], "four");
+    assert_eq!(lying.encode().unwrap(), vec![0x02, 0x04, 0x03, b'a', b'b', b'c'], "four");
 
-    assert_eq!(lying.encode().len(), 6);
-    assert_eq!(Entry::decode(&lying.encode()).unwrap().0.len, Uleb128(4));
+    assert_eq!(lying.encode().unwrap().len(), 6);
+    assert_eq!(Entry::decode(&lying.encode().unwrap()).unwrap().0.len, Uleb128(4));
 
     let wrong_tag = Entry { tag: Uleb128(77), len: Uleb128(0), value: label("") };
-    assert_eq!(wrong_tag.encode(), vec![0x02, 0x01, 0x00]);
+    assert_eq!(wrong_tag.encode().unwrap(), vec![0x02, 0x01, 0x00]);
 
     let list = List { version: 0, entries: vec![lying.clone(), lying] };
     assert_eq!(
-        list.encode(),
+        list.encode().unwrap(),
         vec![0, 0x02, 0x04, 0x03, b'a', b'b', b'c', 0x02, 0x04, 0x03, b'a', b'b', b'c']
     );
-    assert_eq!(List::decode(&list.encode()).unwrap().1, 13);
+    assert_eq!(List::decode(&list.encode().unwrap()).unwrap().1, 13);
 }
 
 #[test]
@@ -153,7 +153,8 @@ fn a_length_that_overruns_the_buffer_is_short() {
 
     let mut bytes =
         List { version: 1, entries: vec![entry(2, label("hi")), entry(2, label("there"))] }
-            .encode();
+            .encode()
+            .unwrap();
     bytes.truncate(bytes.len() - 2);
     let from_list = List::decode(&bytes).unwrap_err();
     let from_entry = Entry::decode(&bytes[6..]).unwrap_err();
@@ -248,9 +249,9 @@ fn scale_offset_and_cap_apply_to_the_window() {
     }
 
     let m = Words { tag: Uleb128(0), words: Uleb128(99), value: Value::Unknown(vec![1, 2, 3, 4]) };
-    assert_eq!(m.encode(), vec![0x00, 0x01, 1, 2, 3, 4], "(4 - 2) / 2 == 1");
+    assert_eq!(m.encode().unwrap(), vec![0x00, 0x01, 1, 2, 3, 4], "(4 - 2) / 2 == 1");
 
-    let (back, used) = Words::decode(&m.encode()).expect("parses");
+    let (back, used) = Words::decode(&m.encode().unwrap()).expect("parses");
     assert_eq!(used, 6);
     assert_eq!(back.words, Uleb128(1));
     assert_eq!(back.value, m.value);

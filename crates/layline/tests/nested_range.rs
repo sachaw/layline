@@ -106,7 +106,7 @@ fn a_holder_decodes_what_its_nested_layout_admits() {
     let got = PsdExt::decode(&psd(0)).expect("the spare bits are zero");
     assert_eq!((got.duration, got.num_bin, got.num_blocks), (1.5, 7, 3));
     assert!(got.bits.has_scaling && !got.bits.units && got.bits.has_origin);
-    assert_eq!(got.encode(), psd(0));
+    assert_eq!(got.encode().unwrap(), psd(0));
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn random_wires_decode_exactly_when_the_spare_bits_are_zero() {
             Ok(got) => {
                 admitted += 1;
                 assert_eq!(wire[10] & 0b1_1111, 0, "wire {i}: admitted nonzero spare bits");
-                assert_eq!(got.encode(), wire, "wire {i}: a round trip changed the bytes");
+                assert_eq!(got.encode().unwrap(), wire, "wire {i}: a round trip changed the bytes");
             }
             Err(ParseError::OutOfRange { field: "reserved", value, .. }) => {
                 assert_eq!(i64::from(wire[10] & 0b1_1111), value, "wire {i}");

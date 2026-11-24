@@ -71,7 +71,7 @@ fn an_unlisted_discriminant_re_encodes_byte_for_byte() {
     for kind in [0u32, 1, 7, u32::MAX] {
         let bytes = wire(kind, [9, 8, 7, 6, 5, 4, 3, 2], 0x1234);
         let (p, _) = Packet::decode(&bytes).unwrap();
-        assert_eq!(p.encode(), bytes, "kind {kind}");
+        assert_eq!(p.encode().unwrap(), bytes, "kind {kind}");
     }
 }
 

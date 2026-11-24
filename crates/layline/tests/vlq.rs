@@ -2,7 +2,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Message, ParseError};
+use layline::{EncodeError, Message, ParseError};
 use layline_core::num::Vlq;
 
 #[path = "support/rng.rs"]
@@ -37,7 +37,7 @@ fn each_boundary_id_takes_the_fewest_bytes_in_a_message() {
         ((1 << 28) - 1, &[0xFF, 0xFF, 0xFF, 0x7F]),
     ];
     for (id, bytes) in cases {
-        let wire = emitter(id).encode();
+        let wire = emitter(id).encode().unwrap();
         let mut want = vec![7];
         want.extend_from_slice(bytes);
         want.extend_from_slice(&[0x02, 0x01, 0x02, 0x03, 0x04]);
@@ -70,9 +70,11 @@ fn a_count_read_from_a_vlq_bounds_the_run() {
 }
 
 #[test]
-#[should_panic(expected = "Vlq<4>: 268435456 needs more than 4 bytes")]
 fn encode_refuses_an_id_past_the_cap() {
-    let _ = emitter(1 << 28).encode();
+    assert_eq!(
+        emitter(1 << 28).encode(),
+        Err(EncodeError::Unfit { field: "id", value: 268435456, bits: 28 })
+    );
 }
 
 /// A run of ids, as a `Vec<Uleb128>` is one.
@@ -87,7 +89,7 @@ struct Roster {
 #[test]
 fn a_run_of_vlqs_reads_each_to_its_own_length() {
     let m = Roster { n: 0, ids: vec![Vlq(5), Vlq(300), Vlq((1 << 28) - 1)] };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, [3, 0x05, 0x82, 0x2C, 0xFF, 0xFF, 0xFF, 0x7F]);
     assert_eq!(Roster::decode(&wire), Ok((Roster { n: 3, ..m }, wire.len())));
 }
@@ -104,7 +106,7 @@ fn a_random_wire_either_errors_or_round_trips() {
         let Ok((value, used)) = Emitter::decode(&wire) else { continue };
         decoded += 1;
         assert!(used <= wire.len(), "wire {i}");
-        let out = value.encode();
+        let out = value.encode().unwrap();
         assert!(out.len() <= used, "wire {i}: the fewest bytes are no more than the wire's");
         assert_eq!(Emitter::decode(&out), Ok((value, out.len())), "wire {i}");
     }

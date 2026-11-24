@@ -301,6 +301,7 @@ impl Walk<'_> {
             quote! { pub #ident: #ty, },
         ));
         item.items.extend(checksum_fits(self.owner, field, &algo, &ty, root));
+        item.via.push(quote!(<#sub as #root::Layout>::ENCODE_FALLIBLE));
         let order = |row: &str| position_in(segments, row);
         let excludes_self = over.excises(field, order);
         self.rows.push(
@@ -366,7 +367,7 @@ impl Walk<'_> {
         if late {
             let mark = format_ident!("__out_{}", field);
             self.byte_steps.extend(quote! {
-                out.push(&#sub { #ident: 0 }.encode_in::<__O>())?;
+                out.push(&#sub { #ident: 0 }.encode_in::<__O>()?)?;
             });
             let hole = excludes_self.then(|| (quote!(#mark), Some(quote!(#mark + #len))));
             let runs = Marks::encode().runs(over, Some(quote!(#mark)), hole);
@@ -382,7 +383,6 @@ impl Walk<'_> {
                 self.owner,
                 &slot,
                 field,
-                d.what(),
                 &quote!(#root::WireInt::to_i64(&#value)),
                 root,
             ));
@@ -391,7 +391,7 @@ impl Walk<'_> {
             self.byte_steps.extend(quote! {
                 {
                     let __ck = <#ty as #root::WireInt>::from_i64(#n);
-                    out.push(&#sub { #ident: __ck }.encode_in::<__O>())?;
+                    out.push(&#sub { #ident: __ck }.encode_in::<__O>()?)?;
                 }
             });
         }

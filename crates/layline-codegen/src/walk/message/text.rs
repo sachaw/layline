@@ -43,37 +43,35 @@ pub(super) fn text_wire_len(codec: &Option<String>, text: TokenStream, root: &Ro
     quote!(<#codec as #root::__private::TextCodec>::encoded_len(#text))
 }
 
-/// Encode text, panicking on text that would not decode back.
+/// Encode text, refusing text that would not decode back.
 pub(super) fn text_write(
     (field, value): (&str, TokenStream),
     len: &Len,
     codec: &Option<String>,
     root: &Root,
 ) -> TokenStream {
-    let Prelude { some, .. } = root.prelude();
+    let Prelude { some, err, .. } = root.prelude();
     let codec = text_codec(codec, root);
     let (refuse, close) = match len {
         Len::Until { terminator } => {
             let term = Literal::u8_unsuffixed(*terminator);
-            let msg = format!(
-                "field `{field}`: the text contains its terminator byte {terminator:#04x}. \
-                 Decode would stop there"
-            );
             (
-                quote! { ::core::assert!(!__text.contains(&#term), #msg); },
+                quote! {
+                    if __text.contains(&#term) {
+                        return #err(#root::EncodeError::Delimiter { field: #field, byte: #term });
+                    }
+                },
                 quote! { out.push(&[#term])?; },
             )
         }
         Len::Bytes(n) => {
             let lit = Literal::usize_unsuffixed(*n);
-            let long = format!("field `{field}`: the text is longer than its {n} bytes");
-            let nul = format!(
-                "field `{field}`: the text ends in a zero byte. Decode would strip it as padding"
-            );
             (
                 quote! {
-                    ::core::assert!(__text.len() <= #lit, #long);
-                    ::core::assert!(__text.last() != #some(&0), #nul);
+                    #root::EncodeError::cap(#field, __text.len(), #lit)?;
+                    if __text.last() == #some(&0) {
+                        return #err(#root::EncodeError::Delimiter { field: #field, byte: 0 });
+                    }
                 },
                 quote! { out.pad(__mark + #lit - out.len())?; },
             )

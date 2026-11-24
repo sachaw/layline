@@ -4,7 +4,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Layout, View};
+use layline::{EncodeError, Layout, View};
 
 macro_rules! quad {
     ($name:ident, $view:ident, $($attr:tt)*) => {
@@ -67,10 +67,10 @@ const QUAD_BE_MSB: [u8; 24] = [
 
 #[test]
 fn a_192_bit_container_matches_hand_computed_wire_bytes() {
-    assert_eq!(QuadLe::sample().encode(), QUAD_LE);
-    assert_eq!(QuadBe::sample().encode(), QUAD_BE);
-    assert_eq!(QuadLeMsb::sample().encode(), QUAD_LE_MSB);
-    assert_eq!(QuadBeMsb::sample().encode(), QUAD_BE_MSB);
+    assert_eq!(QuadLe::sample().encode().unwrap(), QUAD_LE);
+    assert_eq!(QuadBe::sample().encode().unwrap(), QUAD_BE);
+    assert_eq!(QuadLeMsb::sample().encode().unwrap(), QUAD_LE_MSB);
+    assert_eq!(QuadBeMsb::sample().encode().unwrap(), QUAD_BE_MSB);
 
     assert_eq!(QuadLe::decode(&QUAD_LE), QuadLe::sample());
     assert_eq!(QuadBe::decode(&QUAD_BE), QuadBe::sample());
@@ -93,12 +93,12 @@ fn a_wide_container_round_trips_on_arbitrary_bytes() {
         for chunk in wire.chunks_mut(8) {
             chunk.copy_from_slice(&next().to_le_bytes());
         }
-        assert_eq!(QuadLe::decode(&wire).encode(), wire, "le/lsb on {wire:02X?}");
-        assert_eq!(QuadBe::decode(&wire).encode(), wire, "be/lsb on {wire:02X?}");
-        assert_eq!(QuadLeMsb::decode(&wire).encode(), wire, "le/msb on {wire:02X?}");
-        assert_eq!(QuadBeMsb::decode(&wire).encode(), wire, "be/msb on {wire:02X?}");
+        assert_eq!(QuadLe::decode(&wire).encode().unwrap(), wire, "le/lsb on {wire:02X?}");
+        assert_eq!(QuadBe::decode(&wire).encode().unwrap(), wire, "be/lsb on {wire:02X?}");
+        assert_eq!(QuadLeMsb::decode(&wire).encode().unwrap(), wire, "le/msb on {wire:02X?}");
+        assert_eq!(QuadBeMsb::decode(&wire).encode().unwrap(), wire, "be/msb on {wire:02X?}");
     }
-    assert_eq!(QuadBeMsb::decode(&[0xFF; 24]).encode(), [0xFF; 24]);
+    assert_eq!(QuadBeMsb::decode(&[0xFF; 24]).encode().unwrap(), [0xFF; 24]);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn a_304_bit_subframe_puts_its_preamble_in_the_first_byte() {
         pad: 0,
         ..Default::default()
     };
-    let wire = sf.encode();
+    let wire = sf.encode().unwrap();
     assert_eq!(wire[0], 0x8B);
     assert_eq!(wire[1], 0b1010_1001);
     assert_eq!(wire[2] >> 2, 0b011011);
@@ -223,7 +223,7 @@ fn a_304_bit_subframe_round_trips_every_field_independently() {
         ("preamble", NavSubframe { preamble: 0xFF, ..base }),
     ];
     for (name, value) in cases {
-        let wire = value.encode();
+        let wire = value.encode().unwrap();
         assert_eq!(NavSubframe::decode(&wire), value, "{name} round trip");
         let ones: u32 = wire.iter().map(|b| b.count_ones()).sum();
         let want = NavSubframe::FIELDS
@@ -266,7 +266,7 @@ fn a_304_bit_le_container_carries_a_128_bit_opaque_field() {
         opaque: 0xFEDC_BA98_7654_3210_0123_4567_89AB_CDEF,
         pad: 0b10101,
     };
-    let wire = sf.encode();
+    let wire = sf.encode().unwrap();
     assert_eq!(NavSubframeLe::decode(&wire), sf);
     assert_eq!(wire[0], 0x8B);
     assert_eq!(wire[21] >> 3, (0xEF & 0x1F) as u8);
@@ -330,7 +330,7 @@ fn a_512_bit_payload_is_one_container() {
         spare: 0,
         last: true,
     };
-    let wire = p.encode();
+    let wire = p.encode().unwrap();
     assert_eq!(&wire[..2], &[0xD2, 0xA5]);
     assert_eq!(wire[63] & 1, 1);
     assert_eq!(CanFdPayload::decode(&wire), p);
@@ -347,12 +347,12 @@ fn a_512_bit_payload_is_one_container() {
 #[test]
 fn a_field_at_the_very_top_of_a_512_bit_container_is_one_bit_of_one_byte() {
     let only_last = CanFdPayload { last: true, ..Default::default() };
-    let wire = only_last.encode();
+    let wire = only_last.encode().unwrap();
     assert_eq!(wire[63], 0x01);
     assert_eq!(&wire[..63], &[0u8; 63]);
 
     let only_version = CanFdPayload { version: 0xF, ..Default::default() };
-    let wire = only_version.encode();
+    let wire = only_version.encode().unwrap();
     assert_eq!(wire[0], 0xF0);
     assert_eq!(&wire[1..], &[0u8; 63]);
 }
@@ -372,7 +372,7 @@ fn a_512_bit_payload_round_trips_arbitrary_bytes() {
         for chunk in wire.chunks_mut(8) {
             chunk.copy_from_slice(&next().to_le_bytes());
         }
-        assert_eq!(CanFdPayload::decode(&wire).encode(), wire, "on {wire:02X?}");
+        assert_eq!(CanFdPayload::decode(&wire).encode().unwrap(), wire, "on {wire:02X?}");
     }
 }
 
@@ -405,26 +405,26 @@ fn a_128_bit_field_at_a_bit_offset_spans_seventeen_bytes() {
         tail_a: 0x0123_4567_89AB_CDEF,
         tail_b: 0b10110,
     };
-    assert_eq!(v.encode(), SPAN17_LE);
+    assert_eq!(v.encode().unwrap(), SPAN17_LE);
     assert_eq!(Span17Le::decode(&SPAN17_LE), v);
 
     let mut reversed = SPAN17_LE;
     reversed.reverse();
     let be = Span17Be { head: v.head, blob: v.blob, tail_a: v.tail_a, tail_b: v.tail_b };
-    assert_eq!(be.encode(), reversed);
+    assert_eq!(be.encode().unwrap(), reversed);
     assert_eq!(Span17Be::decode(&reversed), be);
 
     let cleared = Span17Le { blob: 0, ..v };
-    let wire = cleared.encode();
+    let wire = cleared.encode().unwrap();
     assert_eq!(wire[0], 0b101);
     assert_eq!(&wire[1..16], &[0u8; 15]);
     assert_eq!(wire[16], SPAN17_LE[16] & 0xF8);
     assert_eq!(Span17Le::decode(&wire), cleared);
 
     let full = Span17Le { head: 0, blob: u128::MAX, tail_a: 0, tail_b: 0 };
-    let ones: u32 = full.encode().iter().map(|b| b.count_ones()).sum();
+    let ones: u32 = full.encode().unwrap().iter().map(|b| b.count_ones()).sum();
     assert_eq!(ones, 128);
-    assert_eq!(Span17Le::decode(&full.encode()), full);
+    assert_eq!(Span17Le::decode(&full.encode().unwrap()), full);
 
     assert_eq!(layline::table::check_layout(Span17Le::FIELDS, 200), Ok(()));
     assert_eq!(layline::table::check_layout(Span17Be::FIELDS, 200), Ok(()));
@@ -446,8 +446,8 @@ fn a_seventeen_byte_field_round_trips_arbitrary_bytes() {
             let n = chunk.len();
             chunk.copy_from_slice(&next().to_le_bytes()[..n]);
         }
-        assert_eq!(Span17Le::decode(&wire).encode(), wire, "le on {wire:02X?}");
-        assert_eq!(Span17Be::decode(&wire).encode(), wire, "be on {wire:02X?}");
+        assert_eq!(Span17Le::decode(&wire).encode().unwrap(), wire, "le on {wire:02X?}");
+        assert_eq!(Span17Be::decode(&wire).encode().unwrap(), wire, "be on {wire:02X?}");
     }
 }
 
@@ -484,10 +484,10 @@ pub struct Windowed {
 fn the_hoist_threshold_changes_no_answer() {
     let h = Hoisted { a: 0x1ABC, b: 0x7_1234_5678_9ABC, c: 0b101, d: 0x1FED_CBA9_8765_4321 };
     let w = Windowed { a: h.a, b: h.b, c: h.c, d: h.d, extra: 0x5A };
-    assert_eq!(&w.encode()[..16], &h.encode()[..]);
-    assert_eq!(w.encode()[16], 0x5A);
-    assert_eq!(Hoisted::decode(&h.encode()), h);
-    assert_eq!(Windowed::decode(&w.encode()), w);
+    assert_eq!(&w.encode().unwrap()[..16], &h.encode().unwrap()[..]);
+    assert_eq!(w.encode().unwrap()[16], 0x5A);
+    assert_eq!(Hoisted::decode(&h.encode().unwrap()), h);
+    assert_eq!(Windowed::decode(&w.encode().unwrap()), w);
 
     assert_eq!(layline::table::check_layout(Hoisted::FIELDS, 128), Ok(()));
     assert_eq!(layline::table::check_layout(Windowed::FIELDS, 136), Ok(()));
@@ -495,11 +495,9 @@ fn the_hoist_threshold_changes_no_answer() {
 
 #[test]
 fn a_wide_container_still_refuses_a_value_that_does_not_fit() {
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let caught = std::panic::catch_unwind(|| {
-        let _ = QuadLe { c: 200, ..QuadLe::default() }.encode();
-    });
-    std::panic::set_hook(hook);
-    assert!(caught.is_err(), "a 192-bit container accepted 200 in a 5-bit field");
+    assert_eq!(
+        QuadLe { c: 200, ..QuadLe::default() }.encode(),
+        Err(EncodeError::Unfit { field: "c", value: 200, bits: 5 }),
+        "a 192-bit container accepted 200 in a 5-bit field"
+    );
 }

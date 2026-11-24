@@ -4,7 +4,7 @@
 #![cfg(feature = "derive")]
 
 use layline::table::{Discriminant, Span, Start};
-use layline::{Layout, Message, ParseError, table::fixed_bits};
+use layline::{EncodeError, Layout, Message, ParseError, table::fixed_bits};
 
 #[derive(Debug, Clone, Copy, PartialEq, Layout)]
 #[layout(bytes = 8)]
@@ -94,7 +94,7 @@ fn the_payload_lands_at_twelve_whichever_arm_the_command_chose() {
         let (back, used) = Packet::decode(&wire).expect("parses");
         assert_eq!(back, packet);
         assert_eq!(used, 16, "4 header + 8 union + 4 payload, by hand");
-        assert_eq!(packet.encode(), wire.to_vec(), "hand-computed, byte for byte");
+        assert_eq!(packet.encode().unwrap(), wire.to_vec(), "hand-computed, byte for byte");
         assert_eq!(
             u32::from_le_bytes([wire[12], wire[13], wire[14], wire[15]]),
             0xDEAD_BEEF,
@@ -114,7 +114,7 @@ fn the_bytes_a_narrow_arm_does_not_use_are_a_field_and_survive() {
         "and every byte of the spare is named in the arm's own table, at a position a \
          reviewer can audit — which is what the union's other four bytes are"
     );
-    assert_eq!(back.encode(), GET_BLOCK_DONE.to_vec(), "encode writes the same bytes");
+    assert_eq!(back.encode().unwrap(), GET_BLOCK_DONE.to_vec(), "encode writes the same bytes");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn an_arm_the_wire_sizes_fills_the_union_and_moves_nothing() {
     );
     assert_eq!(back.payload, 0xDEAD_BEEF);
     assert_eq!(used, 16);
-    assert_eq!(back.encode(), USER_DATA.to_vec(), "hand-computed");
+    assert_eq!(back.encode().unwrap(), USER_DATA.to_vec(), "hand-computed");
 }
 
 #[test]
@@ -156,7 +156,6 @@ fn an_arm_that_stops_short_of_the_footprint_is_refused_by_name() {
 }
 
 #[test]
-#[should_panic(expected = "did not fill it exactly")]
 fn encoding_an_arm_that_did_not_fill_the_union_is_refused_rather_than_padded() {
     let short = Packet {
         command: 0x07,
@@ -165,7 +164,7 @@ fn encoding_an_arm_that_did_not_fill_the_union_is_refused_rather_than_padded() {
         args: Args::UserData(UserData { length: 99, buffer: vec![1, 2, 3] }),
         payload: 0xDEAD_BEEF,
     };
-    let _ = short.encode();
+    assert_eq!(short.encode(), Err(EncodeError::Mismatch { field: "args", value: 4, stated: 8 }));
 }
 
 #[test]
@@ -183,7 +182,7 @@ fn the_open_arm_keeps_the_footprint_and_re_encodes_byte_identically() {
         "eight bytes of union, and the payload read as a payload"
     );
     assert_eq!(used, 16);
-    assert_eq!(back.encode(), UNKNOWN.to_vec(), "byte-identical, discriminant and all");
+    assert_eq!(back.encode().unwrap(), UNKNOWN.to_vec(), "byte-identical, discriminant and all");
 }
 
 #[test]

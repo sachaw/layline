@@ -6,6 +6,11 @@ Derive `Layout` for fixed-size records and `Message` for variable-length ones.
 Fields must cover every bit, or the build fails. Encode fills in counts, lengths
 and checksums; decode checks them.
 
+Encode is as strict as decode. A type that declares something a value can break, such as a field
+narrower than its type, a `#[range]`, a cap or a count field too narrow for its collection,
+returns `Result<_, EncodeError>` from `encode`, naming the field, what it breaks and the value. A
+type that declares nothing of the kind, and holds no type that does, returns the bytes.
+
 ```toml
 [dependencies]
 layline = "0.5"
@@ -26,13 +31,21 @@ pub struct Header {
 
 let header = Header::decode(&[0x1A, 0x05]);
 assert_eq!((header.version, header.urgent, header.length), (1, true, 0x205));
-assert_eq!(header.encode(), [0x1A, 0x05]);
+assert_eq!(header.encode(), Ok([0x1A, 0x05]));
+
+// Four bits cannot hold 16.
+let wide = Header { version: 16, ..header };
+assert_eq!(
+    wide.encode(),
+    Err(layline::EncodeError::Unfit { field: "version", value: 16, bits: 4 }),
+);
 ```
 
 A layout of up to 64 bits is shifts and masks on one integer. At 8, 16, 32 or 64 bits it also
 converts to and from that integer: `Header::from_bits(0x1A05)` is the header above, read
 big-endian. Add `truncate` to `#[layout(..)]` to have encode keep the low bits of an oversized
-value, as a hardware register does, instead of panicking.
+value, as a hardware register does, instead of refusing it; such a layout's `encode` returns the
+bytes.
 
 Add `view` to `#[layout(..)]` for `<Name>View`, which reads and writes fields in place. A view
 reads any bytes, so a reader can inspect a corrupt record; `verify()` runs the checks `decode`
@@ -59,8 +72,12 @@ pub struct Frame {
 }
 
 let frame = Frame { start: 0, len: 0, payload: vec![1, 2, 3], crc: 0 };
-let wire = frame.encode();
+let wire = frame.encode().unwrap();
 assert_eq!(wire[..5], [0xFE, 3, 1, 2, 3]);
+
+// A `u8` length cannot count 256 bytes.
+let long = Frame { payload: vec![0; 256], ..frame };
+assert!(long.encode().is_err());
 
 let (back, used) = Frame::decode(&wire).unwrap();
 assert_eq!((back.payload, used), (vec![1, 2, 3], wire.len()));

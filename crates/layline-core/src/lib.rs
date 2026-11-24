@@ -4,6 +4,7 @@
 //!
 //! - [`Layout`]: a fixed-size type, described by a [`FieldDef`](table::FieldDef) table.
 //! - [`Message`]: a variable-length type, described by a [`SegmentDef`](table::SegmentDef) table.
+//! - [`EncodeError`]: why an encode refused a value.
 //! - [`audit`]: prints those tables.
 //! - [`frame`] (feature `frame`): stream framing.
 //! - [`num`] (feature `num`): LEB128, VLQ, Exp-Golomb and reserved values.
@@ -32,6 +33,7 @@ mod bound;
 mod buffer;
 mod codec;
 mod dispatch;
+mod encode;
 mod extent;
 mod field;
 mod int;
@@ -98,6 +100,9 @@ pub mod __private {
     pub use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
     pub use crate::bound::{Nestable, WireFlag, fits_in_field};
+    pub use crate::encode::{Buffered, Buffers, Encoded, Encodes};
+
+    pub use crate::__layline_alloc as alloc_only;
     pub use crate::field::{Decoded, Decodes, Fallibility, assert_layout};
     pub use crate::order::{Be, ByteOrder, Le};
     pub use crate::word::BitWord;
@@ -123,6 +128,23 @@ pub mod __private {
     impl<A, T> ChecksumFits<T> for A where A: crate::Checksum<Output = T> {}
 }
 
+/// Its items with the `alloc` feature, and nothing without it, for generated code that returns
+/// a vector.
+#[cfg(feature = "alloc")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __layline_alloc {
+    ($($item:tt)*) => { $($item)* };
+}
+
+/// Its items with the `alloc` feature, and nothing without it.
+#[cfg(not(feature = "alloc"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __layline_alloc {
+    ($($item:tt)*) => {};
+}
+
 /// Seals the bound traits so only the blanket impls exist.
 mod sealed {
     pub trait Nestable {}
@@ -139,6 +161,7 @@ pub use buffer::{Buffer, Fixed, Overflow};
 pub use checksum::Checksum;
 pub use codec::{FieldCodec, Nonzero};
 pub use dispatch::Dispatch;
+pub use encode::EncodeError;
 pub use extent::Extent;
 pub use field::{Layout, LayoutError};
 pub use int::{I, U};

@@ -54,7 +54,7 @@ fn a_stamped_payload_and_the_dispatcher_agree() {
     let mut room = [0u8; 2];
     let mut wire = Fixed::new(&mut room);
     f.encode_into(&mut wire).expect("2 bytes");
-    assert_eq!(wire.into_written(), Ping { seq: 7 }.encode());
+    assert_eq!(wire.into_written(), Ping { seq: 7 }.encode().unwrap());
 }
 
 #[test]

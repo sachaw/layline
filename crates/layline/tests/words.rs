@@ -67,7 +67,7 @@ fn words_view_agrees_with_owned_and_patches_in_place() {
         name: *b"NAME",
         ..Default::default()
     };
-    let wire = s.encode();
+    let wire = s.encode().unwrap();
     let view = SampleVView::from_wire(&wire);
     assert_eq!(view.status(), 0x0ABC);
     assert_eq!(view.time(), s.time);
@@ -106,7 +106,7 @@ fn fields_pack_lsb_first_within_le_words() {
         reserved_2: [0xFFFF],
         name: *b"NAME",
     };
-    let wire = s.encode();
+    let wire = s.encode().unwrap();
     assert_eq!(wire.len(), 14);
     assert_eq!(u16::from_le_bytes([wire[0], wire[1]]), 0x4080);
     let w3 = u16::from_le_bytes([wire[4], wire[5]]);

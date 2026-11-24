@@ -7,7 +7,7 @@ use super::body::{Bind, Item, Own, Walk, needs_clone};
 use super::cursor::read_layout;
 use super::patch::{
     Slot, SlotWrite, Target, derived_flag, derived_value, fits, nested_accessors, placeholder,
-    slot_ident, too_narrow,
+    slot_ident,
 };
 use super::table::Row;
 use crate::model::split_ref;
@@ -51,6 +51,7 @@ impl Walk<'_> {
         ));
         let decls = fields.iter().map(|f| block_field(f, root));
         item.items.extend(hidden_block(root, &sub, &len, &self.endian, quote! { #(#decls)* }));
+        item.via.push(quote!(<#sub as #root::Layout>::ENCODE_FALLIBLE));
         for f in fields {
             self.public_fields.extend(emit_message_field(f, false, root, &self.skip));
         }
@@ -102,7 +103,7 @@ impl Walk<'_> {
                         let (get, get_mut) = nested_accessors(owner, &f.name, inner);
                         let into =
                             Target::Nested { get: quote!(#get(&__h)), child: &child, name: inner };
-                        let fits = fits(into, &quote!(__v), &too_narrow(&dotted, d.what()), root);
+                        let fits = fits(into, &quote!(__v), &dotted, root);
                         quote! {
                             {
                                 let __v = #n;
@@ -234,8 +235,7 @@ impl Walk<'_> {
                     }
                     None => {
                         let n = derived_value(d, own, &f.name, root);
-                        let narrow = too_narrow(&f.name, d.what());
-                        let fits = fits(Target::Field(&ty, 0), &n, &narrow, root);
+                        let fits = fits(Target::Field(&ty, 0), &n, &f.name, root);
                         quote! {
                             #fname: {
                                 #fits
@@ -259,7 +259,7 @@ impl Walk<'_> {
         self.byte_steps.extend(quote! {
             #mark
             #rebuild
-            out.push(&#sub { #(#inits)* }.encode_in::<__O>())?;
+            out.push(&#sub { #(#inits)* }.encode_in::<__O>()?)?;
             #reserve
         });
         Ok(())

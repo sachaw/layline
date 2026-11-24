@@ -38,7 +38,7 @@ fn block_repeat_tail_round_trips() {
         trailing: vec![0xAA, 0xBB, 0xCC],
     };
 
-    let bytes = p.encode();
+    let bytes = p.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(bytes, vec![
         0xEF, 0xBE, 0xAD, 0xDE,
@@ -68,7 +68,7 @@ fn parse_reports_the_bytes_it_consumed() {
         items: Vec<Item>,
     }
 
-    let mut buf = Counted { n: 0, items: vec![Item { value: 7 }] }.encode();
+    let mut buf = Counted { n: 0, items: vec![Item { value: 7 }] }.encode().unwrap();
     buf.extend_from_slice(b"the next message");
     let (back, used) = Counted::decode(&buf).expect("parses");
     assert_eq!(used, 5);
@@ -85,7 +85,7 @@ fn a_wrong_count_field_does_not_reach_the_wire() {
         trailing: vec![],
     };
 
-    let bytes = lying.encode();
+    let bytes = lying.encode().unwrap();
     assert_eq!(&bytes[4..6], &[3, 0], "the wire contains the collection's length");
 
     let (back, _) = Packet::decode(&bytes).expect("parses");
@@ -104,7 +104,7 @@ fn a_scaled_count_is_back_patched_through_its_affine_form() {
     }
 
     let m = Scaled { pairs: 7, items: (0..3).map(|value| Item { value }).collect() };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     assert_eq!(&bytes[..2], &[2, 0], "(3 - -1) / 2 == 2");
 
     let (back, used) = Scaled::decode(&bytes).expect("parses");
@@ -131,7 +131,7 @@ fn an_offset_directory_stamps_and_seeks() {
         entries: vec![Entry { tag: 0x1122 }, Entry { tag: 0x3344 }],
     };
 
-    let bytes = d.encode();
+    let bytes = d.encode().unwrap();
     assert_eq!(&bytes[0..4], &[8, 0, 0, 0], "the table starts at byte 8, right after the header");
     assert_eq!(&bytes[4..8], &[2, 0, 0, 0], "the count is 2");
 
@@ -156,7 +156,7 @@ fn an_offset_directory_stamps_and_seeks() {
     }
 
     let b = BigEndian { table_offset: 0, table_len: 0, entries: vec![Entry { tag: 0x1122 }] };
-    let bytes = b.encode();
+    let bytes = b.encode().unwrap();
     // `Entry` has its own byte order; only the header is big-endian.
     assert_eq!(bytes, vec![0, 0, 0, 6, 0, 1, 0x22, 0x11]);
     assert_eq!(BigEndian::decode(&bytes).unwrap().0.table_offset, 6);
@@ -184,7 +184,7 @@ fn an_offset_is_measured_not_predicted() {
         entries: vec![Entry { tag: 0x1122 }, Entry { tag: 0x3344 }],
     };
 
-    let bytes = d.encode();
+    let bytes = d.encode().unwrap();
     assert_eq!(&bytes[8..13], b"cmap\0", "the string is between the header and the table");
     assert_eq!(&bytes[0..4], &[13, 0, 0, 0], "the table offset is 13, right after the string");
     assert_eq!(&bytes[4..8], &[2, 0, 0, 0]);
@@ -197,7 +197,7 @@ fn an_offset_is_measured_not_predicted() {
     assert_eq!(back.entries, d.entries);
 
     let longer = Directory { name: String::from("a much longer name"), ..d };
-    let bytes = longer.encode();
+    let bytes = longer.encode().unwrap();
     assert_eq!(&bytes[0..4], &[27, 0, 0, 0]);
     assert_eq!(Directory::decode(&bytes).unwrap().0.entries, longer.entries);
 }
@@ -212,7 +212,7 @@ fn count_by_field_caps_a_hostile_length() {
         items: Vec<Item>,
     }
 
-    let ok = Capped { n: 0, items: vec![Item { value: 1 }] }.encode();
+    let ok = Capped { n: 0, items: vec![Item { value: 1 }] }.encode().unwrap();
     assert_eq!(Capped::decode(&ok).unwrap().0.items.len(), 1);
 
     let hostile = vec![5, 0];
@@ -281,7 +281,7 @@ fn endian_be_applies_to_blocks_and_to_elements() {
         entries: vec![BeEntry { tag: 0xAABB }],
         raw: vec![0xCCDD],
     };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(bytes, vec![
         0x01, 0x02, 0x03, 0x04,
@@ -324,7 +324,7 @@ fn a_block_carries_codecs_arrays_and_nested_layouts() {
         stamp: Item { value: 0x1234_5678 },
         values: vec![1, 2],
     };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     #[rustfmt::skip]
     assert_eq!(bytes, vec![
         9,
@@ -350,7 +350,7 @@ fn a_collection_splits_the_blocks_around_it() {
     }
 
     let m = TwoBlocks { a: 0, first: vec![1, 2, 3], b: 0, second: vec![Entry { tag: 0x0A0B }] };
-    let bytes = m.encode();
+    let bytes = m.encode().unwrap();
     assert_eq!(bytes, vec![3, 1, 2, 3, 1, 0, 0x0B, 0x0A]);
     assert_eq!(TwoBlocks::decode(&bytes).unwrap().0, TwoBlocks { a: 3, b: 1, ..m });
 }
@@ -368,7 +368,8 @@ fn a_truncated_body_is_an_error_naming_what_was_needed() {
         items: vec![Item { value: 1 }, Item { value: 2 }],
         trailing: vec![],
     }
-    .encode();
+    .encode()
+    .unwrap();
     short.truncate(12);
     assert_eq!(
         Packet::decode(&short),

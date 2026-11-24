@@ -3,7 +3,7 @@
 #![cfg(feature = "derive")]
 
 use layline::table::{By, ParamDef, SegmentDef, Span, Start};
-use layline::{Buffer, Message, Overflow, ParseError};
+use layline::{Buffer, EncodeError, Message, ParseError};
 
 #[path = "support/rng.rs"]
 mod rng;
@@ -47,8 +47,8 @@ impl Message for HandBlock {
         Ok((HandBlock(data.to_vec()), n))
     }
 
-    fn encode_into_with<B: Buffer>(&self, out: &mut B, _ctx: Self::Ctx) -> Result<(), Overflow> {
-        out.push(&self.0)
+    fn encode_into_with<B: Buffer>(&self, out: &mut B, _ctx: Self::Ctx) -> Result<(), EncodeError> {
+        Ok(out.push(&self.0)?)
     }
 }
 
@@ -58,7 +58,7 @@ fn a_hand_written_context_message_decodes_under_the_value_it_is_given() {
     let (block, used) = HandBlock::decode_with(b"abcdef", ctx).expect("decodes");
     assert_eq!(used, 3);
     assert_eq!(block, HandBlock(b"abc".to_vec()));
-    assert_eq!(block.encode_with(ctx), b"abc".to_vec());
+    assert_eq!(block.encode_with(ctx).unwrap(), b"abc".to_vec());
 
     assert_eq!(
         HandBlock::decode_with(b"ab", HandBlockCtx { stride: 4 }),
@@ -102,7 +102,7 @@ fn epoch() -> Epoch {
 #[test]
 fn the_holder_states_the_width_each_element_reads() {
     let m = epoch();
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![2, 3, 1, 0, 1, 2, 3, 2, 0, 4, 5, 6]);
     let (back, used) = Epoch::decode(&wire).expect("decodes");
     assert_eq!(used, wire.len());
@@ -112,13 +112,10 @@ fn the_holder_states_the_width_each_element_reads() {
 /// A parameter is not derived: encode cannot set it from the elements, so it refuses elements the
 /// parameter does not describe, rather than write a wire that decodes differently.
 #[test]
-#[should_panic(
-    expected = "collection `data`: its byte length is not what parameter `stride` states"
-)]
 fn a_parameter_that_disagrees_with_the_elements_is_refused() {
     let mut m = epoch();
     m.stride = 9;
-    let _ = m.encode();
+    assert_eq!(m.encode(), Err(EncodeError::Mismatch { field: "data", value: 3, stated: 9 }));
 }
 
 #[test]
@@ -127,7 +124,7 @@ fn a_context_message_decodes_on_its_own_through_the_context() {
     let (block, used) = Block::decode_with(&[7, 0, 1, 2, 3, 99], ctx).expect("decodes");
     assert_eq!(used, 5);
     assert_eq!(block, Block { id: 7, data: vec![1, 2, 3] });
-    assert_eq!(block.encode_with(ctx), vec![7, 0, 1, 2, 3]);
+    assert_eq!(block.encode_with(ctx).unwrap(), vec![7, 0, 1, 2, 3]);
 }
 
 #[test]
@@ -178,12 +175,12 @@ fn two_parameters_count_a_run_and_choose_an_arm() {
         kind: 2,
         body: Body { values: vec![0x0201, 0x0403], tail: Tail::Wide(9) },
     };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![2, 2, 1, 2, 3, 4, 9, 0, 0, 0]);
     assert_eq!(Frame::decode(&wire).expect("decodes"), (m, wire.len()));
 
     let m = Frame { items: 0, kind: 1, body: Body { values: vec![], tail: Tail::Small(5) } };
-    assert_eq!(m.encode(), vec![0, 1, 5]);
+    assert_eq!(m.encode().unwrap(), vec![0, 1, 5]);
     assert_eq!(Frame::decode(&[0, 1, 5]).expect("decodes").0, m);
 }
 
@@ -219,7 +216,7 @@ fn a_context_message_passes_one_of_its_own_fields_down() {
         tail_len: 2,
         middle: Middle { leaf_width: 3, leaf: Leaf { bytes: vec![1, 2, 3] }, tail: vec![8, 9] },
     };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![2, 3, 1, 2, 3, 8, 9]);
     assert_eq!(Outer::decode(&wire).expect("decodes"), (m, wire.len()));
 }
@@ -248,12 +245,12 @@ fn an_optional_and_a_placed_record_read_the_holders_value_too() {
         maybe: Some(Leaf { bytes: vec![1, 2] }),
         placed: Leaf { bytes: vec![3, 4] },
     };
-    let wire = m.encode();
+    let wire = m.encode().unwrap();
     assert_eq!(wire, vec![2, 1, 5, 1, 2, 3, 4]);
     assert_eq!(Held::decode(&wire).expect("decodes").0, m);
 
     let m = Held { flags: 0, off: 3, maybe: None, ..m };
-    assert_eq!(m.encode(), vec![2, 0, 3, 3, 4]);
+    assert_eq!(m.encode().unwrap(), vec![2, 0, 3, 3, 4]);
     assert_eq!(Held::decode(&[2, 0, 3, 3, 4]).expect("decodes").0, m);
 }
 
@@ -294,7 +291,7 @@ fn random_wires_through_a_holder_that_states_a_value() {
         let Ok((value, used)) = Epoch::decode(&wire) else { continue };
         decoded += 1;
         assert!(used <= wire.len(), "wire {i}: consumed {used} of {}", wire.len());
-        let out = value.encode();
+        let out = value.encode().unwrap();
         let (again, used_again) = Epoch::decode(&out)
             .unwrap_or_else(|e| panic!("wire {i}: re-encoded to bytes it refuses: {e:?}"));
         assert_eq!(value, again, "wire {i}: a round trip changed the value");

@@ -9,7 +9,9 @@ mod tokens;
 
 pub(crate) use derived::{Derived, SlotOf, back_patched, derivations};
 pub use fixed::{DispatchParts, EnumParts, LayoutParts, dispatch_parts, enum_parts, layout_parts};
-pub use message::{Check, ChoiceParts, MessageParts, choice_parts, message_parts};
+pub use message::{
+    Check, ChoiceParts, MessageParts, choice_parts, known, message_parts, refusal, signatures,
+};
 pub(crate) use reference::references;
 pub use row::field_rows;
 pub use tokens::{WidthAttr, kind_ty, width_attr};

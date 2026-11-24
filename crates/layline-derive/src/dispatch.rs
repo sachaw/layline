@@ -302,9 +302,19 @@ fn expand(catalog: &Catalog<'_>) -> TokenStream {
         let vid = v.ident;
         let ty = v.ty;
         quote! {
-            Self::#vid(payload) => <#ty as #root::Layout>::encode_into(payload, out),
+            Self::#vid(payload) => <#ty as #root::Layout>::encode_into(payload, out)?,
         }
     });
+    // The catalogue refuses what any arm's layout refuses.
+    let via: Vec<TokenStream> = catalog
+        .variants
+        .iter()
+        .map(|v| {
+            let ty = v.ty;
+            quote!(<#ty as #root::Layout>::ENCODE_FALLIBLE)
+        })
+        .collect();
+    let fallible = layline_codegen::__derive::refusal(false, &via);
 
     // A payload type used by two variants gets neither `From` nor `Slot`.
     // Types compare by last path segment, since `Sample` and `self::Sample` may be the same type.
@@ -402,17 +412,20 @@ fn expand(catalog: &Catalog<'_>) -> TokenStream {
                 }
             }
 
+            const ENCODE_FALLIBLE: ::core::primitive::bool = #fallible;
+
             fn encode_into<__B: #root::Buffer>(
                 &self,
                 out: &mut __B,
-            ) -> ::core::result::Result<(), #root::Overflow> {
+            ) -> ::core::result::Result<(), #root::EncodeError> {
                 match self {
                     #(#encode_arms)*
                     Self::#unknown { body, .. } => {
                         let bytes: &[::core::primitive::u8] = body;
-                        #root::Buffer::push(out, bytes)
+                        #root::Buffer::push(out, bytes)?;
                     }
                 }
+                ::core::result::Result::Ok(())
             }
         }
 

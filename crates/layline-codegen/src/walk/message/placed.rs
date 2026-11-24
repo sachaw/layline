@@ -21,7 +21,7 @@ impl Walk<'_> {
         seg: &Segment,
         last: bool,
     ) -> Result<(), Error> {
-        let Prelude { some, none, option, i64, .. } = self.root.prelude();
+        let Prelude { some, none, option, i64, err, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
         let Segment::Placed { name: field, kind, at, absent, doc, .. } = seg else {
             unreachable!("just matched")
@@ -33,6 +33,7 @@ impl Walk<'_> {
         self.public_fields.extend(quote! { #d pub #ident: #ty, });
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });
 
+        item.via.extend(super::refuse::held_refusal(kind, owner, false, root));
         let ctx = self.with_ctx(kind, own)?;
         let step = element_step(kind, field, ctx.as_ref(), root)?;
         let mut row = Row::new(field, span_of_kind(kind)).decoded_by(deferred_type(kind)).seek(at);
@@ -123,17 +124,15 @@ impl Walk<'_> {
                 let len_present =
                     stamp(SlotOf::Length, by, &quote!((out.len() - __span_start) as #i64))?;
                 let len_absent = stamp(SlotOf::Length, by, &quote!(0i64))?;
-                let msg = format!(
-                    "record `{field}` is present and measured zero bytes, and length field `{by}` \
-                     would be 0, which means absent"
-                );
                 self.byte_steps.extend(quote! {
                     match &#held {
                         #some(__e) => {
                             #at_present
                             let __span_start = out.len();
                             #write_one
-                            ::core::assert!(out.len() != __span_start, #msg);
+                            if out.len() == __span_start {
+                                return #err(#root::EncodeError::Empty { field: #field });
+                            }
                             #len_present
                             #pad
                         }

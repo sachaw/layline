@@ -60,7 +60,7 @@ fn a_chunk_decodes_and_re_encodes_byte_for_byte() {
     assert_eq!(&c.ctype, b"IHDR");
     assert_eq!(c.length, 13);
     assert_eq!(c.data.len(), 13);
-    assert_eq!(c.encode(), GREY_1X1);
+    assert_eq!(c.encode().unwrap(), GREY_1X1);
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn a_chunk_with_no_data_round_trips() {
     let (c, used) = Chunk::decode(&IEND).expect("parses");
     assert_eq!(used, IEND.len());
     assert_eq!((&c.ctype, c.length, c.data.len()), (b"IEND", 0, 0));
-    assert_eq!(c.encode(), IEND);
+    assert_eq!(c.encode().unwrap(), IEND);
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn the_header_fields_are_where_the_standard_puts_them() {
     assert_eq!((h.width, h.height), (640, 480));
     assert_eq!((h.bit_depth, h.colour_type), (8, 6));
     assert_eq!(h.interlace_method, 1, "Adam7");
-    assert_eq!(h.encode()[..], c.data[..]);
+    assert_eq!(h.encode().unwrap()[..], c.data[..]);
 }
 
 #[test]

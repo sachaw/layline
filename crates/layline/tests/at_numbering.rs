@@ -59,7 +59,7 @@ fn a_can_identifier_encodes_as_the_register_the_standard_draws() {
     assert!(id < 1 << 29);
     let w = CanId { id, ide: true, rtr: false, reserved: true };
     let oracle = (id << 3) | (1 << 2) | 1;
-    assert_eq!(w.encode(), oracle.to_be_bytes());
+    assert_eq!(w.encode().unwrap(), oracle.to_be_bytes());
     assert_eq!(CanId::decode(&oracle.to_be_bytes()), w);
 }
 
@@ -103,6 +103,6 @@ fn a_words_mode_pair_encodes_as_two_hand_built_words() {
     let mut oracle = [0u8; 4];
     oracle[..2].copy_from_slice(&word0.to_be_bytes());
     oracle[2..].copy_from_slice(&word1.to_be_bytes());
-    assert_eq!(p.encode(), oracle);
+    assert_eq!(p.encode().unwrap(), oracle);
     assert_eq!(Pair::decode(&oracle), p);
 }

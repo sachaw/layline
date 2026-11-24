@@ -342,7 +342,7 @@ pub struct LayoutDef {
     pub fields: Vec<Field>,
     /// Whether to generate a `<Name>View` that reads fields in place: `#[layout(.., view)]`.
     pub view: bool,
-    /// Whether encode keeps the low bits of a value wider than its field instead of panicking:
+    /// Whether encode keeps the low bits of a value wider than its field instead of refusing it:
     /// `#[layout(.., truncate)]`.
     pub truncate: bool,
     /// Documentation.

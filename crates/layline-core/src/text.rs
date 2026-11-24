@@ -6,7 +6,7 @@ use crate::{Buffer, Overflow};
 /// The encoding of a `#[text(Codec)]` field. A bare `#[text]` uses [`Utf8`].
 ///
 /// Text ends are found on bytes. `#[until(b)]` ends at the first byte `b`, and `#[bytes(N)]`
-/// strips trailing zero bytes before decoding. Encode panics, naming the field, if the text would
+/// strips trailing zero bytes before decoding. Encode refuses, naming the field, text that would
 /// not read back: an `#[until(b)]` text containing `b`, or a `#[bytes(N)]` text longer than `N`
 /// bytes or ending in a zero byte. An encoding whose characters can contain these bytes, such as
 /// UTF-16, needs `#[len]` or `#[fill]` instead.

@@ -92,7 +92,7 @@ fn fixed_runs_borrow_as_arrays_and_slices() {
 #[test]
 fn encode_writes_the_count_from_the_run() {
     let banner = Banner { version: 3, icon: &[1, 2, 3, 4], tag: b"OK", n: 0, extra: &[0xEE, 0xFF] };
-    assert_eq!(banner.encode(), [0x00, 0x03, 1, 2, 3, 4, b'O', b'K', 0x02, 0xEE, 0xFF]);
+    assert_eq!(banner.encode().unwrap(), [0x00, 0x03, 1, 2, 3, 4, b'O', b'K', 0x02, 0xEE, 0xFF]);
 }
 
 #[derive(layline::Message, Debug, Clone, PartialEq)]

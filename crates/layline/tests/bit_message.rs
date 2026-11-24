@@ -5,7 +5,7 @@
 
 use layline::{FieldCodec, Message, ParseError, U};
 use layline_core::num::{ExpGolomb, unzigzag, zigzag};
-use layline_core::{BitCodec, BitWriter, Buffer, Overflow};
+use layline_core::{BitCodec, BitWriter, Buffer, EncodeError};
 
 /// H.264 `se(v)`: `ue(v)` through zigzag, with the sign flipped.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -17,7 +17,7 @@ impl BitCodec<true> for Se {
         Ok((Self(-unzigzag(code.0)), used))
     }
 
-    fn encode<B: Buffer>(&self, out: &mut BitWriter<'_, B, true>) -> Result<(), Overflow> {
+    fn encode<B: Buffer>(&self, out: &mut BitWriter<'_, B, true>) -> Result<(), EncodeError> {
         ExpGolomb(zigzag(-self.0)).encode(out)
     }
 }
@@ -80,7 +80,7 @@ fn each_combination_of_the_two_optionals_is_the_bytes_the_widths_give() {
     ];
 
     for (value, wire) in cases {
-        assert_eq!(value.encode(), wire, "{value:?} encodes");
+        assert_eq!(value.encode().unwrap(), wire, "{value:?} encodes");
         let (back, used) = Header::decode(&wire).expect("parses");
         assert_eq!(back, value);
         assert_eq!(used, wire.len(), "the message occupies whole bytes");
@@ -93,11 +93,11 @@ fn the_presence_bit_comes_from_the_option_and_from_nothing_else() {
     let present = Header { origin: Some(0), ..absent.clone() };
 
     // Bit 5 of the message is the presence bit for `origin`: bit 2 from the top of byte 0.
-    assert_eq!(absent.encode()[0] & 0b0000_0100, 0);
-    assert_eq!(present.encode()[0] & 0b0000_0100, 0b0000_0100);
+    assert_eq!(absent.encode().unwrap()[0] & 0b0000_0100, 0);
+    assert_eq!(present.encode().unwrap()[0] & 0b0000_0100, 0b0000_0100);
 
     let loud = Header { version: 0xF, urgent: true, priority: 7, ..absent.clone() };
-    assert_eq!(loud.encode()[0] & 0b0000_0100, 0, "the other fields do not set it");
+    assert_eq!(loud.encode().unwrap()[0] & 0b0000_0100, 0, "the other fields do not set it");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn the_low_end_first_order_writes_the_same_fields_into_other_bits() {
         priority: 5,
     };
     let wire = vec![0b0011_1001, 0b1010_1111, 0b0101_0110, 0b0000_1011];
-    assert_eq!(value.encode(), wire);
+    assert_eq!(value.encode().unwrap(), wire);
     assert_eq!(LowFirst::decode(&wire).expect("parses").0, value);
 }
 
@@ -125,7 +125,7 @@ pub struct Thirteen {
 
 #[test]
 fn a_thirteen_bit_message_occupies_two_bytes_and_pads_the_last_three_with_zeros() {
-    let bytes = Thirteen { head: 0b1_1111, tail: 0xFF }.encode();
+    let bytes = Thirteen { head: 0b1_1111, tail: 0xFF }.encode().unwrap();
     assert_eq!(bytes.len(), 2);
     assert_eq!(bytes, [0b1111_1111, 0b1111_1000]);
     assert_eq!(bytes[1] & 0b111, 0, "the pad is zero");
@@ -184,7 +184,7 @@ fn a_parent_steps_over_the_whole_bytes_the_header_occupied() {
         0xBE,
         0xEF, // the body fills what is left
     ];
-    assert_eq!(packet.encode(), wire);
+    assert_eq!(packet.encode().unwrap(), wire);
 
     let (back, used) = Packet::decode(&wire).expect("parses");
     assert_eq!(back, packet);
@@ -196,7 +196,7 @@ fn a_shorter_header_moves_the_body_up() {
     let packet =
         Packet { magic: 0x1234, header: header(None, None), body: vec![0xDE, 0xAD, 0xBE, 0xEF] };
     let wire = vec![0x12, 0x34, 0b1001_1001, 0b0100_0000, 0xDE, 0xAD, 0xBE, 0xEF];
-    assert_eq!(packet.encode(), wire, "the header is 2 bytes with both optionals absent");
+    assert_eq!(packet.encode().unwrap(), wire, "the header is 2 bytes with both optionals absent");
     assert_eq!(Packet::decode(&wire).expect("parses").0, packet);
 }
 
@@ -221,7 +221,7 @@ pub struct Framed {
 fn a_bit_addressed_message_is_an_arm_like_any_other() {
     let framed = Framed { kind: 0, body: Body::Head(header(None, Some(Tag(0b10_1010)))) };
     let wire = vec![0, 0b1001_1011, 0b0101_0101];
-    assert_eq!(framed.encode(), wire);
+    assert_eq!(framed.encode().unwrap(), wire);
 
     let (back, used) = Framed::decode(&wire).expect("parses");
     assert_eq!(back, framed);
@@ -244,11 +244,11 @@ fn a_type_that_carries_its_width_needs_no_attribute_and_a_signed_field_extends_i
     let value = Carried { flag: true, small: U::new(5).expect("3 bits"), wide: -3, spare: 0b101 };
     // 1 | 101 | 111111101 | 101, padded to 16 bits.
     let wire = vec![0b1101_1111, 0b1110_1101];
-    assert_eq!(value.encode(), wire);
+    assert_eq!(value.encode().unwrap(), wire);
     assert_eq!(Carried::decode(&wire).expect("parses").0, value);
 
     let positive = Carried { wide: 255, ..value };
-    assert_eq!(Carried::decode(&positive.encode()).expect("parses").0.wide, 255);
+    assert_eq!(Carried::decode(&positive.encode().unwrap()).expect("parses").0.wide, 255);
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -262,7 +262,7 @@ pub struct Scaled {
 #[test]
 fn a_float_field_keeps_the_bits_ieee_754_gives_it() {
     let value = Scaled { channel: 9, scale: -1.5 };
-    let wire = value.encode();
+    let wire = value.encode().unwrap();
     assert_eq!(wire.len(), 5, "4 + 32 bits, padded to 5 bytes");
     assert_eq!(Scaled::decode(&wire).expect("parses").0, value);
 
@@ -337,20 +337,20 @@ pub struct Run {
 fn a_var_field_takes_the_bits_its_own_coding_gives_it() {
     // 101 | 00101 | 1001, padded to 16 bits.
     let value = Run { channel: 5, length: ExpGolomb(4), tail: 9 };
-    assert_eq!(value.encode(), [0b1010_0101, 0b1001_0000]);
-    assert_eq!(Run::decode(&value.encode()).expect("parses"), (value, 2));
+    assert_eq!(value.encode().unwrap(), [0b1010_0101, 0b1001_0000]);
+    assert_eq!(Run::decode(&value.encode().unwrap()).expect("parses"), (value, 2));
 
     // 101 | 1 | 1001 is 8 bits, and the pad is empty.
     let short = Run { channel: 5, length: ExpGolomb(0), tail: 9 };
-    assert_eq!(short.encode(), [0b1011_1001]);
-    assert_eq!(Run::decode(&short.encode()).expect("parses"), (short, 1));
+    assert_eq!(short.encode().unwrap(), [0b1011_1001]);
+    assert_eq!(Run::decode(&short.encode().unwrap()).expect("parses"), (short, 1));
 }
 
 #[test]
 fn a_wider_value_moves_the_field_behind_it() {
     for n in [0u64, 1, 2, 7, 8, 300, 65_000, u32::MAX as u64] {
         let value = Run { channel: 5, length: ExpGolomb(n), tail: 9 };
-        let wire = value.encode();
+        let wire = value.encode().unwrap();
         let (back, used) = Run::decode(&wire).expect("parses");
         assert_eq!(back, value, "code number {n}");
         assert_eq!(used, wire.len());
@@ -416,25 +416,25 @@ fn a_gated_field_is_on_the_wire_when_the_earlier_field_says_so() {
         tag: Some(Tag(0b10_1010)),
         priority: 5,
     };
-    assert_eq!(both.encode(), [0b1011_1101, 0b0101_1110, 0b0101_0101, 0b0100_0000]);
-    assert_eq!(Gated::decode(&both.encode()).expect("parses"), (both.clone(), 4));
+    assert_eq!(both.encode().unwrap(), [0b1011_1101, 0b0101_1110, 0b0101_0101, 0b0100_0000]);
+    assert_eq!(Gated::decode(&both.encode().unwrap()).expect("parses"), (both.clone(), 4));
 
     // 1010 | 0 | 101, padded to 8 bits.
     let neither = Gated { flags: 0b1010, urgent: false, origin: None, tag: None, ..both };
-    assert_eq!(neither.encode(), [0b1010_0101]);
-    assert_eq!(Gated::decode(&neither.encode()).expect("parses"), (neither, 1));
+    assert_eq!(neither.encode().unwrap(), [0b1010_0101]);
+    assert_eq!(Gated::decode(&neither.encode().unwrap()).expect("parses"), (neither, 1));
 }
 
 #[test]
 fn the_flag_bits_come_from_is_some_and_the_other_bits_stand() {
     let full = Gated { flags: 0b1111, urgent: true, origin: None, tag: None, priority: 0 };
-    let (back, _) = Gated::decode(&full.encode()).expect("parses");
+    let (back, _) = Gated::decode(&full.encode().unwrap()).expect("parses");
     assert_eq!(back.flags, 0b1110, "the governed bit is cleared for a `None`");
     assert!(!back.urgent, "a whole-field flag is the presence of its field");
     assert_eq!((back.origin, back.tag), (None, None));
 
     let empty = Gated { flags: 0b0000, urgent: false, origin: Some(0), tag: None, priority: 0 };
-    let (back, _) = Gated::decode(&empty.encode()).expect("parses");
+    let (back, _) = Gated::decode(&empty.encode().unwrap()).expect("parses");
     assert_eq!(back.flags, 0b0001, "the governed bit is set for a `Some`");
     assert_eq!(back.origin, Some(0));
 }
@@ -485,7 +485,7 @@ fn a_presence_bit_and_a_flag_bit_read_the_same_message() {
         Mixed { flags: 0b0000, level: None, delta: None, spare: Some(7), tail: 1 },
     ];
     for value in &cases {
-        let wire = value.encode();
+        let wire = value.encode().unwrap();
         let (back, used) = Mixed::decode(&wire).expect("parses");
         assert_eq!(&back, value);
         assert_eq!(used, wire.len());
@@ -493,7 +493,7 @@ fn a_presence_bit_and_a_flag_bit_read_the_same_message() {
 
     // 0010 | 01001 | 1 | 00111 | 1 | 101 | 10, where the coding for -3 is five bits.
     // 21 bits, padded to 3 bytes.
-    assert_eq!(cases[0].encode(), [0b0010_0100, 0b1100_1111, 0b1011_0000]);
+    assert_eq!(cases[0].encode().unwrap(), [0b0010_0100, 0b1100_1111, 0b1011_0000]);
 }
 
 #[test]

@@ -3,7 +3,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Layout, Message};
+use layline::{EncodeError, Layout, Message};
 
 #[derive(Debug, Clone, PartialEq, Layout)]
 #[layout(bits = 24)]
@@ -103,7 +103,7 @@ fn a_packed_header_drives_a_count_an_offset_a_flag_and_a_switch() {
         0x22, 0x11,
         0x44, 0x33,
     ];
-    assert_eq!(p.encode(), wire);
+    assert_eq!(p.encode().unwrap(), wire);
 
     let (back, used) = Packet::decode(&wire).expect("parses");
     assert_eq!(used, wire.len());
@@ -135,7 +135,7 @@ fn the_same_header_selects_a_different_arm_and_no_optional_field() {
         0x02, 0x01,
         0xFF, 0x00,
     ];
-    assert_eq!(p.encode(), wire);
+    assert_eq!(p.encode().unwrap(), wire);
 
     let (back, used) = Packet::decode(&wire).expect("parses");
     assert_eq!(used, wire.len());
@@ -162,7 +162,7 @@ fn the_stamp_follows_the_child_s_byte_order_and_not_the_walk_s() {
         0x22, 0x11,
         0x44, 0x33,
     ];
-    assert_eq!(p.encode(), wire);
+    assert_eq!(p.encode().unwrap(), wire);
 
     let (back, used) = PacketBe::decode(&wire).expect("parses");
     assert_eq!(used, wire.len());
@@ -182,7 +182,7 @@ fn a_stamp_through_a_child_leaves_its_neighbours_alone() {
         entries: vec![Entry { tag: 0xFFFF }, Entry { tag: 0xFFFF }],
     };
 
-    let bytes = p.encode();
+    let bytes = p.encode().unwrap();
     assert_eq!(&bytes[..3], &[0xC9, 0xC6, 0xFF]);
 
     let (back, _) = Packet::decode(&bytes).expect("parses");
@@ -193,9 +193,6 @@ fn a_stamp_through_a_child_leaves_its_neighbours_alone() {
 }
 
 #[test]
-#[should_panic(
-    expected = "field `header.n_entries` is too narrow for the length of a collection the wire derives it from"
-)]
 fn a_count_too_large_for_a_nested_field_is_refused() {
     let ok = Packet {
         header: Header { kind: 0, n_entries: 0, flags: 0, table_offset: 0, spare: 0 },
@@ -203,9 +200,12 @@ fn a_count_too_large_for_a_nested_field_is_refused() {
         body: Body::Level(0),
         entries: vec![Entry { tag: 0 }; 15],
     };
-    assert_eq!(ok.encode()[0] >> 2 & 0xF, 15, "15 is the largest count four bits contain");
+    assert_eq!(ok.encode().unwrap()[0] >> 2 & 0xF, 15, "15 is the largest count four bits contain");
 
-    let _ = Packet { entries: vec![Entry { tag: 0 }; 16], ..ok }.encode();
+    assert_eq!(
+        Packet { entries: vec![Entry { tag: 0 }; 16], ..ok }.encode(),
+        Err(EncodeError::Unfit { field: "header.n_entries", value: 16, bits: 4 })
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Layout)]
@@ -230,9 +230,6 @@ pub struct Narrow {
 }
 
 #[test]
-#[should_panic(
-    expected = "field `head.at` is too narrow for the position of a collection the wire derives it from"
-)]
 fn an_offset_too_large_for_a_nested_field_is_refused() {
     let ok = Narrow {
         head: TinyHeader { n: 0, at: 0 },
@@ -240,8 +237,11 @@ fn an_offset_too_large_for_a_nested_field_is_refused() {
         pad: vec![0; 13],
         table: vec![1, 2],
     };
-    assert_eq!(ok.encode()[0] >> 4, 15);
-    assert_eq!(Narrow::decode(&ok.encode()).expect("parses").0.table, vec![1, 2]);
+    assert_eq!(ok.encode().unwrap()[0] >> 4, 15);
+    assert_eq!(Narrow::decode(&ok.encode().unwrap()).expect("parses").0.table, vec![1, 2]);
 
-    let _ = Narrow { pad: vec![0; 14], ..ok }.encode();
+    assert_eq!(
+        Narrow { pad: vec![0; 14], ..ok }.encode(),
+        Err(EncodeError::Unfit { field: "head.at", value: 16, bits: 4 })
+    );
 }

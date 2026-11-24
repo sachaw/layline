@@ -72,6 +72,8 @@ pub(super) struct Writing<'a> {
     /// The field's index into `__LAYLINE_LENSES`.
     pub(super) idx: usize,
     pub(super) name: &'a syn::Ident,
+    /// Refuse a value its field cannot hold, rather than keep its low bits: encode without
+    /// `truncate`. A nested layout refuses as its own encode does either way.
     pub(super) fits_guard: bool,
 }
 
@@ -466,7 +468,13 @@ fn decode_value(p: &Packed, a: &Access, raw: TokenStream, root: &Root) -> TokenS
     }
 }
 
-fn encode_raw(p: &Packed, a: &Access, value: &TokenStream, root: &Root) -> TokenStream {
+fn encode_raw(
+    p: &Packed,
+    a: &Access,
+    value: &TokenStream,
+    refused: Option<&syn::Ident>,
+    root: &Root,
+) -> TokenStream {
     let ty = &p.ty;
     let raw_ty = a.raw_ty();
     match p.reading {
@@ -476,7 +484,17 @@ fn encode_raw(p: &Packed, a: &Access, value: &TokenStream, root: &Root) -> Token
         Reading::Uint(_) => quote! { #value as #raw_ty },
         Reading::Int => quote! { (#value as ::core::primitive::i64) as #raw_ty },
         Reading::Bool | Reading::Codec => {
-            let raw = quote! { <#ty as #root::FieldCodec>::to_raw(&#value) };
+            let raw = match (p.reading, refused) {
+                // The codec refuses a value its bits cannot hold, naming this field.
+                (Reading::Codec, Some(name)) => {
+                    let name = name.to_string();
+                    quote! {
+                        <#ty as #root::FieldCodec>::try_raw(&#value)
+                            .map_err(|__e| __e.named(#name))?
+                    }
+                }
+                _ => quote! { <#ty as #root::FieldCodec>::to_raw(&#value) },
+            };
             if a.u64_raw() {
                 raw
             } else {
@@ -507,43 +525,60 @@ pub(super) fn narrowed(body: &Body) -> bool {
     }
 }
 
-/// Asserts the value fits its width. Otherwise the mask would silently encode a different value.
+/// Whether a value can be too wide for the field: an integer narrower than its type.
+///
+/// A codec refuses its own values through `FieldCodec::try_raw`.
+pub(super) fn refuses_width(p: &Packed) -> bool {
+    match p.reading {
+        Reading::Uint(prim) => p.bits < prim,
+        Reading::Int => p.bits < int_width(&p.ty),
+        Reading::Bool | Reading::Codec | Reading::Native(_) => false,
+    }
+}
+
+/// The width of a signed integer type, or 64 if it is not one.
+fn int_width(ty: &syn::Type) -> u32 {
+    match quote!(#ty).to_string().as_str() {
+        "i8" => 8,
+        "i16" => 16,
+        "i32" => 32,
+        _ => 64,
+    }
+}
+
+/// Refuses a value too wide for its field. Otherwise the mask would silently encode a different
+/// value.
 pub(super) fn fits_check(
     p: &Packed,
     value: &TokenStream,
     name: &syn::Ident,
     root: &Root,
 ) -> TokenStream {
+    if !refuses_width(p) {
+        return quote!();
+    }
     let width = p.bits;
-    let msg = format!("field `{name}`: value does not fit #[bits({width})]");
-    match p.reading {
-        Reading::Int if width < 64 => {
-            let lo = -(1i64 << (width - 1));
-            let hi = (1i64 << (width - 1)) - 1;
-            quote! {
-                ::core::assert!(
-                    (#value as ::core::primitive::i64) >= #lo
-                        && (#value as ::core::primitive::i64) <= #hi,
-                    #msg
-                );
-            }
+    let field = name.to_string();
+    let fits = match p.reading {
+        Reading::Int => {
+            let lo = proc_macro2::Literal::i64_suffixed(-(1i64 << (width - 1)));
+            let hi = proc_macro2::Literal::i64_suffixed((1i64 << (width - 1)) - 1);
+            quote! { (#lo..=#hi).contains(&(#value as ::core::primitive::i64)) }
         }
-        Reading::Codec if width < 64 => {
-            let ty = &p.ty;
-            quote! {
-                ::core::assert!(
-                    <#ty as #root::FieldCodec>::to_raw(&#value) >> #width == 0,
-                    #msg
-                );
-            }
-        }
-        Reading::Uint(prim) if width < prim => {
+        Reading::Uint(prim) => {
             let raw = if prim > 64 { quote!(u128) } else { quote!(u64) };
-            quote! {
-                ::core::assert!((#value as ::core::primitive::#raw) >> #width == 0, #msg);
-            }
+            quote! { (#value as ::core::primitive::#raw) >> #width == 0 }
         }
-        _ => quote!(),
+        _ => return quote!(),
+    };
+    quote! {
+        if !(#fits) {
+            return ::core::result::Result::Err(#root::EncodeError::Unfit {
+                field: #field,
+                value: #value as ::core::primitive::i128,
+                bits: #width,
+            });
+        }
     }
 }
 
@@ -608,15 +643,22 @@ impl Plan<'_> {
         match body {
             Body::Packed(p) => {
                 let access = self.access(at, p, w.idx, w.place);
-                let raw = encode_raw(p, &access, value, self.root);
+                let refused = w.fits_guard.then_some(w.name);
+                let raw = encode_raw(p, &access, value, refused, self.root);
                 let guard =
                     if w.fits_guard { fits_check(p, value, w.name, self.root) } else { quote!() };
                 let store = self.store(&access, w.place, raw);
                 quote! { #guard #store }
             }
-            Body::Nested { bytes, .. } => {
-                let (buf, a) = (&w.place.buf, (at / 8) as usize);
-                put(buf, &quote!(#a), *bytes, &quote!(#value.encode()))
+            Body::Nested { ty, bytes, .. } => {
+                // The child writes its own bytes, refusing what its own encode refuses.
+                let (buf, a, root) = (&w.place.buf, (at / 8) as usize, self.root);
+                quote! {
+                    <#ty as #root::Layout>::encode_into(
+                        &#value,
+                        &mut #root::Fixed::new(&mut #buf[#a..#a + #bytes]),
+                    )?;
+                }
             }
             Body::Repeat { .. } if native_leaf(body) => {
                 let off = Literal::usize_unsuffixed((at / 8) as usize);

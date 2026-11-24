@@ -53,7 +53,7 @@ fn an_emitted_enum_selects_the_arm() {
         (Frame { kind: Kind::Ping, body: Body::Ping(0x0102) }, vec![1, 0x02, 0x01]),
         (Frame { kind: Kind::Pong, body: Body::Pong(7) }, vec![2, 7, 0, 0, 0]),
     ] {
-        assert_eq!(frame.encode(), wire, "{frame:?}");
+        assert_eq!(frame.encode().unwrap(), wire, "{frame:?}");
         assert_eq!(Frame::decode(&wire), Ok((frame, wire.len())));
     }
 }
@@ -61,7 +61,7 @@ fn an_emitted_enum_selects_the_arm() {
 #[test]
 fn encode_states_the_selector_from_the_arm() {
     let frame = Frame { kind: Kind::Unknown(9), body: Body::Pong(7) };
-    assert_eq!(frame.encode()[0], 2);
+    assert_eq!(frame.encode().unwrap()[0], 2);
 }
 
 #[test]

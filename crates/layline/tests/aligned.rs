@@ -48,7 +48,7 @@ fn an_odd_riff_chunk_is_followed_by_an_uncounted_pad_byte() {
         form: *b"WAVE",
         chunks: vec![chunk(b"fmt ", &[1, 2, 3]), chunk(b"data", &[9, 9])],
     };
-    assert_eq!(riff.encode(), WAVE);
+    assert_eq!(riff.encode().unwrap(), WAVE);
 
     let (back, used) = Riff::decode(&WAVE).expect("parses");
     assert_eq!(used, 34);
@@ -62,7 +62,11 @@ fn decode_skips_the_pad_without_reading_it() {
     let mut odd = [b'f', b'm', b't', b' ', 1, 0, 0, 0, 7, 0xFF];
     let (back, used) = Chunk::decode(&odd).expect("parses");
     assert_eq!((back.body.as_slice(), used), (&[7][..], 10));
-    assert_eq!(back.encode(), [b'f', b'm', b't', b' ', 1, 0, 0, 0, 7, 0], "encode writes zeros");
+    assert_eq!(
+        back.encode().unwrap(),
+        [b'f', b'm', b't', b' ', 1, 0, 0, 0, 7, 0],
+        "encode writes zeros"
+    );
 
     odd[4] = 2;
     assert_eq!(Chunk::decode(&odd).map(|(c, _)| c.body), Ok(vec![7, 0xFF]), "an even body");
@@ -100,11 +104,11 @@ pub struct CommandFrame {
 fn a_ring_frame_pads_to_even() {
     let frame = CommandFrame { magic: 0, channel: 0x0102, len: 0, payload: vec![0xAA, 0xBB, 0xCC] };
     let wire = [0x66, 0x99, 0x02, 0x01, 0x03, 0x00, 0xAA, 0xBB, 0xCC, 0x00];
-    assert_eq!(frame.encode(), wire);
+    assert_eq!(frame.encode().unwrap(), wire);
     assert_eq!(CommandFrame::decode(&wire).expect("parses").1, 10);
 
     let even = CommandFrame { payload: vec![0xAA, 0xBB], ..frame };
-    assert_eq!(even.encode(), [0x66, 0x99, 0x02, 0x01, 0x02, 0x00, 0xAA, 0xBB]);
+    assert_eq!(even.encode().unwrap(), [0x66, 0x99, 0x02, 0x01, 0x02, 0x00, 0xAA, 0xBB]);
 }
 
 /// A name padded to four bytes, then a field after it.
@@ -123,7 +127,7 @@ fn padded_text_is_followed_by_the_next_field() {
     let named = Named { n: 0, name: String::from("abcde"), tail: 0x77 };
     // n, five bytes of name, three of padding: eight bytes from the name's start.
     let wire = [5, b'a', b'b', b'c', b'd', b'e', 0, 0, 0, 0x77];
-    assert_eq!(named.encode(), wire);
+    assert_eq!(named.encode().unwrap(), wire);
     assert_eq!(Named::decode(&wire), Ok((Named { n: 5, ..named }, 10)));
 }
 
@@ -158,7 +162,7 @@ pub struct Tlv {
 fn a_padded_switch_window_is_followed_by_the_next_field() {
     let tlv = Tlv { tag: 0, len: 0, body: Body::One(Byte { v: 0x42 }), tail: 0x77 };
     let wire = [1, 1, 0x42, 0, 0, 0, 0x77];
-    assert_eq!(tlv.encode(), wire);
+    assert_eq!(tlv.encode().unwrap(), wire);
     assert_eq!(Tlv::decode(&wire), Ok((Tlv { tag: 1, len: 1, ..tlv }, 7)));
 }
 
@@ -205,7 +209,7 @@ fn a_record_may_count_its_own_padding() {
     // Encode writes the length the record measures, which includes its own padding.
     let mut rewritten = SDK;
     rewritten[4] = 16;
-    assert_eq!(sdat.encode(), rewritten);
+    assert_eq!(sdat.encode().unwrap(), rewritten);
 }
 
 #[test]
@@ -217,7 +221,7 @@ fn encode_pads_a_record_after_its_true_length() {
         8, 0, 0, 0, 13, 0, 0, 0,
         b'S', b'Y', b'M', b'B', 13, 0, 0, 0, b'a', 0, b'b', b'c', 0, 0, 0, 0,
     ];
-    assert_eq!(sdat.encode(), wire);
+    assert_eq!(sdat.encode().unwrap(), wire);
     assert_eq!(Sdat::decode(&wire).map(|(s, used)| (s.symb_size, used)), Ok((13, 24)));
 }
 
@@ -245,7 +249,7 @@ pub struct Sector {
 
 #[test]
 fn a_wide_alignment_pads_byte_by_byte() {
-    let wire = Sector { n: 0, data: vec![7] }.encode();
+    let wire = Sector { n: 0, data: vec![7] }.encode().unwrap();
     assert_eq!(wire.len(), 81);
     assert_eq!((wire[0], wire[1]), (1, 7));
     assert!(wire[2..].iter().all(|&b| b == 0));

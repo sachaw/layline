@@ -5,6 +5,7 @@ use quote::{format_ident, quote};
 
 use super::body::{Bind, Item, Own, Walk, needs_clone};
 use super::cursor::read_layout;
+use super::refuse::held_refusal;
 use super::table::{Row, deferred_type, span_of_kind};
 use super::value::{value_read, value_write};
 use crate::root::Prelude;
@@ -79,6 +80,7 @@ impl Walk<'_> {
             item.opt_n += 1;
             let len = Literal::usize_unsuffixed((bits / 8) as usize);
             item.items.extend(hidden_block(root, &sub, &len, &self.endian, block_field(f, root)));
+            item.via.push(quote!(<#sub as #root::Layout>::ENCODE_FALLIBLE));
             row = row.table(&sub, core::slice::from_ref(f), bits, item.endian);
             let take = if needs_clone(&f.kind) { quote!(__v.clone()) } else { quote!(*__v) };
             let read = read_layout(&format_ident!("__o"), &sub, &len, root);
@@ -87,9 +89,10 @@ impl Walk<'_> {
                     #read
                     #some(__o.#ident)
                 },
-                quote! { out.push(&#sub { #ident: #take }.encode_in::<__O>())?; },
+                quote! { out.push(&#sub { #ident: #take }.encode_in::<__O>()?)?; },
             )
         } else {
+            item.via.extend(held_refusal(&f.kind, owner, false, root));
             let ctx = self.with_ctx(&f.kind, own)?;
             let inner = value_read(&self.env, owner, &f.name, &f.kind, ctx.as_ref(), root)?;
             (
@@ -111,13 +114,13 @@ impl Walk<'_> {
         if let Some((flag, ..)) = when.tests()
             && self.is_param(flag)
         {
-            let msg = format!(
-                "optional field `{}`: whether it is `Some` is not what parameter `{flag}` states. \
-                 Decode would read a different body",
-                f.name
-            );
+            let name = f.name.as_str();
             self.byte_steps.extend(quote! {
-                ::core::assert!((#held).is_some() == (#present), #msg);
+                #root::EncodeError::agree(
+                    #name,
+                    ::core::primitive::i64::from((#held).is_some()),
+                    ::core::primitive::i64::from(#present),
+                )?;
             });
         }
         self.byte_steps.extend(quote! {

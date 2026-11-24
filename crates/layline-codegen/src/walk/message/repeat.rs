@@ -114,7 +114,7 @@ pub(super) fn element_step(
                     <#p as #root::Layout>::decode_slice(__s)
                         .map_err(|__err| __err.rebased(__at))?
                 },
-                write: quote! { out.push(&__e.encode())?; },
+                write: quote! { <#p as #root::Layout>::encode_into(__e, out)?; },
             })
         }
         Kind::Scalar(s) => {
@@ -169,6 +169,7 @@ impl Walk<'_> {
         if collection.borrows() {
             return self.borrowed(item, own, seg);
         }
+        item.via.extend(super::refuse::held_refusal(element, owner, true, root));
         let coll_ident = ident(coll);
         let elem_ty = kind_ty(element, root);
         let (coll_ty, coll_val) = match collection {
@@ -395,51 +396,37 @@ impl Walk<'_> {
         if matches!(count, Count::Window(_) | Count::Terminated { .. } | Count::Fill { .. })
             && matches!(step, Step::Discovered { .. })
         {
-            let msg = format!(
-                "collection `{coll}`: an element encoded to zero bytes. \
-                 Decode rejects that in a run without a count"
-            );
-            each.extend(quote! { ::core::assert!(out.len() > __elem, #msg); });
+            each.extend(quote! {
+                if out.len() == __elem {
+                    return #err(#root::EncodeError::Empty { field: #coll });
+                }
+            });
         }
+        let i64 = quote!(::core::primitive::i64);
         let (before, after) = match count {
             // The holder writes a parameter, so encode checks the elements against it.
             Count::Window(Len::Field { by, .. }) if self.is_param(&by.field) => {
                 let stated = self.param_number(by).expect("a parameter");
-                let msg = format!(
-                    "collection `{coll}`: its byte length is not what parameter `{}` states. \
-                     Decode would read a different run",
-                    by.field
-                );
                 (
                     quote! { let __span_start = out.len(); },
                     quote! {
-                        ::core::assert!((out.len() - __span_start) as ::core::primitive::i64 == #stated, #msg);
+                        #root::EncodeError::agree(#coll, (out.len() - __span_start) as #i64, #stated)?;
                     },
                 )
             }
             Count::Field { by, .. } | Count::Strided { by, .. } if self.is_param(&by.field) => {
                 let stated = self.param_number(by).expect("a parameter");
-                let msg = format!(
-                    "collection `{coll}`: its length is not what parameter `{}` states. \
-                     Decode would read a different number of elements",
-                    by.field
-                );
                 (
-                    quote! { ::core::assert!((#held).len() as ::core::primitive::i64 == #stated, #msg); },
+                    quote! { #root::EncodeError::agree(#coll, (#held).len() as #i64, #stated)?; },
                     quote!(),
                 )
             }
             Count::Squared { by, .. } if self.is_param(&by.field) => {
                 let stated = self.param_number(by).expect("a parameter");
-                let msg = format!(
-                    "collection `{coll}`: its length is not the square parameter `{}` states. \
-                     Decode would read a different number of elements",
-                    by.field
-                );
                 (
                     quote! {
                         let __side = #stated;
-                        ::core::assert!((#held).len() as ::core::primitive::i64 == __side * __side, #msg);
+                        #root::EncodeError::agree(#coll, (#held).len() as #i64, __side * __side)?;
                     },
                     quote!(),
                 )
@@ -452,51 +439,47 @@ impl Walk<'_> {
                     &affine_inverse(
                         quote!(out.len() - __span_start),
                         (by.scale, by.offset),
-                        *cap,
-                        (&by.field, "byte length of a collection"),
+                        cap.map(|cap| (cap, coll.as_str())),
+                        &by.field,
                         root,
                     ),
                     root,
                 )?,
             ),
             Count::Window(Len::Bytes(n)) => {
-                let lit = Literal::usize_unsuffixed(*n);
-                let msg = format!(
-                    "collection `{coll}` is {n} bytes and its elements did not fill it exactly"
-                );
+                let lit = Literal::i64_unsuffixed(*n as i64);
                 (
                     quote! { let __span_start = out.len(); },
-                    quote! { ::core::assert!(out.len() - __span_start == #lit, #msg); },
+                    quote! {
+                        #root::EncodeError::agree(#coll, (out.len() - __span_start) as #i64, #lit)?;
+                    },
                 )
             }
             Count::Window(Len::Until { terminator }) => {
                 let t = Literal::u8_unsuffixed(*terminator);
-                let msg = format!(
-                    "collection `{coll}`: an element starts with terminator byte {terminator:#04x}. \
-                     Decode would end the run there"
-                );
-                each.extend(quote! { ::core::assert!(out.written()[__elem] != #t, #msg); });
+                each.extend(quote! {
+                    if out.written()[__elem] == #t {
+                        return #err(#root::EncodeError::Delimiter { field: #coll, byte: #t });
+                    }
+                });
                 (quote!(), quote! { out.push(&[#t])?; })
             }
             // The last element sets the mask, and every element before it must leave the mask clear.
             Count::Terminated { mask } => {
                 let m = Literal::u8_unsuffixed(*mask);
-                let empty = format!(
-                    "collection `{coll}` is empty, but a run ended by mask {mask:#04x} needs an element"
-                );
-                let early = format!(
-                    "collection `{coll}`: an element before the last has mask {mask:#04x} set. \
-                     Decode would end the run there"
-                );
                 each.extend(quote! {
-                    if let #some(__prev) = __last {
-                        ::core::assert!(out.written()[__prev] & #m != #m, #early);
+                    if let #some(__prev) = __last
+                        && out.written()[__prev] & #m == #m
+                    {
+                        return #err(#root::EncodeError::Delimiter { field: #coll, byte: #m });
                     }
                     __last = #some(__elem);
                 });
                 (
                     quote! {
-                        ::core::assert!(!(#held).is_empty(), #empty);
+                        if (#held).is_empty() {
+                            return #err(#root::EncodeError::Empty { field: #coll });
+                        }
                         let mut __last = #none;
                     },
                     quote! {
@@ -508,8 +491,7 @@ impl Walk<'_> {
             }
             Count::Fill { cap: Some(cap) } => {
                 let lit = Literal::usize_unsuffixed(*cap);
-                let msg = format!("collection `{coll}` passes its cap of {cap} elements");
-                (quote! { ::core::assert!((#held).len() <= #lit, #msg); }, quote!())
+                (quote! { #root::EncodeError::cap(#coll, (#held).len(), #lit)?; }, quote!())
             }
             _ => (quote!(), quote!()),
         };
@@ -632,22 +614,21 @@ impl Walk<'_> {
                     &affine_inverse(
                         quote!(out.len() - __span_start),
                         (by.scale, by.offset),
-                        *cap,
-                        (&by.field, "byte length of a collection"),
+                        cap.map(|cap| (cap, coll.as_str())),
+                        &by.field,
                         root,
                     ),
                     root,
                 )?,
             ),
             Count::Window(Len::Bytes(n)) if *collection == Collection::Borrowed => {
-                let lit = Literal::usize_unsuffixed(*n);
-                let msg = format!("collection `{coll}` is {n} bytes and holds a different number");
-                (quote!(), quote! { ::core::assert!(#held.len() == #lit, #msg); })
+                let lit = Literal::i64_unsuffixed(*n as i64);
+                let i64 = quote!(::core::primitive::i64);
+                (quote!(), quote! { #root::EncodeError::agree(#coll, #held.len() as #i64, #lit)?; })
             }
             Count::Fill { cap: Some(cap) } => {
                 let lit = Literal::usize_unsuffixed(*cap);
-                let msg = format!("collection `{coll}` passes its cap of {cap} elements");
-                (quote! { ::core::assert!(#held.len() <= #lit, #msg); }, quote!())
+                (quote! { #root::EncodeError::cap(#coll, #held.len(), #lit)?; }, quote!())
             }
             _ => (quote!(), quote!()),
         };

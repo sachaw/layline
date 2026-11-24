@@ -114,8 +114,8 @@ fn construction_by_setters_equals_construction_by_mirror() {
     built.set_count(1234);
     built.set_fault(false);
 
-    assert_eq!(built.as_wire(), &owned.encode());
-    assert_eq!(StatusWordView::from(&owned), built);
+    assert_eq!(built.as_wire(), &owned.encode().unwrap());
+    assert_eq!(StatusWordView::try_from(&owned).unwrap(), built);
     assert_eq!(built.decode(), owned);
 }
 
@@ -178,7 +178,7 @@ fn a_view_does_not_truncate_a_wide_carry() {
 
     let all_ones = (1u128 << 68) - 1;
     for body in [0, 1, all_ones, all_ones >> 1, 0x1_DEAD_BEEF_CAFE_F00D] {
-        let wire = Carry { wf: 0b10, body, spare: 0 }.encode();
+        let wire = Carry { wf: 0b10, body, spare: 0 }.encode().unwrap();
         assert_eq!(Carry::decode(&wire).body, body, "decode lost bits");
         assert_eq!(
             CarryView::from_wire(&wire).body(),
