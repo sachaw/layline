@@ -31,16 +31,16 @@ impl Node {
     }
 }
 
-// SAFETY: a `Node` is never written after its `static` is initialized, and its links point only
-// at other such statics or at constants.
-unsafe impl Sync for Node {}
-
 /// A link to a [`Node`] in a `static`, which a constant may hold before the static has a value.
 ///
 /// A reference would make the compiler check the static's value when it checks the constant,
 /// and in a cycle that value is still being computed.
 #[derive(Clone, Copy)]
 pub struct Link(*const Node);
+
+// SAFETY: a link is made only from a `&'static Node`, and a `Node` is never written after its
+// `static` is initialized.
+unsafe impl Sync for Link {}
 
 impl Link {
     /// A link to `node`.
@@ -93,19 +93,18 @@ const fn same(a: &str, b: &str) -> bool {
     true
 }
 
-/// Depth-first, visiting each node with an id once, and reading each leaf where it is linked.
+/// Breadth-first, visiting each node with an id once, and reading each leaf where it is linked.
+///
+/// The nodes seen are the work list: each is pushed once, and read once its turn comes.
 const fn search(start: Link, holds: bool) -> bool {
-    let first = start.get();
-    if decides(first, holds) {
+    if decides(start.get(), holds) {
         return true;
     }
-    let mut seen: [&str; MOST] = [""; MOST];
-    let mut stack: [Link; MOST] = [start; MOST];
-    let (mut n_seen, mut top) = (1, 1);
-    seen[0] = first.id;
-    while top > 0 {
-        top -= 1;
-        let out = edges(stack[top].get(), holds);
+    let mut seen: [Link; MOST] = [start; MOST];
+    let (mut done, mut found) = (0, 1);
+    while done < found {
+        let out = edges(seen[done].get(), holds);
+        done += 1;
         let mut i = 0;
         while i < out.len() {
             let next = out[i].get();
@@ -114,16 +113,14 @@ const fn search(start: Link, holds: bool) -> bool {
             }
             let mut known = next.id.is_empty();
             let mut j = 0;
-            while !known && j < n_seen {
-                known = same(seen[j], next.id);
+            while !known && j < found {
+                known = same(seen[j].get().id, next.id);
                 j += 1;
             }
             if !known {
-                assert!(n_seen < MOST, "layline: more than 512 message types reach one another");
-                seen[n_seen] = next.id;
-                n_seen += 1;
-                stack[top] = out[i];
-                top += 1;
+                assert!(found < MOST, "layline: more than 512 message types reach one another");
+                seen[found] = out[i];
+                found += 1;
             }
             i += 1;
         }
