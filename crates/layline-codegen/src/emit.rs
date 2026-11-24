@@ -258,6 +258,7 @@ mod tests {
                 }),
                 Item::Message(MessageDef {
                     depth: None,
+                    tail: Vec::new(),
                     name: "VelocityReport".into(),
                     endian: Endian::Le,
                     endian_from: None,
@@ -382,6 +383,7 @@ mod tests {
     fn a_checksum_refuses_a_range_it_cannot_resolve() {
         let msg = |over: Coverage| MessageDef {
             depth: None,
+            tail: Vec::new(),
             name: "Packet".into(),
             endian: Endian::Le,
             endian_from: None,
@@ -415,6 +417,7 @@ mod tests {
         let out = message_parts(
             &MessageDef {
                 depth: None,
+                tail: Vec::new(),
                 name: "Packet".into(),
                 endian: Endian::Le,
                 endian_from: None,
@@ -462,6 +465,7 @@ mod tests {
         };
         let msg = |extra: Segment| MessageDef {
             depth: None,
+            tail: Vec::new(),
             name: "Packet".into(),
             endian: Endian::Le,
             endian_from: None,
@@ -525,6 +529,7 @@ mod tests {
                 }),
                 Item::Message(MessageDef {
                     depth: None,
+                    tail: Vec::new(),
                     name: "Packet".into(),
                     endian: Endian::Le,
                     endian_from: None,

@@ -27,12 +27,13 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         ));
     }
     if let Some(inner) = crate::ty::stated_element(&f.ty) {
-        return framing_field(f, inner, &name, span, a, when.is_some() || present.is_some());
+        return framing_field(f, inner, &name, span, a, (when, present));
     }
     let with: Vec<Ref> = a.with.iter().flat_map(|(refs, _)| refs).map(Ref::same).collect();
 
     let position = a.at;
     let align = a.align;
+    let tail = a.tail;
     let valid = a.valid.take();
     let walk_span = walked_by(&a)
         .map(|(_, s)| s)
@@ -46,6 +47,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
             &name,
             Err(present.expect("just matched")),
             field_body(inner, &name, span, a)?,
+            tail.is_some(),
         )?,
         (None, None) if present.is_some() => {
             return Err(syn::Error::new(
@@ -56,7 +58,9 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
                 ),
             ));
         }
-        (Some(when), Some(inner)) => optional(&name, Ok(when), field_body(inner, &name, span, a)?)?,
+        (Some(when), Some(inner)) => {
+            optional(&name, Ok(when), field_body(inner, &name, span, a)?, tail.is_some())?
+        }
         (Some(when), None) => {
             return Err(syn::Error::new(
                 when.span,
@@ -109,6 +113,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
                     align,
                     valid,
                     stated: false,
+                    tail,
                 });
             }
             return Err(syn::Error::new(
@@ -131,7 +136,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
         (None, None) => field_body(&f.ty, &name, span, a)?,
     };
-    Ok(MsgField { name, span, walk_span, body, position, with, align, valid, stated: false })
+    Ok(MsgField { name, span, walk_span, body, position, with, align, valid, stated: false, tail })
 }
 
 /// A `Stated<T>` field: an integer or `bool` in a block, which encode writes.
@@ -141,7 +146,7 @@ fn framing_field(
     name: &str,
     span: Span,
     a: FieldAttrs,
-    gated: bool,
+    (when, present): (Option<WhenSpec>, Option<Span>),
 ) -> syn::Result<MsgField> {
     let refused = |why: &str| {
         syn::Error::new(
@@ -152,8 +157,10 @@ fn framing_field(
             ),
         )
     };
-    if gated {
-        return Err(refused("it is always on the wire, with no `Option`"));
+    if present.is_some() {
+        return Err(refused(
+            "it has no flag of its own: `#[when(c)]` puts it on the wire when `c` holds",
+        ));
     }
     if let Some((what, wspan)) = walked_by(&a) {
         return Err(syn::Error::new(
@@ -164,7 +171,7 @@ fn framing_field(
             ),
         ));
     }
-    let (position, align, valid) = (a.at, a.align, a.valid);
+    let (position, align, valid, tail) = (a.at, a.align, a.valid, a.tail);
     let FieldAttrs { seek, bits, bytes, range, magic, until, stride, with, .. } = a;
     let placed = [seek.is_some(), magic.is_some(), bytes.is_some(), until.is_some()];
     if placed.into_iter().any(|p| p) || stride.is_some() || with.is_some() {
@@ -179,7 +186,12 @@ fn framing_field(
     ) {
         return Err(refused(&format!("`{}` cannot be one", crate::attr::spelled(inner))));
     }
-    let body = Body::Fixed { kind, claims: Claims { range: bound, magic: None } };
+    let claims = Claims { range: bound, magic: None };
+    let body = match when {
+        // On the wire only when the condition holds, and zero otherwise.
+        Some(when) => Body::Opt { when: Some(when), present: false, kind, claims },
+        None => Body::Fixed { kind, claims },
+    };
     Ok(MsgField {
         name: String::from(name),
         span,
@@ -190,16 +202,19 @@ fn framing_field(
         align,
         valid,
         stated: true,
+        tail,
     })
 }
 
 /// An `Option<T>` field, present `when`, or with `Err(span)`, by a `#[present]` flag.
-fn optional(name: &str, when: Result<WhenSpec, Span>, body: Body) -> syn::Result<Body> {
+/// In the `tail`, a collection may take its size from a field, which decode reads first.
+fn optional(name: &str, when: Result<WhenSpec, Span>, body: Body, tail: bool) -> syn::Result<Body> {
     let (when, present) = match when {
         Ok(when) => (when, false),
         Err(span) => match body {
             Body::Repeat { element, count, at, assert, collection, .. } => {
-                return gated(name, span, Gate::Present, (element, count, at, assert, collection));
+                let run = (element, count, at, assert, collection);
+                return gated(name, span, Gate::Present, run, tail);
             }
             Body::Fixed { kind, claims } | Body::Opt { kind, claims, .. } => {
                 return Ok(Body::Opt { when: None, present: true, kind, claims });
@@ -255,7 +270,8 @@ fn optional(name: &str, when: Result<WhenSpec, Span>, body: Body) -> syn::Result
         Body::Value { kind, .. } => kind,
         Body::Repeat { element, count, at, assert, collection, .. } => {
             let span = when.span;
-            return gated(name, span, Gate::When(when), (element, count, at, assert, collection));
+            let run = (element, count, at, assert, collection);
+            return gated(name, span, Gate::When(when), run, tail);
         }
         Body::Switch { .. } => {
             return Err(syn::Error::new(
@@ -313,9 +329,11 @@ fn optional(name: &str, when: Result<WhenSpec, Span>, body: Body) -> syn::Result
 type Run = (Kind, CountSpec, Option<Value>, Option<Box<ElementSize>>, Collection);
 
 /// An optional collection, which states its own size in place.
-fn gated(name: &str, span: Span, gate: Gate, run: Run) -> syn::Result<Body> {
+fn gated(name: &str, span: Span, gate: Gate, run: Run, tail: bool) -> syn::Result<Body> {
     let (element, count, at, assert, collection) = run;
-    if !count.in_place() || at.is_some() || collection.borrows() {
+    let sized = count.in_place()
+        || (tail && matches!(count, CountSpec::Field { .. } | CountSpec::Window { .. }));
+    if !sized || at.is_some() || collection.borrows() {
         return Err(syn::Error::new(
             span,
             format!(
@@ -353,6 +371,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
         align: _,
         valid: _,
         present: _,
+        tail: _,
     } = a;
     let at = seek;
 

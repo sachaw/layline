@@ -130,6 +130,7 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         align: None,
         valid: None,
         stated: false,
+        tail: None,
     })
 }
 

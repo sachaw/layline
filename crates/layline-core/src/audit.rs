@@ -154,6 +154,8 @@ fn start_token<W: fmt::Write>(w: &mut W, start: Start<'_>) -> fmt::Result {
         Start::At(bit) => write!(w, "at,{bit}"),
         Start::After { segment, bits } => write!(w, "after,{segment},{bits}"),
         Start::Seek { by } => write!(w, "seek,{by}"),
+        Start::Tail { before: Some(segment), bits } => write!(w, "tail,{segment},{bits}"),
+        Start::Tail { before: None, bits } => write!(w, "tail,-,{bits}"),
     }
 }
 

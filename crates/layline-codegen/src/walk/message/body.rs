@@ -14,7 +14,7 @@ use crate::model::{Ty, split_ref};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, derivations, endian_arg, expressions, row};
-use crate::{Absence, Endian, Error, Expr, Kind, Len, Param, Root, Segment};
+use crate::{Absence, Count, Endian, Error, Expr, Kind, Len, Param, Presence, Root, Segment};
 
 /// Where encode reads a body's values from.
 #[derive(Clone, Copy)]
@@ -163,12 +163,16 @@ pub(super) struct Walk<'a> {
     pub(super) skip: TokenStream,
     /// The segments encode has written so far.
     pub(super) done: Vec<String>,
+    /// Whether the segment being walked is in the tail, which decode reads before the body.
+    pub(super) in_tail: bool,
 }
 
-/// Generate decode, encode and the table for `segments` in one pass.
+/// Generate decode, encode and the table for `segments` in one pass. The segments from index
+/// `tail` on are the body's tail, which decode reads first, from the end.
 pub(super) fn walk_segments(
     item: &mut Item<'_>,
     segments: &[Segment],
+    tail: usize,
     own: Own,
 ) -> Result<Walked, Error> {
     let (root, owner) = (item.root, item.name);
@@ -198,6 +202,7 @@ pub(super) fn walk_segments(
         rows: Rows::new(),
         skip: item.skip.clone(),
         done: Vec::new(),
+        in_tail: false,
     };
     for p in item.needs {
         let id = ident(&p.name);
@@ -271,58 +276,132 @@ pub(super) fn walk_segments(
         });
     }
 
-    for (i, seg) in segments.iter().enumerate() {
-        let last = i + 1 == segments.len();
-        if let Some(at) = seeks(seg) {
-            let start = w.env.number(owner, "#[seek]", at)?;
-            w.parse_steps.extend(seek_to(&start, super::eval::blamed(at, owner), root));
+    let point = tail_point(segments, tail);
+    let order: Vec<usize> =
+        (0..point).chain((tail..segments.len()).rev()).chain(point..tail).collect();
+    let n = segments.len();
+    let (mut parse_of, mut bytes_of, mut fields_of) =
+        (vec![TokenStream::new(); n], vec![TokenStream::new(); n], vec![TokenStream::new(); n]);
+    let mut size_of = vec![TokenStream::new(); n];
+    let mut rows_of = vec![0usize; n];
+    // The body's rows while the tail's, which count from the end, are walked.
+    let mut body_rows: Option<Rows> = None;
+    let mut tail_rows: Option<Rows> = None;
+    for &i in &order {
+        let seg = &segments[i];
+        // The last segment before the tail reads up to it.
+        let last = if i < tail { i + 1 == tail } else { i + 1 == n };
+        w.in_tail = i >= tail;
+        w.done = segments[..i].iter().flat_map(Segment::places).map(String::from).collect();
+        if i + 1 == n && i >= tail {
+            body_rows = Some(core::mem::replace(&mut w.rows, Rows::new()));
         }
-        if !matches!(seg, Segment::Block(_)) {
-            for name in seg.places() {
-                w.marked.start(name, &mut w.parse_steps, &mut w.byte_steps);
-            }
+        if w.in_tail {
+            size_of[i] = w.tail_size(seg)?;
         }
-        // A placed record pads inside its own window.
-        let padded = seg.align().filter(|_| !matches!(seg, Segment::Placed { .. }));
-        if padded.is_some() {
-            w.parse_steps.extend(quote! { let __pad_from = __at; });
-            w.byte_steps.extend(quote! { let __pad_from = out.len(); });
+        let saved = (
+            core::mem::take(&mut w.parse_steps),
+            core::mem::take(&mut w.byte_steps),
+            core::mem::take(&mut w.public_fields),
+        );
+        let rows_before = w.rows.rows.len();
+        w.walk_one(item, segments, seg, own, last)?;
+        rows_of[i] = w.rows.rows.len() - rows_before;
+        parse_of[i] = core::mem::replace(&mut w.parse_steps, saved.0);
+        bytes_of[i] = core::mem::replace(&mut w.byte_steps, saved.1);
+        fields_of[i] = core::mem::replace(&mut w.public_fields, saved.2);
+        if i == tail && i < n {
+            let body = body_rows.take().expect("saved at the tail's last segment");
+            tail_rows = Some(core::mem::replace(&mut w.rows, body));
         }
-        match seg {
-            Segment::Block(_) => w.block(item, own, seg)?,
-            Segment::Value { .. } => w.value(item, own, seg, last)?,
-            Segment::Repeat { .. } => w.repeat(item, own, seg)?,
-            Segment::Placed { .. } => w.placed(item, own, seg, last)?,
-            Segment::Opt { .. } => w.opt(item, own, seg, last)?,
-            Segment::Switch { .. } => w.switch(item, own, seg, last)?,
-            Segment::Checksum { .. } => w.checksum(item, segments, own, seg)?,
-            Segment::Valid { field, holds } => w.valid(own, field, holds)?,
-        }
-        if !matches!(seg, Segment::Block(_)) {
-            for name in seg.places() {
-                w.marked.end(name, &mut w.parse_steps, &mut w.byte_steps);
-            }
-        }
-        w.done.extend(seg.places().into_iter().map(String::from));
-        if let Some(align) = padded {
-            w.parse_steps.extend(skip_padding(align, root));
-            w.byte_steps.extend(write_padding(align));
-        }
-        if let (Some(align), Some(name)) = (seg.align(), seg.name()) {
-            w.rows.advance(None);
-            let pad = format!("{name}.pad");
-            let mut row = Row::new(&pad, row::Span::Pad { align });
-            if let Segment::Placed { absent: Some(Absence::ZeroLength { by, .. }), .. } = seg {
-                row = row.when(row::Presence::Length { by: by.clone() });
-            }
-            w.rows.push(row);
-        }
-        w.rows.advance(seg.fixed_bits());
+    }
+
+    // Decode: the body up to the tail point, the tail from the end, then the rest of the body.
+    for read in &mut parse_of[..point] {
+        w.parse_steps.extend(core::mem::take(read));
+    }
+    if tail < n {
+        let Prelude { err, usize, .. } = root.prelude();
         w.parse_steps.extend(quote! {
-            if __at > __hi {
-                __hi = __at;
+            let __head_at = __at;
+            let mut __tail_end = __body.len();
+        });
+        for i in (tail..n).rev() {
+            let name = tail_name(&segments[i]);
+            let size = &size_of[i];
+            let read = core::mem::take(&mut parse_of[i]);
+            w.parse_steps.extend(quote! {
+                let __n: #usize = #size;
+                let __from = match __tail_end.checked_sub(__n) {
+                    ::core::option::Option::Some(__from) if __from >= __head_at => __from,
+                    _ => {
+                        return #err(#root::ParseError::Short {
+                            need_bytes: __head_at.saturating_add(__n),
+                            got_bytes: __tail_end,
+                            at: __head_at,
+                        });
+                    }
+                };
+                __at = __from;
+                #read
+                if __at != __tail_end {
+                    return #err(#root::ParseError::Malformed { field: #name, at: __from });
+                }
+                __tail_end = __from;
+            });
+        }
+        w.parse_steps.extend(quote! { __at = __head_at; });
+        if point < tail {
+            w.parse_steps.extend(quote! {
+                let __whole = __body;
+                let __body = &__whole[..__tail_end];
+            });
+        }
+    }
+    for read in &mut parse_of[point..tail] {
+        w.parse_steps.extend(core::mem::take(read));
+    }
+    if tail < n {
+        // The body must end where the tail starts: no byte between them is unaccounted for.
+        let err = root.prelude().err;
+        let name = tail_name(&segments[tail]);
+        w.parse_steps.extend(quote! {
+            if __at != __tail_end {
+                return #err(#root::ParseError::Malformed { field: #name, at: __at });
             }
         });
+    }
+
+    // Encode, and the declared fields, in wire order.
+    for (bytes, fields) in bytes_of.into_iter().zip(fields_of) {
+        w.byte_steps.extend(bytes);
+        w.public_fields.extend(fields);
+    }
+
+    // The tail's rows were pushed last segment first. Each ends a counted distance before the
+    // body's end, or before the nearest later tail segment whose size is read from the wire.
+    if let Some(mut walked) = tail_rows {
+        let (mut before, mut bits) = (None::<String>, 0u64);
+        let mut placed: Vec<Vec<row::SegmentDef>> = Vec::new();
+        for i in (tail..n).rev() {
+            let mut group: Vec<row::SegmentDef> = walked.rows.drain(..rows_of[i]).collect();
+            for r in &mut group {
+                r.start = row::Start::Tail { before: before.clone(), bits };
+            }
+            match segments[i].fixed_bits() {
+                Some(b) => bits += b,
+                None => {
+                    before = Some(String::from(tail_name(&segments[i])));
+                    bits = 0;
+                }
+            }
+            placed.push(group);
+        }
+        w.rows.rows.extend(placed.into_iter().rev().flatten());
+    }
+    if tail < n && point < tail && !w.late_checks.is_empty() {
+        // A check that waited reads the whole body, the tail included.
+        w.parse_steps.extend(quote! { let __body = __whole; });
     }
     w.parse_steps.extend(w.late_checks);
     w.byte_steps.extend(w.late_stamps);
@@ -344,6 +423,189 @@ pub(super) fn walk_segments(
         table: w.rows.table(root),
         rows: w.rows.rows,
     })
+}
+
+/// The index of the first segment before `tail` that decode cannot read until it knows where
+/// the tail starts: one that reaches the end of the body, or reads a tail field. `tail` if none.
+fn tail_point(segments: &[Segment], tail: usize) -> usize {
+    if tail == segments.len() {
+        return tail;
+    }
+    let names: Vec<&str> = segments[tail..].iter().flat_map(declared).collect();
+    let reads = |seg: &Segment| {
+        let mut read: Vec<String> = crate::walk::expressions(core::slice::from_ref(seg))
+            .iter()
+            .flat_map(|(e, _)| e.names().into_iter().map(String::from).collect::<Vec<_>>())
+            .collect();
+        match seg {
+            Segment::Switch { with, .. } => read.extend(with.iter().cloned()),
+            Segment::Value { kind: Kind::Msg { with, .. }, .. }
+            | Segment::Placed { kind: Kind::Msg { with, .. }, .. }
+            | Segment::Repeat { element: Kind::Msg { with, .. }, .. } => {
+                read.extend(with.iter().cloned());
+            }
+            _ => {}
+        }
+        read.iter().any(|r| names.contains(&split_ref(r).0))
+    };
+    let reaches_end = |seg: &Segment| {
+        seg.open_ended()
+            || matches!(
+                seg,
+                Segment::Switch { window: None, .. }
+                    | Segment::Value { kind: Kind::Msg { .. }, .. }
+                    | Segment::Placed { .. }
+                    | Segment::Opt { when: Presence::Remaining, .. }
+                    | Segment::Opt { field: crate::Field { kind: Kind::Msg { .. }, .. }, .. }
+            )
+    };
+    (0..tail).find(|&i| reaches_end(&segments[i]) || reads(&segments[i])).unwrap_or(tail)
+}
+
+/// The field names a segment declares.
+fn declared(seg: &Segment) -> Vec<&str> {
+    match seg {
+        Segment::Block(fields) => fields.iter().map(|f| f.name.as_str()).collect(),
+        other => other.name().into_iter().collect(),
+    }
+}
+
+/// The name a tail segment's refusals report: its field, or a block's first.
+fn tail_name(seg: &Segment) -> &str {
+    match seg {
+        Segment::Block(fields) => fields.first().map_or("tail", |f| f.name.as_str()),
+        Segment::Valid { field, .. } => field,
+        other => other.name().unwrap_or("tail"),
+    }
+}
+
+impl Walk<'_> {
+    /// Decode, encode and rows for one segment.
+    fn walk_one(
+        &mut self,
+        item: &mut Item<'_>,
+        segments: &[Segment],
+        seg: &Segment,
+        own: Own,
+        last: bool,
+    ) -> Result<(), Error> {
+        let (root, owner) = (self.root, self.owner);
+        if let Some(at) = seeks(seg) {
+            let start = self.env.number(owner, "#[seek]", at)?;
+            self.parse_steps.extend(seek_to(&start, super::eval::blamed(at, owner), root));
+        }
+        if !matches!(seg, Segment::Block(_)) {
+            for name in seg.places() {
+                self.marked.start(name, &mut self.parse_steps, &mut self.byte_steps);
+            }
+        }
+        // A placed record pads inside its own window.
+        let padded = seg.align().filter(|_| !matches!(seg, Segment::Placed { .. }));
+        if padded.is_some() {
+            self.parse_steps.extend(quote! { let __pad_from = __at; });
+            self.byte_steps.extend(quote! { let __pad_from = out.len(); });
+        }
+        match seg {
+            Segment::Block(_) => self.block(item, own, seg)?,
+            Segment::Value { .. } => self.value(item, own, seg, last)?,
+            Segment::Repeat { .. } => self.repeat(item, own, seg)?,
+            Segment::Placed { .. } => self.placed(item, own, seg, last)?,
+            Segment::Opt { .. } => self.opt(item, own, seg, last)?,
+            Segment::Switch { .. } => self.switch(item, own, seg, last)?,
+            Segment::Checksum { .. } => self.checksum(item, segments, own, seg)?,
+            Segment::Valid { field, holds } => self.valid(own, field, holds)?,
+        }
+        if !matches!(seg, Segment::Block(_)) {
+            for name in seg.places() {
+                self.marked.end(name, &mut self.parse_steps, &mut self.byte_steps);
+            }
+        }
+        if let Some(align) = padded {
+            self.parse_steps.extend(skip_padding(align, root));
+            self.byte_steps.extend(write_padding(align));
+        }
+        if let (Some(align), Some(name)) = (seg.align(), seg.name()) {
+            self.rows.advance(None);
+            let pad = format!("{name}.pad");
+            let mut row = Row::new(&pad, row::Span::Pad { align });
+            if let Segment::Placed { absent: Some(Absence::ZeroLength { by, .. }), .. } = seg {
+                row = row.when(row::Presence::Length { by: by.clone() });
+            }
+            self.rows.push(row);
+        }
+        self.rows.advance(seg.fixed_bits());
+        self.parse_steps.extend(quote! {
+            if __at > __hi {
+                __hi = __at;
+            }
+        });
+        Ok(())
+    }
+
+    /// The byte size of a tail segment, from what decode has read: its own width, or a count or
+    /// length over later tail fields, earlier fields and parameters, and zero when it is absent.
+    fn tail_size(&self, seg: &Segment) -> Result<TokenStream, Error> {
+        let (root, owner) = (self.root, self.owner);
+        let refuse = || {
+            Error::Refused(format!(
+                "{owner}: tail field `{}` reads its own size from the wire, and decode must know \
+                 it before reading it, from the end. Give it a fixed width, a count or a length",
+                tail_name(seg)
+            ))
+        };
+        let bytes = |bits: u64| Literal::usize_unsuffixed((bits / 8) as usize);
+        let gated = |when: Option<&Presence>, size: TokenStream| -> Result<TokenStream, Error> {
+            Ok(match when {
+                Some(Presence::When(e)) => {
+                    let present = self.env.condition(owner, "#[when]", e)?;
+                    quote!(if #present { #size } else { 0 })
+                }
+                Some(_) => return Err(refuse()),
+                None => size,
+            })
+        };
+        match seg {
+            Segment::Valid { .. } => Ok(quote!(0)),
+            Segment::Block(_) | Segment::Checksum { .. } => {
+                let n = bytes(seg.fixed_bits().ok_or_else(refuse)?);
+                Ok(quote!(#n))
+            }
+            Segment::Opt { when, field } => {
+                let n = bytes(field.kind.bits().ok_or_else(refuse)?);
+                gated(Some(when), quote!(#n))
+            }
+            Segment::Repeat { count, element, when, at: None, .. } => {
+                let size = match count {
+                    Count::Window(Len::Bytes(k)) => {
+                        let k = Literal::usize_unsuffixed(*k);
+                        quote!(#k)
+                    }
+                    Count::Window(Len::Field { by, .. }) => self.env.size(owner, "#[len]", by)?,
+                    Count::Field { by, .. } => {
+                        let each = bytes(element.bits().ok_or_else(refuse)?);
+                        let count = self.env.size(owner, "#[count]", by)?;
+                        let field = tail_name(seg);
+                        quote! {
+                            #count.checked_mul(#each).ok_or(
+                                #root::ParseError::Malformed { field: #field, at: __tail_end },
+                            )?
+                        }
+                    }
+                    _ => return Err(refuse()),
+                };
+                gated(when.as_ref(), size)
+            }
+            Segment::Value { kind: Kind::Text { len, .. }, .. } => match len {
+                Len::Bytes(k) => {
+                    let k = Literal::usize_unsuffixed(*k);
+                    Ok(quote!(#k))
+                }
+                Len::Field { by, .. } => self.env.size(owner, "#[len]", by),
+                _ => Err(refuse()),
+            },
+            _ => Err(refuse()),
+        }
+    }
 }
 
 /// Refuse a field that two derivations write.

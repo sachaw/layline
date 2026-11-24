@@ -254,7 +254,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// anywhere else, it keeps its place in declaration order, which is wire order, and its type says
 /// what it is: `Stated<T>`. Encode writes it, decode reads it, and `PartialEq`, `Eq` and `Hash`
 /// ignore it, so a decoded value equals the one built with `Stated::default()`. An attribute must
-/// write it, as the next section says, or the type is refused. A plain integer field keeps its
+/// write it, as the next section says, or the type is refused. With `#[when(c)]`, a `Stated<T>`
+/// is on the wire only when `c` holds, and holds zero otherwise. A plain integer field keeps its
 /// own meaning: encode writes it where an attribute does, and otherwise takes the value's.
 ///
 /// ```
@@ -414,6 +415,18 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[seek(e)]`: read at the byte offset `e` gives, counted from the start of the message. An
 ///   `Option<T>` at offset zero is `None`.
 /// - `#[at(byte = N)]`: the byte offset where the field starts.
+/// - `#[at(end)]`: the field is anchored to the end of the message, in its tail. The fields that
+///   take it come last. Decode reads them first, from the end, once it has read the fields
+///   before the first one that reaches the end: a `#[fill]`, a `#[switch]` or a nested message.
+///   That one then stops where the tail starts, and every field may read tail fields, as the
+///   tail may read the fields before it. Encode writes every field in declaration order. Each
+///   tail field's size is known before decode reads it: fixed, or a `#[count]` or `#[len]` over
+///   later tail fields, earlier fields and parameters, and an `Option<Vec<T>>` in the tail may be
+///   sized so. A message with a tail reads to the end of the bytes it is given, and refuses a
+///   byte between its other fields and its tail. RTP's padding is
+///   `#[at(end)] #[when(rtp.padding)] #[count(pad_count - 1)] padding: Option<Vec<u8>>`, then
+///   `#[at(end)] #[when(rtp.padding)] pad_count: Stated<u8>`; a CRC trailer is
+///   `#[at(end)] #[checksum(Crc, over = head..=payload)] crc: u32`.
 /// - `#[bytes(N)]`: the size of a nested layout, one element, a `#[switch]` body, or a NUL-padded
 ///   `#[text]` string.
 /// - `#[codec(N)]`: a `FieldCodec` stored as an 8, 16, 32 or 64-bit integer.

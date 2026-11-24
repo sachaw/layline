@@ -145,6 +145,9 @@ fn segment_views<'a>(
                         table::Start::After { segment, bits: *bits }
                     }
                     row::Start::Seek { by } => table::Start::Seek { by },
+                    row::Start::Tail { before, bits } => {
+                        table::Start::Tail { before: before.as_deref(), bits: *bits }
+                    }
                 },
                 spans[i],
                 row.when.as_ref().map(presence_view),

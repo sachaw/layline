@@ -652,13 +652,17 @@ impl ::layline::Message for Record {
                     >(
                         "n",
                         {
-                            let __source = self.items.len();
+                            let __source = ::layline::__private::value::Many::many(
+                                &self.items,
+                            );
                             ::layline::__private::value::Wide::wide(__source)
                         },
                         0,
                     )?;
                     <u8 as ::layline::WireInt>::from_i64({
-                        let __source = self.items.len();
+                        let __source = ::layline::__private::value::Many::many(
+                            &self.items,
+                        );
                         ::layline::__private::value::Wide::wide(__source)
                     })
                 },

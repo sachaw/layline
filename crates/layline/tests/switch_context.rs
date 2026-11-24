@@ -137,6 +137,49 @@ pub struct Sample {
     pub word: Word,
 }
 
+/// The first header word of RTP, as a DW packet uses it.
+#[derive(Layout, Debug, Clone, PartialEq, Eq, Default)]
+#[layout(bits = 16, endian = be, order = msb)]
+pub struct Rtp {
+    #[bits(2)]
+    pub version: u8,
+    #[bits(1)]
+    pub padding: bool,
+    #[bits(1)]
+    pub extension: bool,
+    #[bits(4)]
+    pub csrc_count: u8,
+    #[bits(1)]
+    pub marker: bool,
+    #[bits(7)]
+    pub payload_type: u8,
+}
+
+/// The whole of a DW packet in one type: the payload type picks the element run, which takes
+/// the header's mask, count and byte order, and RTP padding ends it.
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(endian = be)]
+pub struct Dw {
+    #[bytes(2)]
+    pub rtp: Rtp,
+    #[count(rtp.csrc_count)]
+    pub csrc: Vec<u32>,
+    pub mask: u32,
+    #[bytes(1)]
+    pub flags: Flags,
+    pub num_elements: u16,
+    #[switch(rtp.payload_type)]
+    #[with(mask, num_elements, flags.big_endian)]
+    pub payload: Payload,
+    #[at(end)]
+    #[when(rtp.padding)]
+    #[count(pad_count - 1)]
+    pub padding: Option<Vec<u8>>,
+    #[at(end)]
+    #[when(rtp.padding)]
+    pub pad_count: Stated<u8>,
+}
+
 fn pdw_packet(big_endian: bool, elements: Vec<Pdw>) -> Packet {
     Packet {
         payload_type: 1,
@@ -181,6 +224,35 @@ fn the_payload_type_picks_the_arm_and_an_unknown_one_keeps_its_bytes() {
     let wire = [9, 0, 0, 0, 0, 0, 0, 0, 0xAA, 0xBB];
     let (other, used) = Packet::decode(&wire).unwrap();
     assert_eq!((other.payload, used), (Payload::Described(vec![0xAA, 0xBB]), 10));
+}
+
+#[test]
+fn a_padded_dw_packet_is_one_type() {
+    let dw = Dw {
+        rtp: Rtp { version: 2, padding: true, payload_type: 1, ..Rtp::default() },
+        csrc: Vec::new(),
+        mask: 0x04,
+        flags: Flags { big_endian: true, reserved: 0 },
+        num_elements: 1,
+        payload: Payload::Pdw(Pdws { elements: vec![Pdw { pw: Some(1.5), ..Pdw::default() }] }),
+        padding: Some(vec![0, 0]),
+        pad_count: Stated::default(),
+    };
+    let wire = dw.encode().unwrap();
+    #[rustfmt::skip]
+    assert_eq!(wire, [
+        0xA0, 0x01,                 // V=2, P=1, PT=1
+        0, 0, 0, 4, 0x80, 0, 1,     // mask, flags, one element
+        0x3F, 0xC0, 0, 0,           // 1.5 big-endian
+        0, 0, 3,                    // padding
+    ]);
+    assert_eq!(Dw::decode(&wire).unwrap(), (dw, wire.len()));
+
+    // An unknown payload type keeps its bytes, and they stop at the padding.
+    let other = [0xA0, 0x09, 0, 0, 0, 0, 0, 0, 0, 0xAA, 0xBB, 0, 2];
+    let (back, _) = Dw::decode(&other).unwrap();
+    assert_eq!(back.payload, Payload::Described(vec![0xAA, 0xBB]));
+    assert_eq!(back.encode().unwrap(), other);
 }
 
 #[test]

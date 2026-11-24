@@ -32,7 +32,11 @@ fn a_stated_field_is_one_number_or_flag() {
     );
     refused(
         &message("pub f: u8,\n#[when(f & 1)]\npub n: Stated<Option<u8>>,"),
-        "it is always on the wire, with no `Option`",
+        "field `n`: `Option<u8>` has no known size",
+    );
+    refused(
+        &message("#[present]\npub n: Stated<u8>,\n#[count(n)]\npub items: Vec<u8>,"),
+        "it has no flag of its own: `#[when(c)]` puts it on the wire when `c` holds",
     );
 }
 
@@ -92,4 +96,20 @@ fn a_prefix_is_a_row_of_its_own_and_no_field() {
     assert!(got.contains(r#"SegmentDef::new("name.len",::layline::table::Start::At(0),::layline::table::Span::Fixed(16)"#), "{got}");
     assert!(got.contains(r#"By::field("name.len")"#), "{got}");
     assert!(got.contains("Self{name}"), "{got}");
+}
+
+#[test]
+fn a_field_after_the_tail() {
+    refused(
+        &message("#[fill]\npub a: Vec<u8>,\n#[at(end)]\npub b: u8,\npub c: u8,"),
+        "field `c`: it follows `b`, which is anchored to the end with `#[at(end)]`",
+    );
+}
+
+#[test]
+fn a_tail_field_that_reads_its_own_size() {
+    refused(
+        &message("#[fill]\npub a: Vec<u8>,\n#[at(end)]\n#[len(prefix = u8)]\npub b: Vec<u8>,"),
+        "a collection in the tail is counted or sized",
+    );
 }

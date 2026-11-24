@@ -2,6 +2,7 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use super::bits::validate_bits;
@@ -36,11 +37,96 @@ pub(crate) fn validate_message(msg: &MessageDef) -> Result<(), Invalid> {
         }
     }
     borrowed(&msg.segments, msg.lifetime.is_some())?;
+    borrowed(&msg.tail, false)?;
     let mut seen = needs(msg)?;
     if msg.bits.is_some() {
+        if !msg.tail.is_empty() {
+            return Err(Invalid::Other(format!(
+                "message `{}`: a bit-addressed message has no tail. \
+                 Anchor fields to the end of a byte-addressed message",
+                msg.name
+            )));
+        }
         return validate_bits(msg);
     }
-    validate_segments(&msg.segments, &mut seen)
+    let all: Vec<Segment> = msg.segments.iter().chain(&msg.tail).cloned().collect();
+    // The body may read any tail field, which decode reads before the segment that needs it.
+    let tail = &all[msg.segments.len()..];
+    for seg in tail {
+        tail_shape(seg)?;
+        known(seg, &mut seen);
+    }
+    validate_segments(&all, msg.segments.len(), &mut seen)
+}
+
+/// The names a segment gives the fields after it, as decode reads them.
+fn known<'a>(seg: &'a Segment, seen: &mut Seen<'a>) {
+    match seg {
+        Segment::Block(fields) => {
+            seen.extend(fields.iter().map(|f| Known::field(&f.name, &f.kind)))
+        }
+        Segment::Opt { field, .. } if field.stated => {
+            seen.push(Known::field(&field.name, &field.kind))
+        }
+        Segment::Value { name, kind, .. } => seen.push(Known::field(name, kind)),
+        _ => {}
+    }
+}
+
+/// Refuses a tail segment whose size decode cannot know before reading it, from the end.
+fn tail_shape(seg: &Segment) -> Result<(), Invalid> {
+    let name = match seg {
+        Segment::Block(fields) => fields.first().map_or("?", |f| f.name.as_str()),
+        other => other.name().unwrap_or("?"),
+    };
+    let placed = match seg {
+        Segment::Block(fields) => fields.iter().any(|f| f.position.is_some()),
+        other => other.position().is_some(),
+    };
+    if placed {
+        return Err(Invalid::field(
+            name,
+            String::from(
+                "`#[at]` counts from the start, and the tail is anchored to the end. \
+                 Remove the position",
+            ),
+        ));
+    }
+    let sized = match seg {
+        Segment::Block(_) | Segment::Checksum { .. } | Segment::Valid { .. } => true,
+        Segment::Opt { when: Presence::When(_), field } => field.kind.bits().is_some(),
+        Segment::Repeat {
+            count, at: None, when: None | Some(Presence::When(_)), element, ..
+        } => match count {
+            Count::Window(Len::Bytes(_) | Len::Field { align: None, .. }) => true,
+            Count::Field { .. } => element.bits().is_some(),
+            _ => {
+                return Err(Invalid::field(
+                    name,
+                    String::from(
+                        "a collection in the tail is counted or sized, of fixed-width \
+                             elements, so decode knows its size before it reads it, from the end",
+                    ),
+                ));
+            }
+        },
+        Segment::Value {
+            kind: Kind::Text { len: Len::Bytes(_) | Len::Field { align: None, .. }, .. },
+            ..
+        } => true,
+        _ => false,
+    };
+    if sized {
+        return Ok(());
+    }
+    Err(Invalid::field(
+        name,
+        String::from(
+            "it reads its own size from the wire, and decode must know a tail field's size \
+             before it reads it, from the end. Give it a fixed width, a count or a length over \
+             later tail fields, earlier fields and parameters",
+        ),
+    ))
 }
 
 /// Checks a choice: distinct arm values, and each arm a valid body.
@@ -60,7 +146,7 @@ pub(crate) fn validate_choice(choice: &ChoiceDef) -> Result<(), Invalid> {
         values.push(arm.value);
         borrowed(&arm.body, false)?;
         let mut seen = params("choice", &choice.name, &choice.needs, &declared(&arm.body))?;
-        validate_segments(&arm.body, &mut seen)?;
+        validate_segments(&arm.body, arm.body.len(), &mut seen)?;
     }
     if let Some(from) = &choice.endian_from {
         order_param("choice", &choice.name, &choice.needs, from)?;
@@ -213,12 +299,23 @@ fn position_here(pos: Cursor, name: &str, position: Position) -> Result<(), Inva
     position.check(name, pos).map_err(Invalid::Position)
 }
 
-fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result<(), Invalid> {
+/// Checks a body: the segments before `tail` read from the start, and the rest are its tail.
+fn validate_segments<'a>(
+    segments: &'a [Segment],
+    tail: usize,
+    seen: &mut Seen<'a>,
+) -> Result<(), Invalid> {
     let mut open_ended: Option<&str> = None;
     let places: Places<'a> = segments.iter().flat_map(Segment::places).collect();
     let optional: Places<'a> = segments.iter().filter_map(Segment::placed_optionally).collect();
     let mut pos: Cursor = Some(0);
-    for seg in segments {
+    for (i, seg) in segments.iter().enumerate() {
+        let in_tail = i >= tail;
+        if in_tail {
+            // The tail ends the body, whatever the body before it reads to.
+            open_ended = None;
+            pos = None;
+        }
         if let Some(who) = open_ended
             && !matches!(seg, Segment::Valid { .. })
         {
@@ -318,7 +415,15 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                 kind_paths(name, element)?;
                 variable_element(name, element)?;
                 if let Some(when) = when {
-                    optional_collection(seen, name, when, count, at.is_some(), *collection)?;
+                    optional_collection(
+                        seen,
+                        name,
+                        when,
+                        count,
+                        at.is_some(),
+                        *collection,
+                        in_tail,
+                    )?;
                 }
                 match count {
                     Count::Field { by, .. } => expr::number(seen, by)?,
@@ -496,6 +601,23 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
             Segment::Opt { when, field } => {
                 field_names(field)?;
                 stated_with(seen, &field.kind)?;
+                if field.stated {
+                    if !matches!(when, Presence::When(_))
+                        || !matches!(
+                            field.kind,
+                            Kind::Scalar(Scalar::U(_) | Scalar::I(_)) | Kind::Codec { .. }
+                        )
+                    {
+                        return Err(Invalid::field(
+                            &field.name,
+                            String::from(
+                                "optional framing is an integer on the wire when a condition \
+                                 holds. Declare an integer, present `when` a condition",
+                            ),
+                        ));
+                    }
+                    seen.push(Known::field(&field.name, &field.kind));
+                }
                 match when {
                     Presence::Remaining => {}
                     Presence::When(e) => {
@@ -546,6 +668,7 @@ fn written(segments: &[Segment]) -> Result<(), Invalid> {
     let derived = crate::derived::derivations(segments);
     let framing = segments.iter().flat_map(|seg| match seg {
         Segment::Block(fields) => fields.iter().filter(|f| f.stated).collect(),
+        Segment::Opt { field, .. } if field.stated => vec![field],
         _ => Vec::new(),
     });
     for f in framing {
@@ -578,6 +701,7 @@ fn prefix(name: &str, repr: Scalar) -> Result<(), Invalid> {
 }
 
 /// Refuses an optional collection that does not state its own size, or that sits at an offset.
+/// A tail collection may take its size from a field, which decode reads first.
 fn optional_collection(
     seen: &Seen<'_>,
     name: &str,
@@ -585,6 +709,7 @@ fn optional_collection(
     count: &Count,
     placed: bool,
     collection: Collection,
+    tail: bool,
 ) -> Result<(), Invalid> {
     match when {
         Presence::When(e) => expr::presence(seen, e).map_err(|why| in_field(name, why))?,
@@ -599,12 +724,14 @@ fn optional_collection(
             ));
         }
     }
+    // In the tail, decode knows the size before it reads: a field may state it.
     let sized = matches!(
         count,
         Count::Prefix { .. }
             | Count::Terminated { .. }
             | Count::Window(Len::Prefix { .. } | Len::Bytes(_) | Len::Until { .. })
-    );
+    ) || (tail
+        && matches!(count, Count::Field { .. } | Count::Window(Len::Field { .. })));
     if !sized || placed || collection.borrows() {
         return Err(Invalid::field(
             name,

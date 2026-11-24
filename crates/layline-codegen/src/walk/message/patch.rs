@@ -38,7 +38,8 @@ pub(super) fn derived_value(
     Ok(match d {
         Derived::Count { of, by, cap } => {
             let coll = own.get(of);
-            inverted(by, quote!(#coll.len()), cap.map(|cap| (cap, of.as_str())), field, root)?
+            let n = quote!(#root::__private::value::Many::many(&#coll));
+            inverted(by, n, cap.map(|cap| (cap, of.as_str())), field, root)?
         }
         Derived::TextLen { of, codec, by, cap } => {
             let text = own.get(of);
@@ -163,6 +164,11 @@ impl Walk<'_> {
             return self.agree(own, coll, value, by);
         };
         let n = inverted(by, value, cap.map(|cap| (cap, coll)), into, self.root)?;
+        if self.follows(into, coll) {
+            // The field comes after the segment, in the tail: encode writes it with this number.
+            let wrote = wrote_ident(into);
+            return Ok(quote! { let #wrote = #n; });
+        }
         let at = StampAt { owner: self.owner, coll, of, field: into, record };
         if record {
             return stamp_slot(&self.slots, at, &n, self.root);
@@ -174,6 +180,15 @@ impl Walk<'_> {
             let #wrote = #n;
             #stamp
         })
+    }
+}
+
+impl Walk<'_> {
+    /// Whether the field `field` comes after the segment `coll` in wire order, so encode knows
+    /// the segment's number by the time it writes the field.
+    pub(super) fn follows(&self, field: &str, coll: &str) -> bool {
+        let at = |name: &str| self.places.iter().position(|p| *p == name);
+        matches!((at(field), at(coll)), (Some(f), Some(c)) if f > c)
     }
 }
 

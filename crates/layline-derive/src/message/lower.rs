@@ -85,7 +85,26 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
         ));
     }
 
+    // Where the tail starts: the first `#[at(end)]` field, after which every field is one.
+    let mut tail: Option<(usize, &MsgField)> = None;
     for f in &p.fields {
+        match (f.tail, tail) {
+            (Some(_), None) => {
+                flush(&mut segments, &mut block);
+                tail = Some((segments.len(), f));
+            }
+            (None, Some((_, first))) => {
+                return Err(syn::Error::new(
+                    f.span,
+                    format!(
+                        "field `{}`: it follows `{}`, which is anchored to the end with \
+                         `#[at(end)]`. Move it before `{}`, or anchor it too",
+                        f.name, first.name, first.name,
+                    ),
+                ));
+            }
+            _ => {}
+        }
         if let Body::Fixed { kind, .. } | Body::Opt { kind, .. } = &f.body
             && let Some(ty) = nestable_ty(kind)
         {
@@ -242,9 +261,12 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     ));
                 }
                 let otherwise = if *present { Presence::Prefix } else { Presence::Remaining };
+                let mut field =
+                    solved_field(&f.name, kind, claims, f.position.map(|a| a.position), p)?;
+                field.stated = f.stated;
                 segments.push(Segment::Opt {
                     when: when.as_ref().map_or(otherwise, WhenSpec::presence),
-                    field: solved_field(&f.name, kind, claims, f.position.map(|a| a.position), p)?,
+                    field,
                 });
             }
         }
@@ -265,7 +287,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
         }
     }
     flush(&mut segments, &mut block);
-    // A condition takes no bytes, so it goes after every field it may read.
+    let tail = segments.split_off(tail.map_or(segments.len(), |(at, _)| at));
+    // A condition takes no bytes, so it goes after every field it may read: decode reads the
+    // tail before the body ends.
     segments.extend(
         p.fields
             .iter()
@@ -273,6 +297,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
     );
 
     let mut msg = MessageDef::new(&crate::attr::name(&p.ident), segments)
+        .with_tail(tail)
         .with_endian(p.endian)
         .with_needs(p.needs.clone());
     if let Some(from) = &p.endian_from {

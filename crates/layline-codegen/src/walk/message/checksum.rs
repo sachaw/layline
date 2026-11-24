@@ -354,6 +354,15 @@ impl Walk<'_> {
             });
             self.parse_steps.extend(read);
             self.late_checks.extend(verify(&Marks::decode().runs(over, None, hole)));
+        } else if self.in_tail {
+            // Decode reads the tail before the bytes it covers, so the check waits for them.
+            let to = format_ident!("__ck_to_{}", field);
+            let runs = Marks::decode().runs(over, Some(quote!(#to)), None);
+            self.parse_steps.extend(quote! {
+                let #to = __at;
+                #read
+            });
+            self.late_checks.extend(verify(&runs));
         } else {
             let runs = Marks::decode().runs(over, Some(quote!(__ck_to)), None);
             let check = verify(&runs);

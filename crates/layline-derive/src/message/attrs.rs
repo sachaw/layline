@@ -88,6 +88,7 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         align: None,
         valid: None,
         present: None,
+        tail: None,
     };
 
     let owner = format!("field `{name}`");
@@ -105,7 +106,21 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         } else if path.is_ident("fill") {
             reject_second(&a.count, aspan, name)?;
             a.count = Some((CountSpec::Fill { cap: parse_fill(attr, name)? }, aspan));
+        } else if path.is_ident("at") && is_end(attr) {
+            if a.tail.is_some() || a.at.is_some() {
+                return Err(syn::Error::new(
+                    aspan,
+                    format!("field `{name}`: #[at] takes one position. Remove the second"),
+                ));
+            }
+            a.tail = Some(aspan);
         } else if path.is_ident("at") {
+            if a.tail.is_some() {
+                return Err(syn::Error::new(
+                    aspan,
+                    format!("field `{name}`: #[at] takes one position. Remove the second"),
+                ));
+            }
             crate::attr::once_attr(&mut a.at, attr, &owner, || parse_at(attr, name))?;
         } else if path.is_ident("seek") {
             crate::attr::once_attr(&mut a.seek, attr, &owner, || parse_seek(attr, name))?;
@@ -567,6 +582,11 @@ fn when_shape(span: Span, name: &str) -> syn::Error {
              `#[when(flag)]` for an earlier `bool`, or `#[when(kind == 3 && len > 0)]`"
         ),
     )
+}
+
+/// `#[at(end)]`.
+fn is_end(attr: &syn::Attribute) -> bool {
+    attr.parse_args::<syn::Ident>().is_ok_and(|i| i == "end")
 }
 
 fn parse_at(attr: &syn::Attribute, name: &str) -> syn::Result<crate::claim::At> {

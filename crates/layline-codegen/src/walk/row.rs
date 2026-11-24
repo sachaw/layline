@@ -45,6 +45,7 @@ pub(crate) enum Start {
     At(u64),
     After { segment: String, bits: u64 },
     Seek { by: String },
+    Tail { before: Option<String>, bits: u64 },
 }
 
 /// A row's size, and what determines it.

@@ -455,6 +455,8 @@ impl Segment {
     #[must_use]
     pub fn placed_optionally(&self) -> Option<&str> {
         match self {
+            // Framing holds a number when absent too: zero.
+            Segment::Opt { field, .. } if field.stated => None,
             Segment::Opt { field, .. } => Some(field.name.as_str()),
             Segment::Placed { name, absent: Some(_), .. }
             | Segment::Repeat { name, when: Some(_), .. } => Some(name.as_str()),
@@ -573,6 +575,24 @@ pub struct MessageDef {
     pub needs: Vec<Param>,
     /// The segments, in wire order.
     pub segments: Vec<Segment>,
+    /// The segments anchored to the end of the body, in wire order, after
+    /// [`segments`](Self::segments).
+    ///
+    /// Decode reads them first, backwards from the end, as soon as it has read the fields
+    /// before the first segment that reaches the end: a [`Count::Fill`], text to the end, a
+    /// switch or a nested message whose size it decides. That segment then ends where the tail
+    /// starts, and it and every later segment may read tail fields, as the tail may read the
+    /// fields before it. Encode writes every segment in wire order. A message with a tail reads
+    /// to the end of the bytes it is given.
+    ///
+    /// Each tail segment's size must be known before it is read, from the end: fixed, or given
+    /// by an expression over later tail fields, earlier fields and parameters. So a tail holds
+    /// blocks, checksums, fixed optional fields, and collections of fixed-width elements sized by
+    /// a count or byte length, optional with [`Presence::When`]. An optional field of a block may
+    /// be framing: on the wire when its condition holds. RTP's padding is
+    /// `padding: Option<Vec<u8>>`, counted by `pad_count - 1`, and then `pad_count`, both present
+    /// when the header's padding bit is set.
+    pub tail: Vec<Segment>,
     /// Documentation.
     pub doc: Option<String>,
     /// Derives for this message, written after the module's.
@@ -599,11 +619,18 @@ impl MessageDef {
             bits: None,
             needs: Vec::new(),
             segments,
+            tail: Vec::new(),
             doc: None,
             derives: Vec::new(),
             lifetime: None,
             depth: None,
         }
+    }
+
+    /// Anchors `tail` to the end of the body: segments decode reads first, from the end.
+    #[must_use]
+    pub fn with_tail(self, tail: Vec<Segment>) -> Self {
+        Self { tail, ..self }
     }
 
     /// Sets the deepest the message decodes, as `Message::MAX_DEPTH`.

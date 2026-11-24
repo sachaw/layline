@@ -144,9 +144,14 @@ fn lower_message(
     {
         return Err(Error::Refused(unbounded_recursion(&m.name, r.field)));
     }
+    let all: Vec<crate::Segment> = m.segments.iter().chain(&m.tail).cloned().collect();
     let Walked { fields, base, parse, build, bytes, table, rows, .. } =
-        walk_segments(&mut item, &m.segments, Own::Struct)?;
-    let end = open_end(&m.segments, &m.name, root);
+        walk_segments(&mut item, &all, m.segments.len(), Own::Struct)?;
+    // A message with a tail reads to the end of what it is given.
+    let end = match m.tail.is_empty() {
+        true => open_end(&m.segments, &m.name, root),
+        false => refuse::End { open: true, through: Vec::new() },
+    };
     let covered = covers_table(&rows, root).map(|covers| {
         quote! {
             /// The bytes each `#[checksum]` field covers.

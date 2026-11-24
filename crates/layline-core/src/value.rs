@@ -163,6 +163,50 @@ impl Wide for usize {
     }
 }
 
+/// A collection whose elements encode counts: none for an absent optional one.
+pub trait Many {
+    /// The number of elements.
+    fn many(&self) -> usize;
+}
+
+impl<T> Many for [T] {
+    fn many(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<T, const N: usize> Many for [T; N] {
+    fn many(&self) -> usize {
+        N
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T> Many for crate::__private::Vec<T> {
+    fn many(&self) -> usize {
+        self.len()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T> Many for crate::__private::Box<[T]> {
+    fn many(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<T: Many + ?Sized> Many for &T {
+    fn many(&self) -> usize {
+        (**self).many()
+    }
+}
+
+impl<T: Many> Many for Option<T> {
+    fn many(&self) -> usize {
+        self.as_ref().map_or(0, Many::many)
+    }
+}
+
 /// A number as a count or byte length: `None` when it is negative.
 #[must_use]
 pub fn size(a: Option<i64>) -> Option<usize> {

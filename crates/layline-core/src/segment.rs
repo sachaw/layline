@@ -24,6 +24,16 @@ pub enum Start<'a> {
         /// The field holding the offset, or the expression giving it.
         by: &'a str,
     },
+    /// In the message's tail, anchored to its end: the segment ends `bits` before the end of the
+    /// body, or before the start of `before`, the nearest later tail segment whose size is read
+    /// from the wire. Its span then gives its start. Decode reads the tail first, from the end.
+    Tail {
+        /// The nearest later tail segment whose size is read from the wire, or `None` when every
+        /// later one is fixed.
+        before: Option<&'a str>,
+        /// Bits between the end of this segment and that point.
+        bits: u64,
+    },
 }
 
 impl Start<'_> {

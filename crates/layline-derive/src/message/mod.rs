@@ -89,6 +89,8 @@ struct MsgField {
     valid: Option<Value>,
     /// Whether the type is `Stated<T>`: framing encode writes.
     stated: bool,
+    /// `#[at(end)]`: anchored to the end of the body, in its tail.
+    tail: Option<Span>,
 }
 
 enum Body {
@@ -579,6 +581,8 @@ struct FieldAttrs {
     valid: Option<Value>,
     /// `#[present]`: a flag just before an `Option<T>`.
     present: Option<Span>,
+    /// `#[at(end)]`: anchored to the end of the body.
+    tail: Option<Span>,
 }
 
 enum KindWord {

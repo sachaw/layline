@@ -112,7 +112,7 @@ fn lower_choice(
     for arm in &c.arms {
         let variant = ident(&arm.name);
         let Walked { base, binds, parse, build, bytes, table, rows, .. } =
-            walk_segments(&mut item, &arm.body, Own::Arm)?;
+            walk_segments(&mut item, &arm.body, arm.body.len(), Own::Arm)?;
 
         let (decl, ctor, pat) = match binds.as_slice() {
             [] => (quote!(,), quote!(), quote!()),

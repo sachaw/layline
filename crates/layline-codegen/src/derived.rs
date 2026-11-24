@@ -315,6 +315,8 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
 /// The presence condition of an optional field, and the field.
 fn tested(seg: &Segment) -> Option<(&Expr, &str)> {
     match seg {
+        // Framing's presence says nothing encode can write back: it follows the condition.
+        Segment::Opt { field, .. } if field.stated => None,
         Segment::Opt { when: Presence::When(e), field } => Some((e, &field.name)),
         Segment::Repeat { when: Some(Presence::When(e)), name, .. } => Some((e, name)),
         _ => None,

@@ -190,6 +190,14 @@ fn start_tokens(start: &row::Start, root: &Root) -> TokenStream {
             quote!(#root::table::Start::After { segment: #segment, bits: #bits })
         }
         row::Start::Seek { by } => quote!(#root::table::Start::Seek { by: #by }),
+        row::Start::Tail { before, bits } => {
+            let bits = Literal::u64_unsuffixed(*bits);
+            let before = match before {
+                Some(b) => quote!(::core::option::Option::Some(#b)),
+                None => quote!(::core::option::Option::None),
+            };
+            quote!(#root::table::Start::Tail { before: #before, bits: #bits })
+        }
     }
 }
 

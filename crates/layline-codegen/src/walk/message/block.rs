@@ -147,8 +147,12 @@ impl Walk<'_> {
                 }
                 locals.push((f.name.clone(), local, held_after));
             }
-            if let Some((which, of)) =
-                self.derived.iter().find(|(df, _)| df == &f.name).and_then(|(_, d)| d.reserves())
+            if let Some((which, of)) = self
+                .derived
+                .iter()
+                .find(|(df, _)| df == &f.name)
+                .and_then(|(_, d)| d.reserves())
+                .filter(|(_, of)| !self.follows(&f.name, of))
             {
                 let what = which.what();
                 let width = f.kind.width();
@@ -189,11 +193,16 @@ impl Walk<'_> {
                         f.name,
                     )));
                 }
-                let pos = Literal::u64_unsuffixed(bit / 8);
                 let decode = format_ident!("{}{}", decode, f.name);
                 let encode = format_ident!("{}{}", encode, f.name);
-                at_marks.extend(quote! { let #decode = __at + #pos; });
-                reserve.extend(quote! { let #encode = __block + #pos; });
+                at_marks.extend(match bit / 8 {
+                    0 => quote! { let #decode = __at; },
+                    byte => {
+                        let pos = Literal::u64_unsuffixed(byte);
+                        quote! { let #decode = __at + #pos; }
+                    }
+                });
+                reserve.extend(in_block(&encode, bit / 8));
             }
             bit_at += f.kind.width();
         }
@@ -246,6 +255,17 @@ impl Walk<'_> {
                     Some(present) => quote! {
                         #fname: <#ty as #root::__private::WireFlag>::from_flag(#present),
                     },
+                    // Written after its segment, as that segment's stamp worked it out.
+                    None if d.reserves().is_some_and(|(_, of)| self.follows(&f.name, of)) => {
+                        let wrote = super::patch::wrote_ident(&f.name);
+                        let fits = fits(Target::Field(&ty, 0), &quote!(#wrote), &f.name, root);
+                        quote! {
+                            #fname: {
+                                #fits
+                                <#ty as #root::WireInt>::from_i64(#wrote)
+                            },
+                        }
+                    }
                     // Stamped later, and range-checked then.
                     None if d.reserves().is_some() => {
                         let held = placeholder(f.range);

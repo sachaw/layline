@@ -26,6 +26,9 @@ impl Walk<'_> {
         let Prelude { some, none, option, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
         let Segment::Opt { when, field: f } = seg else { unreachable!("just matched") };
+        if f.stated {
+            return self.optional_framing(item, own, when, f);
+        }
         let ident = ident(&f.name);
         let ty = kind_ty(&f.kind, root);
         let opt_ty = quote!(#option<#ty>);
@@ -102,6 +105,87 @@ impl Walk<'_> {
 }
 
 impl Walk<'_> {
+    /// A `Stated<T>` on the wire only when its condition holds: decode reads it then, and holds
+    /// zero otherwise, and encode writes the number its attribute works out then.
+    fn optional_framing(
+        &mut self,
+        item: &mut Item<'_>,
+        own: Own,
+        when: &Presence,
+        f: &crate::Field,
+    ) -> Result<(), Error> {
+        let Prelude { some, err, .. } = self.root.prelude();
+        let (root, owner) = (self.root, self.owner);
+        let Presence::When(e) = when else {
+            return Err(Error::Refused(format!(
+                "{owner}: framing field `{}` is present when a condition holds",
+                f.name
+            )));
+        };
+        let name = f.name.as_str();
+        let ident = ident(name);
+        let ty = kind_ty(&f.kind, root);
+        self.public_fields.extend(emit_message_field(f, false, root, &self.skip));
+        self.binds.push(Bind {
+            name: ident.clone(),
+            ty: quote!(#root::Stated<#ty>),
+            value: quote!(#ident),
+        });
+        let bits = f.kind.width();
+        if bits == 0 || !bits.is_multiple_of(8) {
+            return Err(Error::Refused(format!(
+                "{owner}: optional framing `{name}` is {bits} bits, not whole bytes"
+            )));
+        }
+        let sub = format_ident!("__{}Opt{}", owner, item.opt_n);
+        item.opt_n += 1;
+        let len = Literal::usize_unsuffixed((bits / 8) as usize);
+        item.items.extend(hidden_block(root, &sub, &len, &self.endian, block_field(f, root)));
+        item.via.push(quote!(<#sub as #root::Layout>::ENCODE_FALLIBLE));
+        let gate = self.presence_rows(when, name);
+        self.rows.push(Row::new(name, span_of_kind(&f.kind, name)).when(gate).table(
+            &sub,
+            core::slice::from_ref(f),
+            bits,
+            item.endian,
+        ));
+
+        let present = self.env.condition(owner, "#[when]", e)?;
+        let read = read_layout(&format_ident!("__o"), &sub, &len, root);
+        self.parse_steps.extend(quote! {
+            let #ident = if #present {
+                #read
+                #root::Stated::new(__o.#ident)
+            } else {
+                #root::Stated::default()
+            };
+        });
+        self.env.bind(name, quote!(#ident.get()));
+
+        let Some((_, d)) = self.derived.iter().find(|(df, _)| df == name) else {
+            return Err(Error::Internal(format!(
+                "{owner}: framing field `{name}` has no attribute that writes it"
+            )));
+        };
+        let n = super::patch::derived_value(d, own, name, root)?;
+        let fits = super::patch::fits(super::patch::Target::Field(&ty, 0), &n, name, root);
+        let holds = condition(e, &|n, want| self.written(own, n, want), root)?;
+        self.byte_steps.extend(quote! {
+            match #holds {
+                #some(true) => {
+                    #fits
+                    out.push(
+                        &#sub { #ident: <#ty as #root::WireInt>::from_i64(#n) }
+                            .encode_in::<__O>()?,
+                    )?;
+                }
+                #some(false) => {}
+                _ => return #err(#root::EncodeError::Inexact { field: #name, value: 0 }),
+            }
+        });
+        Ok(())
+    }
+
     /// Decode's test of whether the optional field `name` is present, as a `bool` expression. A
     /// byte-addressed flag before the field is read into `__flag` first, by statements this adds.
     pub(super) fn presence_read(
