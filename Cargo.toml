@@ -12,7 +12,6 @@ version = "0.5.1"
 edition = "2024"
 license = "MPL-2.0"
 repository = "https://github.com/sachaw/layline"
-homepage = "https://github.com/sachaw/layline"
 documentation = "https://docs.rs/layline"
 keywords = ["binary", "parsing", "bitfield", "protocol", "no-std"]
 categories = ["encoding", "parser-implementations", "embedded", "no-std"]
