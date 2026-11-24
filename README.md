@@ -124,7 +124,7 @@ Every attribute is documented on its derive.
 | `derive` | The derive macros | Yes |
 | `alloc` | `Vec`, `String` and `Box` fields | Yes |
 | `frame` | Stream framing | No |
-| `num` | LEB128, Exp-Golomb and reserved values | No |
+| `num` | LEB128, VLQ, Exp-Golomb and reserved values | No |
 | `serde` | `Serialize` for `U`, `I` and `Reserved` | No |
 
 ## Crates

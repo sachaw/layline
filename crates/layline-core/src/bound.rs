@@ -5,10 +5,11 @@
 
 /// An integer read from the wire, such as a count, length or offset.
 ///
-/// Implemented for the integer primitives, [`Uleb128`] and [`Sleb128`].
+/// Implemented for the integer primitives, [`Uleb128`], [`Sleb128`] and [`Vlq`].
 ///
 /// [`Uleb128`]: crate::num::Uleb128
 /// [`Sleb128`]: crate::num::Sleb128
+/// [`Vlq`]: crate::num::Vlq
 ///
 /// ```
 /// use layline_core::WireInt;

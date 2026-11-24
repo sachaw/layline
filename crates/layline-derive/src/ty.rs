@@ -21,6 +21,11 @@ pub(crate) fn is_plain_path(ty: &Type) -> bool {
         if p.qself.is_none() && p.path.segments.iter().all(|s| s.arguments.is_none()))
 }
 
+/// A path with generic arguments allowed, such as `Vlq<4>`, but not a qualified one.
+pub(crate) fn is_generic_path(ty: &Type) -> bool {
+    matches!(ty, Type::Path(p) if p.qself.is_none())
+}
+
 pub(crate) fn scalar_of(ty: &Type) -> Option<Scalar> {
     Some(match bare_ident(ty)?.to_string().as_str() {
         "u8" => Scalar::U(8),

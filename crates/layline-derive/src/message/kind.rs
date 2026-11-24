@@ -9,7 +9,9 @@ use layline_codegen::{Collection, Kind, Len, Scalar};
 use super::lower::model_by;
 use super::*;
 use crate::claim::Ref;
-use crate::ty::{array_of, box_element, is_plain_path, is_string, scalar_of, variable_size};
+use crate::ty::{
+    array_of, box_element, is_generic_path, is_plain_path, is_string, scalar_of, variable_size,
+};
 
 pub(super) struct TextAttrs<'a> {
     pub(super) codec: Option<String>,
@@ -218,7 +220,7 @@ pub(super) fn var_field(
             ),
         ));
     }
-    if !is_plain_path(ty) {
+    if !is_generic_path(ty) {
         return Err(syn::Error::new(
             ty.span(),
             format!(

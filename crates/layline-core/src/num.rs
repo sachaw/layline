@@ -1,4 +1,4 @@
-//! Number codings: reserved values, LEB128 and Exp-Golomb.
+//! Number codings: reserved values, LEB128, VLQ and Exp-Golomb.
 //!
 //! # Tags
 //! [`Reserved`] takes an optional `Tag` type, `()` by default. Two fields with different tags
@@ -22,9 +22,11 @@ use crate::FieldCodec;
 
 mod expgolomb;
 mod varint;
+mod vlq;
 
 pub use expgolomb::ExpGolomb;
 pub use varint::{Sleb128, Uleb128, unzigzag, zigzag};
+pub use vlq::Vlq;
 
 /// A field codec with one raw value reserved to mean `None`.
 ///

@@ -6,7 +6,7 @@
 //! - [`Message`]: a variable-length type, described by a [`SegmentDef`](table::SegmentDef) table.
 //! - [`audit`]: prints those tables.
 //! - [`frame`] (feature `frame`): stream framing.
-//! - [`num`] (feature `num`): LEB128, Exp-Golomb and reserved values.
+//! - [`num`] (feature `num`): LEB128, VLQ, Exp-Golomb and reserved values.
 
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
