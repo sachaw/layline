@@ -23,10 +23,15 @@ use core::fmt;
 /// | `+` `-` | integers |
 /// | `*` `/` `%` | integers |
 /// | unary `!` `-` | a `bool`; an integer |
+/// | `if c { a } else { b }` | a condition, then two of a kind |
 ///
 /// An operand is an integer literal (`12`, `0x0f`, `0b1010`, `1_000`), a constant (a
 /// `SCREAMING_CASE` name or a path with `::`), an earlier field (`n`, or `hdr.n` for a field of the
 /// nested layout `hdr`), a parameter, or a parenthesised expression.
+///
+/// `if c { a } else { b }` is `a` where `c` holds and `b` where it does not, as in Rust: `b` may be
+/// another `if`, and the two give the same type. It is an operand, so `if c { 1 } else { 2 } * 4`
+/// scales either.
 ///
 /// A condition is a `bool`, or the result of `&`, `|` or `^`, which holds when any bit is set.
 /// `!` takes a `bool`: on an integer, Rust would flip its bits rather than test them.
@@ -34,7 +39,8 @@ use core::fmt;
 /// Evaluation is in `i64` and total. An operation that overflows, divides by zero, or shifts by a
 /// count outside `0..64` gives no number, and decode refuses the bytes with `Malformed` rather
 /// than wrapping. `<<` is multiplication by a power of two, so a set bit shifted out overflows.
-/// `/` and `%` round toward zero. `&&` and `||` short-circuit.
+/// `/` and `%` round toward zero. `&&` and `||` short-circuit, and `if` evaluates only the branch it
+/// takes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Expr {
@@ -50,6 +56,8 @@ pub enum Expr {
     Neg(Box<Expr>),
     /// `a op b`.
     Binary(Op, Box<Expr>, Box<Expr>),
+    /// `if c { a } else { b }`.
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 /// A binary operator.
@@ -181,6 +189,12 @@ impl Expr {
         Expr::Binary(op, Box::new(a), Box::new(b))
     }
 
+    /// `if c { a } else { b }`.
+    #[must_use]
+    pub fn if_else(c: Expr, a: Expr, b: Expr) -> Self {
+        Expr::If(Box::new(c), Box::new(a), Box::new(b))
+    }
+
     /// Parses an expression, such as `ext_len * 4 - (13 + markings_len)`.
     ///
     /// # Errors
@@ -231,7 +245,7 @@ impl Expr {
         use layline_core::__private::value as v;
         match self {
             Expr::Int(n) => Some(*n),
-            Expr::Const(_) | Expr::Name(_) | Expr::Not(_) => None,
+            Expr::Const(_) | Expr::Name(_) | Expr::Not(_) | Expr::If(..) => None,
             Expr::Neg(e) => v::neg(e.fold()),
             Expr::Binary(op, a, b) => {
                 let (a, b) = (a.fold(), b.fold());
@@ -260,6 +274,11 @@ impl Expr {
                 a.visit(f);
                 b.visit(f);
             }
+            Expr::If(c, a, b) => {
+                c.visit(f);
+                a.visit(f);
+                b.visit(f);
+            }
             Expr::Int(_) | Expr::Const(_) | Expr::Name(_) => {}
         }
     }
@@ -270,18 +289,30 @@ impl Expr {
     /// `is_field` tells a field from a parameter. A parameter is stated by the holder, so it is
     /// part of the expression's constant side. The steps take the expression's value to the
     /// field's, outermost first: `n * 4 + 1` is `- 1`, then `/ 4` exactly.
+    ///
+    /// `if c { a } else { b }` is invertible where `a` and `b` both are, in the same field, and
+    /// `c` does not read it: encode tests `c`, then works back through the branch it takes.
     #[cfg_attr(not(feature = "walk"), allow(dead_code))]
     pub(crate) fn inverse(&self, is_field: &dyn Fn(&str) -> bool) -> Option<Inverse<'_>> {
         let fields: Vec<&str> = self.names().into_iter().filter(|n| is_field(n)).collect();
         let [field] = fields[..] else { return None };
+        Some(Inverse { field, steps: self.undo(field)? })
+    }
+
+    /// The steps from this expression's value back to `field`'s, outermost first.
+    fn undo<'a>(&'a self, field: &str) -> Option<Vec<Undo<'a>>> {
         let mut steps = Vec::new();
         let mut e = self;
         loop {
             match e {
-                Expr::Name(n) if n == field => return Some(Inverse { field, steps }),
+                Expr::Name(n) if n == field => return Some(steps),
                 Expr::Neg(x) => {
                     steps.push(Undo::Neg);
                     e = x;
+                }
+                Expr::If(c, a, b) if !c.reads(field) => {
+                    steps.push(Undo::Pick(c, a.undo(field)?, b.undo(field)?));
+                    return Some(steps);
                 }
                 Expr::Binary(Op::Mul, a, b) if a == b => {
                     steps.push(Undo::Root);
@@ -369,7 +400,7 @@ impl core::ops::Neg for Expr {
 }
 
 /// One step of working an expression's value back to its field's: see [`Expr::inverse`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "walk"), allow(dead_code))]
 pub(crate) enum Undo<'a> {
     /// `t - k`, undoing `+ k`.
@@ -390,6 +421,8 @@ pub(crate) enum Undo<'a> {
     Neg,
     /// The square root, exactly, undoing `f * f`.
     Root,
+    /// The steps of the branch the condition takes, undoing `if c { a } else { b }`.
+    Pick(&'a Expr, Vec<Undo<'a>>, Vec<Undo<'a>>),
 }
 
 /// The field an invertible expression reads, and how to work back to it.
@@ -437,6 +470,23 @@ fn write_expr(
         Expr::Int(n) if *n < 0 && parent.is_some() => write!(f, "({n})"),
         Expr::Int(n) => write!(f, "{n}"),
         Expr::Const(c) | Expr::Name(c) => f.write_str(c),
+        Expr::If(c, a, b) => {
+            let (open, close) = if compact { ("{", "}") } else { (" { ", " }") };
+            f.write_str("if ")?;
+            write_expr(f, c, None, compact)?;
+            f.write_str(open)?;
+            write_expr(f, a, None, compact)?;
+            f.write_str(close)?;
+            f.write_str(if compact { "else" } else { " else" })?;
+            if let Expr::If(..) = &**b {
+                f.write_str(" ")?;
+                write_expr(f, b, None, compact)
+            } else {
+                f.write_str(open)?;
+                write_expr(f, b, None, compact)?;
+                f.write_str(close)
+            }
+        }
         Expr::Not(x) | Expr::Neg(x) => {
             f.write_str(if matches!(e, Expr::Not(_)) { "!" } else { "-" })?;
             match &**x {
@@ -486,6 +536,14 @@ enum Tok {
     Not,
     Open,
     Close,
+    /// `if`.
+    If,
+    /// `else`.
+    Else,
+    /// `{`.
+    Begin,
+    /// `}`.
+    End,
 }
 
 impl fmt::Display for Tok {
@@ -497,6 +555,10 @@ impl fmt::Display for Tok {
             Tok::Not => f.write_str("!"),
             Tok::Open => f.write_str("("),
             Tok::Close => f.write_str(")"),
+            Tok::If => f.write_str("if"),
+            Tok::Else => f.write_str("else"),
+            Tok::Begin => f.write_str("{"),
+            Tok::End => f.write_str("}"),
         }
     }
 }
@@ -517,6 +579,9 @@ fn lex(text: &str) -> Result<Vec<Tok>, String> {
                 i += 1;
             }
             out.push(Tok::Int(literal(&text[start..i])?));
+        } else if let Some((k, len)) = keyword(rest) {
+            out.push(k);
+            i += len;
         } else if ident_char(c) {
             if rest.starts_with("r#") {
                 i += 2;
@@ -553,6 +618,12 @@ fn lex(text: &str) -> Result<Vec<Tok>, String> {
         } else if c == b'(' {
             out.push(Tok::Open);
             i += 1;
+        } else if c == b'{' {
+            out.push(Tok::Begin);
+            i += 1;
+        } else if c == b'}' {
+            out.push(Tok::End);
+            i += 1;
         } else if c == b')' {
             out.push(Tok::Close);
             i += 1;
@@ -568,6 +639,14 @@ fn lex(text: &str) -> Result<Vec<Tok>, String> {
         }
     }
     Ok(out)
+}
+
+/// `if` or `else` at the start of `rest`, as a whole word, and its length. `r#if` is a name.
+fn keyword(rest: &str) -> Option<(Tok, usize)> {
+    let (word, tok) =
+        [("if", Tok::If), ("else", Tok::Else)].into_iter().find(|(w, _)| rest.starts_with(w))?;
+    let after = rest.as_bytes().get(word.len());
+    (!after.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')).then_some((tok, word.len()))
 }
 
 /// An integer literal, with Rust's prefixes, `_` separators and type suffixes.
@@ -653,8 +732,36 @@ impl Parser<'_> {
                     _ => Err(format!("`({e}` is missing its `)`")),
                 }
             }
+            Tok::If => {
+                let c = self.expr(0)?;
+                let a = self.block(&c)?;
+                if self.peek() != Some(&Tok::Else) {
+                    return Err(format!(
+                        "`if {c} {{ {a} }}` has no `else`. An expression has a value either way"
+                    ));
+                }
+                self.at += 1;
+                let b = if self.peek() == Some(&Tok::If) { self.unary()? } else { self.block(&c)? };
+                Ok(Expr::if_else(c, a, b))
+            }
             other => Err(format!("`{other}` where an operand should be")),
         }
+    }
+}
+
+impl Parser<'_> {
+    /// `{ e }`, a branch of `if c`.
+    fn block(&mut self, c: &Expr) -> Result<Expr, String> {
+        if self.peek() != Some(&Tok::Begin) {
+            return Err(format!("`if {c}` needs `{{` before its branch"));
+        }
+        self.at += 1;
+        let e = self.expr(0)?;
+        if self.peek() != Some(&Tok::End) {
+            return Err(format!("`{{ {e}` is missing its `}}`"));
+        }
+        self.at += 1;
+        Ok(e)
     }
 }
 
@@ -752,6 +859,53 @@ mod tests {
         assert!(p("n % 4").inverse(&field).is_none());
         assert!(p("n + n").inverse(&field).is_none());
         assert!(p("p * 2").inverse(&field).is_none());
+    }
+
+    #[test]
+    fn a_conditional_is_an_operand_with_rusts_spelling() {
+        let e = p("if marker || pt == 127 { DESCRIBED } else { pt }");
+        assert_eq!(
+            e,
+            Expr::if_else(p("marker || pt == 127"), Expr::constant("DESCRIBED"), Expr::name("pt"))
+        );
+        assert_eq!(e.names(), ["marker", "pt"]);
+        assert_eq!(p("if a { 1 } else { 2 } * 4"), p("(if a { 1 } else { 2 }) * 4"));
+        assert_eq!(p("r#if + 1").names(), ["if"]);
+        assert_eq!(p("iffy + elsewhere").names(), ["iffy", "elsewhere"]);
+        for s in [
+            "if a { n } else { n * 2 }",
+            "if a { 1 } else if b { 2 } else { 3 }",
+            "-if a && !b { x } else { y } + 1",
+            "if if a { b } else { c } { 1 } else { 2 }",
+        ] {
+            let e = p(s);
+            assert_eq!(e.to_string(), s);
+            assert_eq!(p(&format!("{e:#}")), e, "{e:#}");
+        }
+        assert!(Expr::parse("if a { 1 }").is_err(), "no else");
+        assert!(Expr::parse("if a 1 else 2").is_err(), "no braces");
+        assert!(Expr::parse("if a { 1 else { 2 }").is_err(), "unclosed");
+        assert!(Expr::parse("a ? 1 : 2").is_err(), "C's spelling");
+    }
+
+    #[test]
+    fn a_conditional_works_back_through_the_branch_it_takes() {
+        let field = |n: &str| n != "p";
+        let e = p("if p { n * 2 } else { n } + 1");
+        let inv = e.inverse(&field).unwrap();
+        assert_eq!(inv.field, "n");
+        let [Undo::Sub(_), Undo::Pick(c, then, otherwise)] = &inv.steps[..] else {
+            panic!("{:?}", inv.steps)
+        };
+        assert_eq!(**c, Expr::name("p"));
+        assert!(matches!(then[..], [Undo::Exactly(_)]));
+        assert!(otherwise.is_empty());
+        assert!(p("if p { n } else { 0 }").inverse(&field).is_none(), "one branch reads no field");
+        assert!(p("if n > 1 { n } else { n * 2 }").inverse(&field).is_none(), "the test reads it");
+        assert!(p("if p { n } else { m }").inverse(&field).is_none(), "two fields");
+        assert!(p("if m > 0 { n } else { n }").inverse(&field).is_none(), "the test reads a field");
+        assert!(p("if p { n } else { 1 }").test().is_none());
+        assert_eq!(p("if p { 1 } else { 2 }").fold(), None);
     }
 
     #[test]

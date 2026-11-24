@@ -42,6 +42,17 @@ fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStre
             let x = condition(x, look, root)?;
             (quote!(#v::not(#x)), Ty::Bool)
         }
+        Expr::If(c, a, b) => {
+            let c = condition(c, look, root)?;
+            let (a, ty) = eval(a, want, look, root)?;
+            let (b, other) = eval(b, ty, look, root)?;
+            if other != ty {
+                return Err(Error::Refused(format!(
+                    "`{e}` gives a `bool` one way and an integer the other"
+                )));
+            }
+            (quote!(#v::pick(#c, || #a, || #b)), ty)
+        }
         Expr::Binary(op, a, b) if op.joins() => {
             let (a, b) = (condition(a, look, root)?, condition(b, look, root)?);
             let f = if *op == Op::And { quote!(both) } else { quote!(either) };
@@ -99,10 +110,10 @@ pub(super) fn blamed<'e>(e: &'e Expr, fallback: &'e str) -> &'e str {
 }
 
 /// How a parameter reads in encode, for the side of an invertible expression that is not its
-/// field: from the context the holder passed.
+/// field: from the context the holder passed. A `bool` reads as 1 or 0, which a condition tests.
 pub(super) fn params(name: &str, _: Ty, root: &Root) -> Result<(TokenStream, Ty), Error> {
     let id = ident(name);
-    Ok((quote!(#root::WireInt::to_i64(&__ctx.#id)), Ty::Int))
+    Ok((quote!(#root::__private::value::Number::number(&__ctx.#id)), Ty::Int))
 }
 
 /// The value of the field `inv` names, where `e` equals the `i64` `target`, as an `i64`.
@@ -120,11 +131,37 @@ pub(super) fn solve(
     if inv.steps.is_empty() {
         return Ok(quote!(#root::__private::value::Wide::wide(#target)));
     }
-    let v = quote!(#root::__private::value);
     let look = |name: &str, ty: Ty| params(name, ty, root);
-    let mut back = quote!(#some(__target));
-    for step in &inv.steps {
-        let k = |k: &Expr| number(k, &look, root);
+    let back = undo(&inv.steps, quote!(#some(__target)), &look, root)?;
+    let solved = inv.field;
+    let forward = number(
+        e,
+        &|name: &str, ty: Ty| {
+            if name == solved { Ok((quote!(__solved), Ty::Int)) } else { params(name, ty, root) }
+        },
+        root,
+    )?;
+    Ok(quote! {{
+        let __target: #i64 = #root::__private::value::Wide::wide(#target);
+        match #back {
+            #some(__solved) if #forward == #some(__target) => __solved,
+            _ => {
+                return #err(#root::EncodeError::Inexact { field: #field, value: __target });
+            }
+        }
+    }})
+}
+
+/// `back`, an `Option<i64>`, worked back through `steps`, whose constant sides read through `look`.
+fn undo(
+    steps: &[Undo<'_>],
+    mut back: TokenStream,
+    look: &Lookup<'_>,
+    root: &Root,
+) -> Result<TokenStream, Error> {
+    let v = quote!(#root::__private::value);
+    for step in steps {
+        let k = |k: &Expr| number(k, look, root);
         back = match step {
             Undo::Sub(k_) => {
                 let k = k(k_)?;
@@ -156,23 +193,13 @@ pub(super) fn solve(
             }
             Undo::Neg => quote!(#v::neg(#back)),
             Undo::Root => quote!(#v::root(#back)),
+            Undo::Pick(c, then, otherwise) => {
+                let c = condition(c, look, root)?;
+                let a = undo(then, back.clone(), look, root)?;
+                let b = undo(otherwise, back, look, root)?;
+                quote!(#v::pick(#c, || #a, || #b))
+            }
         };
     }
-    let solved = inv.field;
-    let forward = number(
-        e,
-        &|name: &str, ty: Ty| {
-            if name == solved { Ok((quote!(__solved), Ty::Int)) } else { params(name, ty, root) }
-        },
-        root,
-    )?;
-    Ok(quote! {{
-        let __target: #i64 = #root::__private::value::Wide::wide(#target);
-        match #back {
-            #some(__solved) if #forward == #some(__target) => __solved,
-            _ => {
-                return #err(#root::EncodeError::Inexact { field: #field, value: __target });
-            }
-        }
-    }})
+    Ok(back)
 }

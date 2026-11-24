@@ -329,6 +329,11 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// | `\|`, then `^`, then `&` | integers |
 /// | `<<` `>>`, then `+` `-`, then `*` `/` `%` | integers |
 /// | unary `!`, `-` | a `bool`; an integer |
+/// | `if c { a } else { b }`, an operand | a condition, then two of a kind |
+///
+/// `if c { a } else { b }` is `a` where `c` holds and `b` where it does not; `b` may be another
+/// `if`. So a switch may select on two fields: RTP's DW packet is
+/// `#[switch(if hdr.marker || hdr.pt == 127 { DESCRIBED } else { hdr.pt })]`.
 ///
 /// A condition is a `bool`, or the result of `&`, `|` or `^`, which holds when any bit is set.
 /// `!` takes a `bool`: on an integer, Rust would flip its bits rather than test them. A number
@@ -337,7 +342,7 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// or shifts by a count outside `0..64` has no value, and decode refuses the bytes with
 /// `ParseError::Malformed`, naming the first field the expression reads, rather than wrapping.
 /// `<<` multiplies by a power of two, so a set bit shifted out overflows. `/` and `%` round
-/// toward zero, and `&&` and `||` short-circuit.
+/// toward zero, `&&` and `||` short-circuit, and `if` evaluates only the branch it takes.
 ///
 /// What encode does with an expression is decided when the type is built, by one rule: **what
 /// encode can work backwards.** A field holds a value encode has: the caller's in a plain field,
@@ -347,7 +352,10 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   is written: encode works the number back to that field. The steps are `+ k`, `- k`,
 ///   `k - f`, `* k` (exactly), `/ k`, `<< k` (exactly), `>> k`, unary `-`, and `f * f` (an exact
 ///   root), where `k` reads only literals, constants and parameters. So `#[count(n * 2 - 1)]`
-///   writes `n = (len + 1) / 2`. Where no value of the field gives the number, or decode would
+///   writes `n = (len + 1) / 2`. `if c { a } else { b }` is such a step where `a` and `b` both
+///   work back to the same field and `c` reads only literals, constants and parameters: encode
+///   tests `c` and works back through the branch it takes, so `#[count(if wide { n * 2 } else
+///   { n })]`, with `wide` a parameter, writes `n`. Where no value of the field gives the number, or decode would
 ///   read back a different one, encode refuses with `EncodeError::Inexact`; a value the field is
 ///   too narrow for is `EncodeError::Unfit`, and one past a `cap` is `EncodeError::OverCap`.
 /// - A condition that tests one field is written too: `f` for a `bool`, `f & MASK` for bits,

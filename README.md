@@ -204,6 +204,10 @@ let (packet, _) = Packet::decode(&[1, 7, 0, 0, 0]).unwrap();
 assert_eq!(packet.body, Body::Ping(Ping { seq: 7 }));
 ```
 
+A selector is an expression, as every attribute's value is, and may read several fields:
+`#[switch(if head.marker || head.pt == 127 { DESCRIBED } else { head.pt })]`. Encode checks such a
+selector against the arm, and writes the field of one it can work back to.
+
 A switch passes its holder's fields to the arm it selects with `#[with(..)]`, as a nested
 message takes them: the enum declares `#[message(needs(..))]`, and an arm reads them, or passes
 them to its own message with `#[with(..)]`.

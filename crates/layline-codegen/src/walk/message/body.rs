@@ -777,12 +777,12 @@ impl Walk<'_> {
         value: TokenStream,
         e: &Expr,
     ) -> Result<TokenStream, Error> {
-        let Prelude { i64, some, err, .. } = self.root.prelude();
+        let Prelude { some, err, .. } = self.root.prelude();
         let root = self.root;
         let stated = number(e, &|name, want| self.written(own, name, want), root)?;
         Ok(quote! {
             {
-                let __value = (#value) as #i64;
+                let __value = #root::__private::value::Wide::wide(#value);
                 match #stated {
                     #some(__stated) => #root::EncodeError::agree(#field, __value, __stated)?,
                     _ => return #err(#root::EncodeError::Inexact { field: #field, value: __value }),

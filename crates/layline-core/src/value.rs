@@ -132,6 +132,34 @@ pub fn not(a: Option<bool>) -> Option<bool> {
     Some(!a?)
 }
 
+/// `if c { a } else { b }`. Only the branch `c` takes is evaluated, so the other may be undefined.
+#[must_use]
+pub fn pick<T>(
+    c: Option<bool>,
+    a: impl FnOnce() -> Option<T>,
+    b: impl FnOnce() -> Option<T>,
+) -> Option<T> {
+    if c? { a() } else { b() }
+}
+
+/// A parameter's value as a number: an integer's own, or 1 for a `bool` that holds.
+pub trait Number {
+    /// The number.
+    fn number(&self) -> i64;
+}
+
+impl<T: crate::WireInt> Number for T {
+    fn number(&self) -> i64 {
+        self.to_i64()
+    }
+}
+
+impl Number for bool {
+    fn number(&self) -> i64 {
+        i64::from(*self)
+    }
+}
+
 /// Whether bits are set: a bit test used as a condition.
 #[must_use]
 pub fn any_bit(a: Option<i64>) -> Option<bool> {

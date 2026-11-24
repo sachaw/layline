@@ -37,8 +37,8 @@ pub(super) fn derived_value(
     let Prelude { some, none, .. } = root.prelude();
     Ok(match d {
         Derived::Count { of, by, cap } => {
-            let coll = own.get(of);
-            let n = quote!(#root::__private::value::Many::many(&#coll));
+            let coll = own.by_ref(of);
+            let n = quote!(#root::__private::value::Many::many(#coll));
             inverted(by, n, cap.map(|cap| (cap, of.as_str())), field, root)?
         }
         Derived::TextLen { of, codec, by, cap } => {

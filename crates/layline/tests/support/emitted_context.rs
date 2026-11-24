@@ -691,7 +691,7 @@ impl ::layline::Message for Pdws {
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
         {
-            let __value = (self.elements.len()) as i64;
+            let __value = ::layline::__private::value::Wide::wide(self.elements.len());
             match Some(::layline::WireInt::to_i64(&__ctx.count)) {
                 Some(__stated) => {
                     ::layline::EncodeError::agree("elements", __value, __stated)?

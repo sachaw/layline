@@ -511,7 +511,7 @@ fn parse_switch(attr: &syn::Attribute, name: &str) -> syn::Result<SwitchOn> {
         syn::Error::new(
             attr.meta.span(),
             format!(
-                "field `{name}`: #[switch] takes a field name or `..`. \
+                "field `{name}`: #[switch] takes an expression or `..`. \
                  Write `#[switch(n)]`, or `#[switch(..)]` to switch on the bytes remaining"
             ),
         )

@@ -96,3 +96,21 @@ fn a_comparison_is_like_with_like() {
         "compares a `bool` with an integer",
     );
 }
+
+#[test]
+fn a_conditional_gives_one_kind_and_tests_a_condition() {
+    refused(
+        &message(
+            "pub on: bool,\npub n: u8,\n#[count(if on { n } else { on })]\npub items: Vec<u8>,",
+        ),
+        "gives a `bool` one way and an integer the other",
+    );
+    refused(
+        &message("pub n: u8,\n#[count(if n { n } else { 1 })]\npub items: Vec<u8>,"),
+        "`n` is an integer, and `if n { n } else { 1 }` needs a condition there",
+    );
+    refused(
+        &message("pub on: bool,\npub n: u8,\n#[count(if on { n })]\npub items: Vec<u8>,"),
+        "`if on { n }` has no `else`",
+    );
+}

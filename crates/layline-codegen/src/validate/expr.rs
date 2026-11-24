@@ -100,6 +100,17 @@ fn check(seen: &Seen<'_>, e: &Expr, want: Ty) -> Result<Ty, Invalid> {
             int(b)?;
             Ok(Ty::Int)
         }
+        Expr::If(c, a, b) => {
+            cond(c)?;
+            let then = check(seen, a, want)?;
+            if check(seen, b, then)? != then {
+                return Err(Invalid::Other(format!(
+                    "`{e}` gives a `bool` one way and an integer the other. \
+                     Give both branches one kind"
+                )));
+            }
+            Ok(then)
+        }
     }
 }
 
