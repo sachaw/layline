@@ -161,33 +161,6 @@ assert_eq!(Rtp::decode(&wire).unwrap().0, rtp);
 A message may hold itself, through `Box`, `Vec` or other types, as a BER element or an OpenWire
 object does. `#[message(depth = N)]` bounds how deeply decode nests it.
 
-Fields anchored to the end with `#[at(end)]` form the message's tail. Decode reads them first,
-from the end, so a `#[fill]` stops where they start. RTP's padding counts itself in the last
-byte:
-
-```rust
-use layline::{Message, Stated};
-
-#[derive(Message, Debug, PartialEq)]
-pub struct Rtp {
-    pub padded: bool,
-    #[fill]
-    pub payload: Vec<u8>,
-    #[at(end)] #[when(padded)] #[count(pad_count - 1)]
-    pub padding: Option<Vec<u8>>,
-    #[at(end)] #[when(padded)]
-    pub pad_count: Stated<u8>,
-}
-
-let rtp = Rtp { padded: true, payload: vec![7], padding: Some(vec![0, 0]), pad_count: Stated::default() };
-let wire = rtp.encode().unwrap();
-assert_eq!(wire, [1, 7, 0, 0, 3]);
-assert_eq!(Rtp::decode(&wire).unwrap().0, rtp);
-```
-
-A message may hold itself, through `Box`, `Vec` or other types, as a BER element or an OpenWire
-object does. `#[message(depth = N)]` bounds how deeply decode nests it.
-
 A struct with a lifetime borrows its byte runs from the input instead of copying them, so it
 decodes without an allocator. It implements `MessageRef<'a>`:
 
@@ -230,10 +203,6 @@ pub struct Packet {
 let (packet, _) = Packet::decode(&[1, 7, 0, 0, 0]).unwrap();
 assert_eq!(packet.body, Body::Ping(Ping { seq: 7 }));
 ```
-
-A switch passes its holder's fields to the arm it selects with `#[with(..)]`, as a nested
-message takes them: the enum declares `#[message(needs(..))]`, and an arm reads them, or passes
-them to its own message with `#[with(..)]`.
 
 A switch passes its holder's fields to the arm it selects with `#[with(..)]`, as a nested
 message takes them: the enum declares `#[message(needs(..))]`, and an arm reads them, or passes
