@@ -26,7 +26,7 @@ fn an_unknown_message_key_is_named() {
 pub struct M {
     pub a: u16,
 }"#,
-        "`M`: expected `endian`, `bits`, `order`, `needs`, `closed`, or `crate`",
+        "`M`: expected `endian`, `bits`, `order`, `needs`, `depth`, `closed`, or `crate`",
     );
 }
 

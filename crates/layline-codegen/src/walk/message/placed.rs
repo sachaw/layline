@@ -34,7 +34,7 @@ impl Walk<'_> {
         self.public_fields.extend(quote! { #d pub #ident: #ty, });
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });
 
-        item.via.extend(super::refuse::held_refusal(kind, owner, false, root));
+        item.hold(super::refuse::held_refusal(kind, owner, root));
         let ctx = self.with_ctx(kind, own)?;
         let step = element_step(kind, field, ctx.as_ref(), root)?;
         let mut row =

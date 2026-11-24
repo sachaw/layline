@@ -24,6 +24,6 @@ pub(crate) use fixed::{emit_dispatch, emit_enum, emit_layout};
 #[cfg(feature = "emit")]
 pub(crate) use message::{emit_choice, emit_message};
 #[cfg(feature = "emit")]
-pub(crate) use reference::{Reference, Referent, defers_open_end};
+pub(crate) use reference::{Reference, Referent};
 #[cfg(feature = "emit")]
 pub(crate) use tokens::{collection_ty, derive_attr};

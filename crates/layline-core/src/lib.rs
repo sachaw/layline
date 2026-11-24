@@ -40,6 +40,7 @@ mod field;
 mod int;
 mod mask;
 mod message;
+mod reach;
 mod row;
 mod segment;
 mod slot;
@@ -108,6 +109,12 @@ pub mod __private {
     pub use crate::__layline_alloc as alloc_only;
     pub use crate::field::{Decoded, Decodes, Fallibility, assert_layout};
     pub use crate::order::{Be, ByteOrder, Le};
+    pub use crate::reach::{Link, Node};
+
+    /// The searches that work out a message's constants across the types it holds.
+    pub mod reach {
+        pub use crate::reach::{open_ended, refuses};
+    }
     pub use crate::word::BitWord;
 
     /// The arithmetic of attribute expressions.

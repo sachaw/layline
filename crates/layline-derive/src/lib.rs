@@ -304,9 +304,11 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// cap, a count, length, offset or discriminant field too narrow for what it states, an
 /// expression it cannot state exactly or disagrees with, a terminator or mask inside the value,
 /// and a parameter it disagrees with.
-/// The error names the field, the declaration and the value. A message held through `Box` or
-/// `Vec` counts as refusing unless it is this one, since it may hold this one in turn.
-/// `Message::ENCODE_FALLIBLE` says which; the trait's own methods always return `EncodeError`. In a byte-mode
+/// The error names the field, the declaration and the value. A held message counts as it
+/// declares, wherever it leads: a type may hold itself, through `Box` or `Vec` or through other
+/// types, and each one's constants are searched across that cycle when the crate is built, so a
+/// cycle that refuses nothing is infallible. `Message::ENCODE_FALLIBLE` says which; the trait's
+/// own methods always return `EncodeError`. In a byte-mode
 /// message a `bool` is one strict byte, as in a `bytes = N` layout. A struct with no fields,
 /// `struct Ready {}` or `struct Ready;`, is a message of no bytes, such as a frame whose selector
 /// alone says what happened.
@@ -377,6 +379,11 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   supplies. They become `Message::Ctx`, a generated `<Name>Ctx` struct. The holder writes a
 ///   parameter, so encode cannot derive it: encode returns `EncodeError::Mismatch` when a
 ///   `#[count]`, `#[len]`, `#[switch]` or `#[when]` it drives disagrees with the value.
+/// - `#[message(depth = N)]`: decode refuses this type nested more than `N` messages and
+///   catalogues deep, counted from where decode started, with `ParseError::TooDeep { limit: N }`.
+///   It sets `Message::MAX_DEPTH`, or `Choice::MAX_DEPTH` on an enum, and defaults to
+///   `MAX_NESTING_DEPTH`. Each type checks its own, so a type that holds itself, such as
+///   OpenWire's nested object, is bounded by the smallest limit on its cycle.
 /// - `#[message(closed)]`: on an enum, an unknown discriminant fails with
 ///   `ParseError::Malformed`.
 /// - `#[message(crate = path)]`: the path to `layline`. Default `::layline`.

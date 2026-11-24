@@ -569,6 +569,9 @@ pub struct MessageDef {
     /// The message implements `layline::MessageRef<'a>` instead of `layline::Message`, so it
     /// takes no [`needs`](Self::needs) and no other message can hold it.
     pub lifetime: Option<String>,
+    /// The deepest the message decodes, as `Message::MAX_DEPTH`: how many messages and
+    /// catalogues it may be nested in. `None` is `layline::MAX_NESTING_DEPTH`.
+    pub depth: Option<u32>,
 }
 
 impl MessageDef {
@@ -585,7 +588,14 @@ impl MessageDef {
             doc: None,
             derives: Vec::new(),
             lifetime: None,
+            depth: None,
         }
+    }
+
+    /// Sets the deepest the message decodes, as `Message::MAX_DEPTH`.
+    #[must_use]
+    pub fn with_depth(self, depth: u32) -> Self {
+        Self { depth: Some(depth), ..self }
     }
 
     /// Declares `Name<'lifetime>`, whose borrowed fields hold views of the input.

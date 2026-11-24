@@ -392,7 +392,7 @@ pub enum Body {
     #[value(1)]
     Greedy(Greedy),
 }"#,
-        quote::quote!(<Greedy as ::layline::Message>::OPEN_ENDED),
+        quote::quote!(ends: &[<Greedy as ::layline::Message>::NODE]),
     );
 }
 

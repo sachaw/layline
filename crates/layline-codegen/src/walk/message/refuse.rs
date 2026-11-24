@@ -47,39 +47,134 @@ pub fn known(fallible: &TokenStream) -> Option<bool> {
     }
 }
 
-/// Whether encoding a held `kind` can refuse, or `None` if it never does.
-///
-/// A message held through `Box` or `Vec` may hold this item in turn, and a constant cannot be
-/// worked out from itself, so one other than this item counts as refusing. This item itself adds
-/// nothing.
-pub(super) fn held_refusal(
-    kind: &Kind,
-    owner: &str,
-    indirect: bool,
-    root: &Root,
-) -> Option<TokenStream> {
+/// What encoding a held `kind` adds to the holder's refusals.
+pub(super) enum Held {
+    /// A constant the holder joins into its own: a layout's, codec's or var codec's.
+    Leaf(TokenStream),
+    /// A message the holder links to in its [`Node`](layline_core::__private::Node), which may
+    /// hold the holder in turn.
+    Link(TokenStream),
+}
+
+/// What encoding a held `kind` adds, or `None` if it adds nothing: a scalar, or this item.
+pub(super) fn held_refusal(kind: &Kind, owner: &str, root: &Root) -> Option<Held> {
     match kind {
         Kind::Nested { ty, .. } | Kind::NestedArray { ty, .. } => {
             let p = path(ty);
-            Some(quote!(<#p as #root::Layout>::ENCODE_FALLIBLE))
+            Some(Held::Leaf(quote!(<#p as #root::Layout>::ENCODE_FALLIBLE)))
         }
         Kind::Var { ty } => {
             let p = path(ty);
-            Some(quote!(<#p as #root::VarCodec>::ENCODE_FALLIBLE))
+            Some(Held::Leaf(quote!(<#p as #root::VarCodec>::ENCODE_FALLIBLE)))
         }
         Kind::Codec { ty, .. } => {
             let p = path(ty);
-            Some(quote!(<#p as #root::FieldCodec>::ENCODE_FALLIBLE))
+            Some(Held::Leaf(quote!(<#p as #root::FieldCodec>::ENCODE_FALLIBLE)))
         }
         Kind::Msg { ty, .. } if names_self(ty, owner) => None,
-        Kind::Msg { boxed: true, .. } => Some(quote!(true)),
-        Kind::Msg { .. } if indirect => Some(quote!(true)),
         Kind::Msg { ty, .. } => {
             let p = path(ty);
-            Some(quote!(<#p as #root::Message>::ENCODE_FALLIBLE))
+            Some(Held::Link(quote!(<#p as #root::Message>::NODE)))
         }
         _ => None,
     }
+}
+
+/// Where a body ends: by itself, and through the types its last field holds.
+#[derive(Default)]
+pub(super) struct End {
+    /// Whether the body reads to its end by itself.
+    pub(super) open: bool,
+    /// The types whose open end is the body's.
+    pub(super) through: Vec<TokenStream>,
+}
+
+/// An item's `NODE`, `OPEN_ENDED` and `ENCODE_FALLIBLE`, and the value of `ENCODE_FALLIBLE` that a
+/// signature names.
+pub(super) struct Constants {
+    /// `const NODE`, or nothing for an item that keeps the default.
+    pub(super) node: TokenStream,
+    pub(super) open_ended: TokenStream,
+    pub(super) encode_fallible: TokenStream,
+    pub(super) fallible: TokenStream,
+}
+
+impl Constants {
+    /// Every constant, for an item with an open end.
+    pub(super) fn all(&self) -> TokenStream {
+        let Self { node, open_ended, encode_fallible, .. } = self;
+        quote! { #node #open_ended #encode_fallible }
+    }
+}
+
+/// The constants of the item `name`, in its impl of `of`, that refuses `own` by itself, links to
+/// `links` and ends as `end` says. `id` distinguishes its node from every other.
+///
+/// An item that links to nothing keeps the default node, and its constants are what it decides
+/// alone. Otherwise its node is a `static`, and each constant is a search from it, which a cycle
+/// of types cannot make depend on itself.
+pub(super) fn constants(
+    own: &TokenStream,
+    links: &[TokenStream],
+    end: &End,
+    (name, of): (&TokenStream, &TokenStream),
+    id: &str,
+    root: &Root,
+) -> Constants {
+    let bool_ty = root.prelude().bool;
+    let open = end.open;
+    let links = dedup(links);
+    let ends = if open { Vec::new() } else { dedup(&end.through) };
+    let reach = quote!(#root::__private::reach);
+    let (node, link) = (quote!(#root::__private::Node), quote!(#root::__private::Link));
+    let linked = !links.is_empty() || !ends.is_empty();
+    let open_ended = if ends.is_empty() {
+        quote!(#open)
+    } else {
+        quote!(#reach::open_ended(<Self as #of>::NODE))
+    };
+    let (fallible, value) = match known(own) {
+        Some(true) => (quote!(true), quote!(true)),
+        _ if links.is_empty() => (own.clone(), own.clone()),
+        _ => {
+            (quote!(<#name as #of>::ENCODE_FALLIBLE), quote!(#reach::refuses(<Self as #of>::NODE)))
+        }
+    };
+    let node = linked.then(|| {
+        quote! {
+            const NODE: #link = {
+                static NODE: #node = #node {
+                    id: ::core::concat!(
+                        ::core::line!(), ":", ::core::column!(), ":", #id, ":", ::core::module_path!()
+                    ),
+                    open_ended: #open,
+                    refuses: #own,
+                    ends: &[#(#ends),*],
+                    holds: &[#(#links),*],
+                };
+                #link::new(&NODE)
+            };
+        }
+    });
+    Constants {
+        node: node.unwrap_or_default(),
+        open_ended: quote! { const OPEN_ENDED: #bool_ty = #open_ended; },
+        encode_fallible: quote! { const ENCODE_FALLIBLE: #bool_ty = #value; },
+        fallible,
+    }
+}
+
+fn dedup(all: &[TokenStream]) -> Vec<TokenStream> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut kept = Vec::new();
+    for t in all {
+        let s = t.to_string();
+        if !seen.contains(&s) {
+            seen.push(s);
+            kept.push(t.clone());
+        }
+    }
+    kept
 }
 
 /// The error of an encode into a buffer, and the value of an encode that returns `t`, for an
@@ -132,15 +227,28 @@ mod tests {
     }
 
     #[test]
-    fn a_message_held_indirectly_refuses_unless_it_is_this_one() {
+    fn a_held_message_is_a_link_and_this_one_adds_nothing() {
         let root = Root::default();
         let held = |ty: &str, boxed| Kind::Msg { ty: ty.into(), boxed, with: Vec::new() };
-        assert!(held_refusal(&held("Node", true), "Node", true, &root).is_none());
-        let other = held_refusal(&held("Leaf", false), "Node", true, &root).unwrap();
-        assert_eq!(other.to_string(), "true");
-        let boxed = held_refusal(&held("Leaf", true), "Node", false, &root).unwrap();
-        assert_eq!(boxed.to_string(), "true");
-        let direct = held_refusal(&held("Leaf", false), "Node", false, &root).unwrap();
-        assert!(direct.to_string().contains("Message"), "{direct}");
+        assert!(held_refusal(&held("Node", true), "Node", &root).is_none());
+        let Some(Held::Link(other)) = held_refusal(&held("Leaf", true), "Node", &root) else {
+            panic!("a link")
+        };
+        assert!(other.to_string().contains("NODE"), "{other}");
+    }
+
+    #[test]
+    fn an_item_that_links_nowhere_decides_its_constants_alone() {
+        let root = Root::default();
+        let (m, of) = (quote!(M), quote!(::layline::Message));
+        let this = (&m, &of);
+        let alone = constants(&quote!(false), &[], &End::default(), this, "M", &root);
+        assert_eq!(alone.fallible.to_string(), "false");
+        assert!(alone.node.is_empty());
+        let linked = constants(&quote!(false), &[quote!(L)], &End::default(), this, "M", &root);
+        assert!(linked.node.to_string().contains("static NODE"), "{}", linked.node);
+        assert!(linked.fallible.to_string().contains("ENCODE_FALLIBLE"));
+        let refusing = constants(&quote!(true), &[quote!(L)], &End::default(), this, "M", &root);
+        assert_eq!(refusing.fallible.to_string(), "true");
     }
 }

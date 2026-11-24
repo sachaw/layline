@@ -48,7 +48,7 @@ impl Walk<'_> {
         let cty: syn::Path = syn::parse_str(choice).map_err(|_| {
             Error::Refused(format!("{owner}: switch type `{choice}` is not a valid type path"))
         })?;
-        item.via.push(quote!(<#cty as #root::Choice>::ENCODE_FALLIBLE));
+        item.links.push(quote!(<#cty as #root::Choice>::NODE));
         let d = doc_attr(doc);
         self.public_fields.extend(quote! { #d pub #ident: #cty, });
         self.binds.push(Bind { name: ident.clone(), ty: quote!(#cty), value: quote!(#ident) });

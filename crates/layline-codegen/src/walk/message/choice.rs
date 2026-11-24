@@ -6,7 +6,8 @@ use quote::quote;
 use super::Check;
 use super::body::{Bind, Item, Own, Walked, walk_segments};
 use super::cursor::too_deep;
-use super::recursion::{names_self, open_ended_expr};
+use super::recursion::{names_self, open_end};
+use super::refuse::End;
 use super::table::covers_table;
 use crate::Derive;
 use crate::root::Prelude;
@@ -38,13 +39,11 @@ pub(crate) fn emit_choice(
     c: &ChoiceDef,
     derives: &[Derive],
     root: &Root,
-    cyclic: &[(String, bool)],
 ) -> Result<(TokenStream, Vec<row::ArmDef>), Error> {
     let name = ident(&c.name);
     let der = derive_attr(derives, &c.derives)?;
     let doc = doc_attr(&c.doc);
-    let (ChoiceParts { variants, checks, blocks, codec }, arms) =
-        lower_choice(c, derives, root, cyclic)?;
+    let (ChoiceParts { variants, checks, blocks, codec }, arms) = lower_choice(c, derives, root)?;
     let checks = checks.into_iter().map(|c| c.tokens);
     Ok((
         quote! {
@@ -71,17 +70,16 @@ pub(crate) fn emit_choice(
 /// [`Error::Invalid`] when [`validate`](crate::validate()) refuses it. [`Error::Refused`] for a
 /// shape that cannot be generated.
 pub fn choice_parts(c: &ChoiceDef, derives: &[Derive], root: &Root) -> Result<ChoiceParts, Error> {
-    lower_choice(c, derives, root, &[]).map(|(parts, _)| parts)
+    lower_choice(c, derives, root).map(|(parts, _)| parts)
 }
 
-/// [`choice_parts`] plus each arm's rows. `cyclic` says which types on `c`'s cycles are open-ended.
+/// [`choice_parts`] plus each arm's rows.
 fn lower_choice(
     c: &ChoiceDef,
     derives: &[Derive],
     root: &Root,
-    cyclic: &[(String, bool)],
 ) -> Result<(ChoiceParts, Vec<row::ArmDef>), Error> {
-    let Prelude { ok, err, some, none, option, result, vec, u8, u32, usize, i64, bool, .. } =
+    let Prelude { ok, err, some, none, option, result, vec, u8, u32, usize, i64, .. } =
         root.prelude();
     crate::validate::validate_choice(c).map_err(|why| Error::Invalid(c.name.clone(), why))?;
     let name = ident(&c.name);
@@ -92,7 +90,7 @@ fn lower_choice(
     let mut decode_arms = TokenStream::new();
     let mut encode_arms = TokenStream::new();
     let mut which_arms = TokenStream::new();
-    let mut open_terms: Vec<TokenStream> = Vec::new();
+    let mut end = End::default();
     let mut arm_tables: Vec<TokenStream> = Vec::new();
     let mut arm_rows: Vec<row::ArmDef> = Vec::new();
 
@@ -154,10 +152,9 @@ fn lower_choice(
             Self::#variant { .. } => #some(#value),
         });
 
-        let arm_open = open_ended_expr(&arm.body, &c.name, cyclic, root);
-        if arm_open.to_string() != "false" {
-            open_terms.push(arm_open);
-        }
+        let arm_end = open_end(&arm.body, &c.name, root);
+        end.open |= arm_end.open;
+        end.through.extend(arm_end.through);
     }
 
     let what = c.name.as_str();
@@ -189,7 +186,7 @@ fn lower_choice(
                 )
             }
             None => {
-                open_terms = vec![quote!(true)];
+                end.open = true;
                 (
                     quote!(#vec<#u8>),
                     row::Span::Fill { cap: None },
@@ -233,14 +230,6 @@ fn lower_choice(
         )
     };
 
-    let open_ended = if open_terms.iter().any(|t| t.to_string() == "true") {
-        quote!(true)
-    } else if open_terms.is_empty() {
-        quote!(false)
-    } else {
-        quote!(#(#open_terms)||*)
-    };
-
     let per_arm: Vec<TokenStream> = arm_rows
         .iter()
         .filter_map(|arm| {
@@ -259,10 +248,20 @@ fn lower_choice(
     });
 
     let (owner, str_ty) = (c.name.as_str(), root.prelude().primitive("str"));
-    let too_deep = too_deep(root);
+    let too_deep = too_deep(&quote!(#root::Choice), root);
+    let max_depth = super::max_depth(c.depth, root);
     let parse_order = super::fixed_order(c.endian, &decode_arms, root);
     let bytes_order = super::fixed_order(c.endian, &encode_arms, root);
-    let fallible = super::refuse::refusal(super::refuse::refuses_itself(&encode_arms), &item.via);
+    let own = super::refuse::refusal(super::refuse::refuses_itself(&encode_arms), &item.via);
+    let consts = super::refuse::constants(
+        &own,
+        &item.links,
+        &end,
+        (&quote!(#name), &quote!(#root::Choice)),
+        owner,
+        root,
+    );
+    let (constants, fallible) = (consts.all(), consts.fallible);
     let inherent = super::inherent_encodes(&fallible, &quote!(#root::Choice), None, root);
     let codec = quote! {
         impl #root::Choice for #name {
@@ -275,9 +274,9 @@ fn lower_choice(
 
             #covered
 
-            const OPEN_ENDED: #bool = #open_ended;
+            #constants
 
-            const ENCODE_FALLIBLE: #bool = #fallible;
+            #max_depth
 
             fn decode_with_nested(
                 discriminant: #i64,

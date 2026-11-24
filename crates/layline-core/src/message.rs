@@ -1,8 +1,7 @@
 //! The decode error type.
 
-/// The nesting depth, in messages, past which decode returns [`ParseError::TooDeep`].
-///
-/// One limit for the whole crate, since a per-type limit cannot bound mutual recursion.
+/// The nesting depth, in messages, past which decode returns [`ParseError::TooDeep`], unless a
+/// type sets its own [`Message::MAX_DEPTH`](crate::Message::MAX_DEPTH).
 pub const MAX_NESTING_DEPTH: u32 = 128;
 
 /// Why a decode failed.
@@ -68,9 +67,9 @@ pub enum ParseError {
         /// Index of the field's first byte. See [Where](Self#where).
         at: usize,
     },
-    /// Nesting exceeded [`MAX_NESTING_DEPTH`].
+    /// Nesting exceeded a type's [`MAX_DEPTH`](crate::Message::MAX_DEPTH).
     TooDeep {
-        /// [`MAX_NESTING_DEPTH`].
+        /// That limit: [`MAX_NESTING_DEPTH`] unless the type sets its own.
         limit: u32,
     },
 }

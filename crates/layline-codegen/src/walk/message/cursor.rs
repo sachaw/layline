@@ -6,13 +6,13 @@ use quote::quote;
 use crate::Root;
 use crate::root::Prelude;
 
-/// Refuse a message nested past `MAX_NESTING_DEPTH`.
-pub(super) fn too_deep(root: &Root) -> TokenStream {
+/// Refuse a value nested past its type's `MAX_DEPTH`, in its impl of the trait `of`.
+pub(super) fn too_deep(of: &TokenStream, root: &Root) -> TokenStream {
     let Prelude { err, .. } = root.prelude();
     quote! {
-        if __depth > #root::MAX_NESTING_DEPTH {
+        if __depth > <Self as #of>::MAX_DEPTH {
             return #err(#root::ParseError::TooDeep {
-                limit: #root::MAX_NESTING_DEPTH,
+                limit: <Self as #of>::MAX_DEPTH,
             });
         }
     }

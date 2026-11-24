@@ -29,7 +29,7 @@ use body::{Item, Own, Walked, walk_segments};
 pub(crate) use choice::emit_choice;
 pub use choice::{ChoiceParts, choice_parts};
 use cursor::too_deep;
-use recursion::{names_self, open_ended_expr, unbounded_recursion};
+use recursion::{names_self, open_end, unbounded_recursion};
 use refuse::refuses_itself;
 pub use refuse::{known, refusal, signatures};
 use table::covers_table;
@@ -81,13 +81,11 @@ pub(crate) fn emit_message(
     m: &MessageDef,
     derives: &[Derive],
     root: &Root,
-    cyclic: &[(String, bool)],
 ) -> Result<(TokenStream, Vec<row::SegmentDef>), Error> {
     let name = ident(&m.name);
     let der = derive_attr(derives, &m.derives)?;
     let doc = doc_attr(&m.doc);
-    let (MessageParts { fields, checks, blocks, codec }, rows) =
-        lower_message(m, derives, root, cyclic)?;
+    let (MessageParts { fields, checks, blocks, codec }, rows) = lower_message(m, derives, root)?;
     let checks = checks.into_iter().map(|c| c.tokens);
     let generics = m.lifetime.as_ref().map(|lifetime| {
         let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
@@ -122,17 +120,16 @@ pub fn message_parts(
     derives: &[Derive],
     root: &Root,
 ) -> Result<MessageParts, Error> {
-    lower_message(m, derives, root, &[]).map(|(parts, _)| parts)
+    lower_message(m, derives, root).map(|(parts, _)| parts)
 }
 
-/// [`message_parts`] plus the table rows. `cyclic` says which types on `m`'s cycles are open-ended.
+/// [`message_parts`] plus the table rows.
 fn lower_message(
     m: &MessageDef,
     derives: &[Derive],
     root: &Root,
-    cyclic: &[(String, bool)],
 ) -> Result<(MessageParts, Vec<row::SegmentDef>), Error> {
-    let Prelude { ok, result, u8, u32, usize, bool, .. } = root.prelude();
+    let Prelude { ok, result, u8, u32, usize, .. } = root.prelude();
     crate::validate::validate_message(m).map_err(|why| Error::Invalid(m.name.clone(), why))?;
     if m.bits.is_some() {
         return bits_parts(m, derives, root);
@@ -149,7 +146,7 @@ fn lower_message(
     }
     let Walked { fields, base, parse, build, bytes, table, rows, .. } =
         walk_segments(&mut item, &m.segments, Own::Struct)?;
-    let open_ended = open_ended_expr(&m.segments, &m.name, cyclic, root);
+    let end = open_end(&m.segments, &m.name, root);
     let covered = covers_table(&rows, root).map(|covers| {
         quote! {
             /// The bytes each `#[checksum]` field covers.
@@ -163,10 +160,13 @@ fn lower_message(
         const SEGMENTS: &'static [#root::table::SegmentDef<'static>] = &[#table];
 
         #covered
-
-        const OPEN_ENDED: #bool = #open_ended;
     };
-    let too_deep = too_deep(root);
+    // A borrowing message is never nested, so it decodes at depth zero.
+    let too_deep = match m.lifetime {
+        Some(_) => quote!(),
+        None => too_deep(&quote!(#root::Message), root),
+    };
+    let max_depth = max_depth(m.depth, root);
     // The body reads and writes in the order `__O`: a fixed one here, or the parameter's.
     let fixed = |body: &TokenStream| match &m.endian_from {
         Some(_) => quote!(),
@@ -182,7 +182,7 @@ fn lower_message(
         #parse
         #ok((Self { #build }, __hi))
     };
-    let fallible = refusal(refuses_itself(&bytes), &item.via);
+    let own = refusal(refuses_itself(&bytes), &item.via);
     let buffered = quote!(#root::EncodeError);
     let encode = quote! {
         #bytes_order
@@ -215,6 +215,19 @@ fn lower_message(
                 syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
             quote!(#root::MessageRef<#lifetime>)
         };
+        let named = {
+            let lifetime = syn::Lifetime::new("'static", proc_macro2::Span::call_site());
+            (quote!(#name<#lifetime>), quote!(#root::MessageRef<#lifetime>))
+        };
+        let refuse::Constants { node, encode_fallible, fallible, .. } = refuse::constants(
+            &own,
+            &item.links,
+            &refuse::End::default(),
+            (&named.0, &named.1),
+            owner,
+            root,
+        );
+        let constants = quote!(#node #encode_fallible);
         let inherent_ref = inherent_encodes(&fallible, &of, None, root);
         let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
         let codec = quote! {
@@ -226,7 +239,7 @@ fn lower_message(
 
                 #covered
 
-                const ENCODE_FALLIBLE: #bool = #fallible;
+                #constants
 
                 fn decode(body: &#lifetime [#u8]) -> #result<(Self, #usize), #root::ParseError> {
                     let __depth: #u32 = 0;
@@ -248,6 +261,15 @@ fn lower_message(
         };
         return Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows));
     }
+    let consts = refuse::constants(
+        &own,
+        &item.links,
+        &end,
+        (&quote!(#name), &quote!(#root::Message)),
+        owner,
+        root,
+    );
+    let (constants, fallible) = (consts.all(), consts.fallible);
     let inherent =
         inherent_encodes(&fallible, &quote!(#root::Message), Some(!m.needs.is_empty()), root);
     let (decode, encode, held) = match &m.endian_from {
@@ -266,7 +288,9 @@ fn lower_message(
 
             #params
 
-            const ENCODE_FALLIBLE: #bool = #fallible;
+            #constants
+
+            #max_depth
 
             fn decode_with_nested(
                 body: &[#u8],
@@ -292,6 +316,18 @@ fn lower_message(
     };
 
     Ok((MessageParts { fields, checks: item.checks, blocks: item.items, codec }, rows))
+}
+
+/// `const MAX_DEPTH`, if the item sets its own.
+pub(super) fn max_depth(depth: Option<u32>, root: &Root) -> TokenStream {
+    let u32 = root.prelude().u32;
+    match depth {
+        Some(n) => {
+            let n = proc_macro2::Literal::u32_unsuffixed(n);
+            quote! { const MAX_DEPTH: #u32 = #n; }
+        }
+        None => quote!(),
+    }
 }
 
 /// The inherent encodes of an item whose `ENCODE_FALLIBLE` is `fallible`, shadowing the trait

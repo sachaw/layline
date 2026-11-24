@@ -5,6 +5,7 @@ use quote::quote;
 
 use super::Check;
 use super::body::{Item, Walk};
+use super::refuse::End;
 use crate::walk::path;
 use crate::{Error, Field, Kind, Root, Segment};
 
@@ -12,15 +13,6 @@ use crate::{Error, Field, Kind, Root, Segment};
 pub(super) fn names_self(ty: &str, owner: &str) -> bool {
     let ty = ty.trim();
     ty == owner || ty == "Self"
-}
-
-/// Whether `ty` is open-ended, when that is known here: a type on the cycle, or the item itself.
-fn resolved(ty: &str, owner: &str, cyclic: &[(String, bool)]) -> Option<bool> {
-    let ty = ty.trim();
-    if let Some((_, value)) = cyclic.iter().find(|(n, _)| n == ty) {
-        return Some(*value);
-    }
-    names_self(ty, owner).then_some(false)
 }
 
 /// The refusal for a field that always contains its own type.
@@ -31,29 +23,24 @@ pub(super) fn unbounded_recursion(owner: &str, field: &str) -> String {
     )
 }
 
-/// Whether the body runs to its end: a `bool` literal, or the last type's `OPEN_ENDED`.
-pub(super) fn open_ended_expr(
-    segments: &[Segment],
-    owner: &str,
-    cyclic: &[(String, bool)],
-    root: &Root,
-) -> TokenStream {
-    let forward = |ty: &str, of: TokenStream| {
-        if let Some(value) = resolved(ty, owner, cyclic) {
-            return quote!(#value);
+/// Where a body ends: by itself, or through the type its last field holds.
+pub(super) fn open_end(segments: &[Segment], owner: &str, root: &Root) -> End {
+    let through = |ty: &str, of: TokenStream| {
+        if names_self(ty, owner) {
+            return End::default();
         }
         let p = path(ty);
-        quote!(<#p as #root::#of>::OPEN_ENDED)
+        End { open: false, through: vec![quote!(<#p as #root::#of>::NODE)] }
     };
     match segments.last() {
-        Some(Segment::Switch { choice, window: None, .. }) => forward(choice, quote!(Choice)),
+        Some(Segment::Switch { choice, window: None, .. }) => through(choice, quote!(Choice)),
         Some(
             Segment::Value { kind: Kind::Msg { ty, .. }, .. }
             | Segment::Opt { field: Field { kind: Kind::Msg { ty, .. }, .. }, .. }
             | Segment::Placed { kind: Kind::Msg { ty, .. }, .. },
-        ) => forward(ty, quote!(Message)),
-        Some(seg) if seg.open_ended() => quote!(true),
-        _ => quote!(false),
+        ) => through(ty, quote!(Message)),
+        Some(seg) => End { open: seg.open_ended(), through: Vec::new() },
+        None => End::default(),
     }
 }
 

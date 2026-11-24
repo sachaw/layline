@@ -280,6 +280,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
     if let Some(l) = &p.lifetime {
         msg = msg.with_lifetime(&l.ident.to_string());
     }
+    if let Some(depth) = p.depth {
+        msg = msg.with_depth(depth);
+    }
     Ok((msg, checks))
 }
 

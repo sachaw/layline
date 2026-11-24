@@ -118,10 +118,7 @@ pub(super) fn solve(
 ) -> Result<TokenStream, Error> {
     let Prelude { i64, err, some, .. } = root.prelude();
     if inv.steps.is_empty() {
-        return Ok(quote! {{
-            let __solved = #target;
-            __solved as #i64
-        }});
+        return Ok(quote!(#root::__private::value::Wide::wide(#target)));
     }
     let v = quote!(#root::__private::value);
     let look = |name: &str, ty: Ty| params(name, ty, root);
@@ -170,7 +167,7 @@ pub(super) fn solve(
         root,
     )?;
     Ok(quote! {{
-        let __target = (#target) as #i64;
+        let __target: #i64 = #root::__private::value::Wide::wide(#target);
         match #back {
             #some(__solved) if #forward == #some(__target) => __solved,
             _ => {

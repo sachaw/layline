@@ -63,38 +63,3 @@ impl Segment {
 pub(crate) fn references(segments: &[Segment]) -> Vec<Reference<'_>> {
     segments.iter().filter_map(Segment::references).collect()
 }
-
-/// The reference that decides whether this body is open-ended, if the last segment has one.
-///
-/// A repeat never has one. Its [`Count`] decides, whatever its elements are.
-#[cfg(feature = "emit")]
-pub(crate) fn defers_open_end(segments: &[Segment]) -> Option<Reference<'_>> {
-    match segments.last()? {
-        Segment::Switch { window: Some(_), .. } => None,
-        seg @ (Segment::Switch { .. }
-        | Segment::Value { kind: Kind::Msg { .. }, .. }
-        | Segment::Opt { field: Field { kind: Kind::Msg { .. }, .. }, .. }) => seg.references(),
-        _ => None,
-    }
-}
-
-#[cfg(all(test, feature = "emit"))]
-mod tests {
-    use super::*;
-    use crate::{Expr, Scalar};
-
-    #[test]
-    fn a_windowed_repeat_defers_to_nothing() {
-        let segments = [
-            Segment::Block(vec![Field::new("len", Kind::Scalar(Scalar::U(16)))]),
-            Segment::repeat(
-                "items",
-                Kind::Scalar(Scalar::U(8)),
-                Count::Window(Len::Field { by: Expr::name("len"), cap: None, align: None }),
-                None,
-                crate::Collection::Vec,
-            ),
-        ];
-        assert!(defers_open_end(&segments).is_none());
-    }
-}

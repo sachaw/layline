@@ -70,7 +70,7 @@ impl Walk<'_> {
                 quote! { out.push(&#sub { #ident: #take }.encode_in::<__O>()?)?; },
             )
         } else {
-            item.via.extend(held_refusal(&f.kind, owner, false, root));
+            item.hold(held_refusal(&f.kind, owner, root));
             let ctx = self.with_ctx(&f.kind, own)?;
             let inner = value_read(&self.env, owner, &f.name, &f.kind, ctx.as_ref(), root)?;
             if let Kind::Text { len, .. } = &f.kind

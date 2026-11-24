@@ -68,6 +68,8 @@ struct Parsed {
     bits: Option<BitOrder>,
     /// `#[message(needs(..))]`.
     needs: Vec<Param>,
+    /// `#[message(depth = N)]`.
+    depth: Option<u32>,
     root: Root,
     fields: Vec<MsgField>,
 }
@@ -462,7 +464,8 @@ struct ElementSize {
 fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
     let lifetime = borrowed_lifetime(input)?;
 
-    let MessageAttr { endian, endian_from, root, closed, bits, needs } = container_attr(input)?;
+    let MessageAttr { endian, endian_from, root, closed, bits, needs, depth } =
+        container_attr(input)?;
     if let (Some((_, span)), Some(_)) = (&needs, &bits) {
         return Err(syn::Error::new(
             *span,
@@ -545,6 +548,7 @@ fn parse(input: &DeriveInput) -> syn::Result<Parsed> {
         endian_from,
         bits,
         needs,
+        depth,
         root,
         fields,
     })

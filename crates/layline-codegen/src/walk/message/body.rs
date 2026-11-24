@@ -71,8 +71,10 @@ pub(super) struct Item<'a> {
     pub(super) skip: TokenStream,
     /// The lifetime borrowed fields hold, without the `'`.
     pub(super) lifetime: Option<&'a str>,
-    /// The `Refuses` of each type the bodies encode through.
+    /// The `ENCODE_FALLIBLE` of each layout and codec the bodies encode through.
     pub(super) via: Vec<TokenStream>,
+    /// The `NODE` of each message and catalogue the bodies hold.
+    pub(super) links: Vec<TokenStream>,
 }
 
 impl<'a> Item<'a> {
@@ -96,6 +98,16 @@ impl<'a> Item<'a> {
             checks: Vec::new(),
             lifetime: None,
             via: Vec::new(),
+            links: Vec::new(),
+        }
+    }
+
+    /// Join what encoding a held type adds to this item's refusals.
+    pub(super) fn hold(&mut self, held: Option<super::refuse::Held>) {
+        match held {
+            Some(super::refuse::Held::Leaf(t)) => self.via.push(t),
+            Some(super::refuse::Held::Link(t)) => self.links.push(t),
+            None => {}
         }
     }
 }

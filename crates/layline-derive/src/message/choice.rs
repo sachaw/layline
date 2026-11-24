@@ -68,7 +68,8 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     }
 
-    let MessageAttr { endian, endian_from, root, closed, bits, needs } = container_attr(input)?;
+    let MessageAttr { endian, endian_from, root, closed, bits, needs, depth } =
+        container_attr(input)?;
     if let Some(p) = endian_from {
         return Err(syn::Error::new(
             p.span(),
@@ -171,6 +172,9 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
     }
 
     let mut choice = ChoiceDef::new(&crate::attr::name(&input.ident), arms).with_endian(endian);
+    if let Some(depth) = depth {
+        choice = choice.with_depth(depth);
+    }
     if let Some((other_name, _, other_bytes)) = open {
         choice = choice.with_other(&other_name);
         if let Some(bytes) = other_bytes {

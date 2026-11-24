@@ -393,12 +393,28 @@ pub trait Message: Sized {
     #[doc(hidden)]
     const OPEN_ENDED: bool = false;
 
+    /// This type's part of the graph that `OPEN_ENDED` and `ENCODE_FALLIBLE` are searched in,
+    /// so a type that holds itself has constants. A type that holds no message keeps the default.
+    #[doc(hidden)]
+    const NODE: crate::__private::Link = crate::__private::Link::new(
+        &crate::__private::Node::leaf(Self::OPEN_ENDED, Self::ENCODE_FALLIBLE),
+    );
+
+    /// The deepest this type decodes: the number of messages and catalogues it may be nested in,
+    /// counted from the one decode started at. Deeper, decode returns
+    /// [`TooDeep`](crate::ParseError::TooDeep) naming this limit.
+    ///
+    /// A derive sets it with `#[message(depth = N)]`, and defaults to
+    /// [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH). Each type checks its own, so a cycle of
+    /// types is bounded by the smallest limit on it.
+    const MAX_DEPTH: u32 = crate::MAX_NESTING_DEPTH;
+
     /// Decode from the start of `bytes`. Returns the value and the bytes consumed.
     ///
     /// # Errors
     ///
     /// A short body, a malformed count, a wrong checksum, a missing magic, or nesting past
-    /// [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH).
+    /// [`MAX_DEPTH`](Self::MAX_DEPTH).
     fn decode_with(bytes: &[u8], ctx: Self::Ctx) -> Result<(Self, usize), crate::ParseError> {
         Self::decode_with_nested(bytes, 0, ctx)
     }
@@ -521,6 +537,11 @@ pub trait MessageRef<'a>: Sized {
     /// Read by a holder, since a derive cannot see a field's type.
     const ENCODE_FALLIBLE: bool = false;
 
+    /// This type's part of the graph its constants are searched in, as [`Message::NODE`].
+    #[doc(hidden)]
+    const NODE: crate::__private::Link =
+        crate::__private::Link::new(&crate::__private::Node::leaf(false, Self::ENCODE_FALLIBLE));
+
     /// Append the wire bytes to `out`.
     ///
     /// # Errors
@@ -560,6 +581,15 @@ pub trait Choice: Sized {
     /// Whether the chosen arm can consume all the bytes it is given.
     #[doc(hidden)]
     const OPEN_ENDED: bool = false;
+
+    /// This type's part of the graph its constants are searched in, as [`Message::NODE`].
+    #[doc(hidden)]
+    const NODE: crate::__private::Link = crate::__private::Link::new(
+        &crate::__private::Node::leaf(Self::OPEN_ENDED, Self::ENCODE_FALLIBLE),
+    );
+
+    /// The deepest this catalogue decodes, as [`Message::MAX_DEPTH`].
+    const MAX_DEPTH: u32 = crate::MAX_NESTING_DEPTH;
 
     /// Decode the arm `discriminant` selects. Returns the value and the bytes consumed.
     ///

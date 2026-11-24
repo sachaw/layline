@@ -80,6 +80,9 @@ pub struct ChoiceDef {
     pub doc: Option<String>,
     /// Derives for this choice, written after the module's.
     pub derives: Vec<Derive>,
+    /// The deepest the choice decodes, as `Choice::MAX_DEPTH`. `None` is
+    /// `layline::MAX_NESTING_DEPTH`.
+    pub depth: Option<u32>,
 }
 
 impl ChoiceDef {
@@ -94,7 +97,14 @@ impl ChoiceDef {
             other_bytes: None,
             doc: None,
             derives: Vec::new(),
+            depth: None,
         }
+    }
+
+    /// Sets the deepest the choice decodes, as `Choice::MAX_DEPTH`.
+    #[must_use]
+    pub fn with_depth(self, depth: u32) -> Self {
+        Self { depth: Some(depth), ..self }
     }
 
     /// Sets the derives written on this choice, after the module's.

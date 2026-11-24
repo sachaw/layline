@@ -138,6 +138,31 @@ pub fn any_bit(a: Option<i64>) -> Option<bool> {
     Some(a? != 0)
 }
 
+/// A number encode works an expression back from: a length or count, or a discriminant.
+pub trait Wide: Copy {
+    /// The number as an `i64`. A length past `i64::MAX` cannot be in memory.
+    fn wide(self) -> i64;
+}
+
+impl Wide for i64 {
+    fn wide(self) -> i64 {
+        self
+    }
+}
+
+impl Wide for i32 {
+    fn wide(self) -> i64 {
+        self.into()
+    }
+}
+
+impl Wide for usize {
+    #[allow(clippy::cast_possible_wrap)]
+    fn wide(self) -> i64 {
+        self as i64
+    }
+}
+
 /// A number as a count or byte length: `None` when it is negative.
 #[must_use]
 pub fn size(a: Option<i64>) -> Option<usize> {

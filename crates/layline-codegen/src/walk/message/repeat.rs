@@ -182,7 +182,7 @@ impl Walk<'_> {
             None => (own, TokenStream::new(), TokenStream::new()),
         };
         let prefix = Prefix::of_count(count);
-        item.via.extend(super::refuse::held_refusal(element, owner, true, root));
+        item.hold(super::refuse::held_refusal(element, owner, root));
         let coll_ident = ident(coll);
         let elem_ty = kind_ty(element, root);
         let (coll_ty, coll_val) = match collection {

@@ -234,13 +234,17 @@ pub(super) fn bits_parts(
                 let p = path(ty);
                 Some(quote!(<#p as #root::BitCodec<#msb>>::ENCODE_FALLIBLE))
             }
-            other => super::refuse::held_refusal(other, &m.name, false, root),
+            other => match super::refuse::held_refusal(other, &m.name, root) {
+                Some(super::refuse::Held::Leaf(t) | super::refuse::Held::Link(t)) => Some(t),
+                None => None,
+            },
         })
         .collect();
     let fallible = super::refuse::refusal(super::refuse::refuses_itself(&writes), &via);
     let inherent = super::inherent_encodes(&fallible, &quote!(#root::Message), Some(false), root);
     let (owner, str_ty) = (m.name.as_str(), root.prelude().primitive("str"));
-    let too_deep = too_deep(root);
+    let too_deep = too_deep(&quote!(#root::Message), root);
+    let max_depth = super::max_depth(m.depth, root);
     let codec = quote! {
         impl #root::Message for #name {
             const NAME: &'static #str_ty = #owner;
@@ -253,6 +257,8 @@ pub(super) fn bits_parts(
             const OPEN_ENDED: #bool = false;
 
             const ENCODE_FALLIBLE: #bool = #fallible;
+
+            #max_depth
 
             fn decode_with_nested(
                 body: &[#u8],

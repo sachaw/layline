@@ -233,9 +233,9 @@ impl ::layline::Message for Record {
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
-        if __depth > ::layline::MAX_NESTING_DEPTH {
+        if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
-                limit: ::layline::MAX_NESTING_DEPTH,
+                limit: <Self as ::layline::Message>::MAX_DEPTH,
             });
         }
         let __body = body;
@@ -653,19 +653,13 @@ impl ::layline::Message for Record {
                         "n",
                         {
                             let __source = self.items.len();
-                            {
-                                let __solved = __source;
-                                __solved as i64
-                            }
+                            ::layline::__private::value::Wide::wide(__source)
                         },
                         0,
                     )?;
                     <u8 as ::layline::WireInt>::from_i64({
                         let __source = self.items.len();
-                        {
-                            let __solved = __source;
-                            __solved as i64
-                        }
+                        ::layline::__private::value::Wide::wide(__source)
                     })
                 },
                 tag: self.tag,

@@ -163,10 +163,6 @@ fn emit_source(module: &Module, audit: &mut String) -> Result<String, Error> {
     }
 
     graph::recursion(module)?;
-    let cycles = graph::open_end_cycles(module)?;
-    let cyclic = |name: &str| {
-        cycles.iter().find(|(n, _)| n == name).map_or(&[][..], |(_, members)| members.as_slice())
-    };
 
     let derives = &module.derives;
     for item in &module.items {
@@ -179,13 +175,13 @@ fn emit_source(module: &Module, audit: &mut String) -> Result<String, Error> {
             }
             Item::Dispatch(d) => emit_dispatch(d, derives, root)?,
             Item::Choice(c) => {
-                let (code, arms) = emit_choice(c, derives, root, cyclic(&c.name))?;
+                let (code, arms) = emit_choice(c, derives, root)?;
                 audit.push_str(&crate::audit::choice(&c.name, &arms));
                 code
             }
             Item::Message(m) => {
                 graph::terminal_switches(module, m)?;
-                let (code, rows) = emit_message(m, derives, root, cyclic(&m.name))?;
+                let (code, rows) = emit_message(m, derives, root)?;
                 audit.push_str(&crate::audit::message(&m.name, &m.needs, &rows));
                 code
             }
@@ -232,6 +228,7 @@ mod tests {
         let module = Module {
             items: vec![
                 Item::Choice(ChoiceDef {
+                    depth: None,
                     name: "VelocityForm".into(),
                     endian: Endian::Le,
                     arms: vec![
@@ -258,6 +255,7 @@ mod tests {
                     derives: Vec::new(),
                 }),
                 Item::Message(MessageDef {
+                    depth: None,
                     name: "VelocityReport".into(),
                     endian: Endian::Le,
                     endian_from: None,
@@ -292,6 +290,7 @@ mod tests {
     fn a_checksum_may_live_inside_one_arm_of_a_choice() {
         let module = Module {
             items: vec![Item::Choice(ChoiceDef {
+                depth: None,
                 name: "Body".into(),
                 endian: Endian::Le,
                 arms: vec![
@@ -377,6 +376,7 @@ mod tests {
     #[test]
     fn a_checksum_refuses_a_range_it_cannot_resolve() {
         let msg = |over: Coverage| MessageDef {
+            depth: None,
             name: "Packet".into(),
             endian: Endian::Le,
             endian_from: None,
@@ -409,6 +409,7 @@ mod tests {
     fn a_checksum_field_may_not_also_be_a_count() {
         let out = message_parts(
             &MessageDef {
+                depth: None,
                 name: "Packet".into(),
                 endian: Endian::Le,
                 endian_from: None,
@@ -455,6 +456,7 @@ mod tests {
             field: Field::new(name, kind),
         };
         let msg = |extra: Segment| MessageDef {
+            depth: None,
             name: "Packet".into(),
             endian: Endian::Le,
             endian_from: None,
@@ -501,6 +503,7 @@ mod tests {
         let module = Module {
             items: vec![
                 Item::Choice(ChoiceDef {
+                    depth: None,
                     name: "Body".into(),
                     endian: Endian::Le,
                     arms: vec![Arm::new(
@@ -514,6 +517,7 @@ mod tests {
                     derives: Vec::new(),
                 }),
                 Item::Message(MessageDef {
+                    depth: None,
                     name: "Packet".into(),
                     endian: Endian::Le,
                     endian_from: None,

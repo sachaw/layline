@@ -292,7 +292,7 @@ impl Walk<'_> {
         };
         let ident = ident(field);
         let ty = kind_ty(kind, self.root);
-        item.via.extend(super::refuse::held_refusal(kind, self.owner, false, self.root));
+        item.hold(super::refuse::held_refusal(kind, self.owner, self.root));
         let d = doc_attr(doc);
         self.public_fields.extend(quote! { #d pub #ident: #ty, });
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });

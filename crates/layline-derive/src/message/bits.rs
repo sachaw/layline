@@ -269,7 +269,8 @@ pub(super) fn lower_bits(p: &Parsed, order: BitOrder) -> (MessageDef, Vec<TokenS
         }
     }
     flush(&mut segments, &mut block);
-    (MessageDef::new(&crate::attr::name(&p.ident), segments).with_bits(order), checks)
+    let msg = MessageDef::new(&crate::attr::name(&p.ident), segments).with_bits(order);
+    (p.depth.map_or(msg.clone(), |d| msg.with_depth(d)), checks)
 }
 
 /// Requires a `#[var]` type to implement `BitCodec` in the message's bit order.

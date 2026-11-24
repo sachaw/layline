@@ -276,9 +276,10 @@ fn a_sequence_is_its_own_indirection() {
     assert!(src.contains("const OPEN_ENDED: bool = false;"), "{src}");
 }
 
-/// Constants that refer to each other in a cycle do not compile, so the emitter writes literals.
+/// Constants that refer to each other in a cycle do not compile, so each is a search of the
+/// graph the types' `NODE` statics make, which may hold cycles.
 #[test]
-fn a_cycle_in_the_open_endedness_constants_is_resolved_rather_than_refused() {
+fn a_cycle_in_the_open_endedness_constants_is_searched_rather_than_refused() {
     let src = emit_module(&module(vec![
         item(
             "A",
@@ -317,11 +318,10 @@ fn a_cycle_in_the_open_endedness_constants_is_resolved_rather_than_refused() {
     ]))
     .expect("the cycle resolves");
 
-    assert_eq!(
-        src.matches("const OPEN_ENDED: bool = false;").count(),
-        2,
-        "both are the literal `false`:\n{src}"
-    );
+    let searched = "const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(";
+    assert_eq!(src.matches(searched).count(), 2, "both search their node:\n{src}");
+    assert!(src.contains("ends: &[<B as ::layline::Message>::NODE]"), "{src}");
+    assert!(src.contains("ends: &[<A as ::layline::Message>::NODE]"), "{src}");
     assert!(!src.contains("<A as ::layline::Message>::OPEN_ENDED"), "{src}");
     assert!(!src.contains("<B as ::layline::Message>::OPEN_ENDED"), "{src}");
 }
@@ -365,9 +365,10 @@ fn a_true_that_did_not_come_from_the_cycle_survives_it() {
     .expect("emits");
     assert_eq!(
         src.matches("const OPEN_ENDED: bool = true;").count(),
-        2,
-        "the open-ended `Raw` arm makes both `true`:\n{src}"
+        1,
+        "the open-ended `Raw` arm makes `Body` `true` by itself:\n{src}"
     );
+    assert!(src.contains("ends: &[<Body as ::layline::Choice>::NODE]"), "{src}");
 }
 
 #[test]

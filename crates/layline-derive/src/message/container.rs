@@ -19,6 +19,8 @@ pub(super) struct MessageAttr {
     pub(super) bits: Option<(BitOrder, Span)>,
     /// `needs(a: u8, ..)`: parameters the enclosing message supplies.
     pub(super) needs: Option<(Vec<Param>, Span)>,
+    /// `depth = N`: the deepest the type decodes.
+    pub(super) depth: Option<u32>,
 }
 
 /// Must mirror the `attributes(..)` list on `derive_message` in `lib.rs`.
@@ -143,6 +145,7 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
         closed: None,
         bits: None,
         needs: None,
+        depth: None,
     };
     let ident = &input.ident;
     let Some(attr) = crate::attr::single(&input.attrs, "message", format_args!("`{ident}`"))?
@@ -150,7 +153,7 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
         return Ok(default());
     };
     let (mut endian, mut order, mut bits_span) = (None, None, None);
-    let (mut needs, mut closed, mut root) = (None, None, None);
+    let (mut needs, mut closed, mut root, mut depth) = (None, None, None, None);
     attr.parse_nested_meta(|meta| {
         let span = meta.path.span();
         if meta.path.is_ident("endian") {
@@ -164,6 +167,11 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
         } else if meta.path.is_ident("needs") {
             crate::attr::once_key(&mut needs, &meta, ident, "message", || {
                 Ok((parse_needs(&meta, ident)?, span))
+            })
+        } else if meta.path.is_ident("depth") {
+            crate::attr::once_key(&mut depth, &meta, ident, "message", || {
+                let lit: syn::LitInt = meta.value()?.parse()?;
+                lit.base10_parse::<u32>()
             })
         } else if meta.path.is_ident("closed") {
             crate::attr::once_key(&mut closed, &meta, ident, "message", || Ok(span))
@@ -183,7 +191,8 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
             )))
         } else {
             Err(meta.error(format!(
-                "`{ident}`: expected `endian`, `bits`, `order`, `needs`, `closed`, or `crate`"
+                "`{ident}`: expected `endian`, `bits`, `order`, `needs`, `depth`, `closed`, or \
+                 `crate`"
             )))
         }
     })?;
@@ -200,6 +209,7 @@ pub(super) fn container_attr(input: &DeriveInput) -> syn::Result<MessageAttr> {
         closed,
         bits: None,
         needs,
+        depth,
     };
     match (bits_span, endian, order) {
         (Some(_), Some((_, span)), _) => Err(syn::Error::new(
