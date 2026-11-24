@@ -7,7 +7,7 @@ use core::fmt;
 use crate::LayoutError;
 use crate::table::{
     ArmCover, ArmDef, By, ConstDef, CoverDef, CoverEdge, Discriminant, FieldDef, ParamDef,
-    Presence, RangeDef, SegmentDef, Span, Start, StatedDef, TypeDef,
+    PositionDef, Presence, RangeDef, SegmentDef, Span, Start, TypeDef,
 };
 use crate::table::{check_layout, fixed_bits};
 
@@ -21,7 +21,7 @@ pub struct LayoutRecords<'a> {
     constants: &'a [ConstDef<'a>],
     ranges: &'a [RangeDef<'a>],
     covered: &'a [CoverDef<'a>],
-    stated: &'a [StatedDef<'a>],
+    positions: &'a [PositionDef<'a>],
 }
 
 /// Audit records for a message: `M`, a `P` per parameter, a `G` per segment with its fields, then `E`.
@@ -52,15 +52,15 @@ pub fn layout<'a>(name: &'a str, bits: u64, fields: &'a [FieldDef<'a>]) -> Layou
         constants: &[],
         ranges: &[],
         covered: &[],
-        stated: &[],
+        positions: &[],
     }
 }
 
 impl<'a> LayoutRecords<'a> {
     /// Add the `#[at(..)]` positions as `S` records.
     #[must_use]
-    pub fn stated(self, stated: &'a [StatedDef<'a>]) -> Self {
-        Self { stated, ..self }
+    pub fn positions(self, positions: &'a [PositionDef<'a>]) -> Self {
+        Self { positions, ..self }
     }
 
     /// Add each field's type as `T` records.
@@ -338,7 +338,7 @@ impl fmt::Display for LayoutRecords<'_> {
         })?;
         records(f, 'R', self.name, self.ranges, |w, r| write!(w, "{} {} {}", r.field, r.lo, r.hi))?;
         cover_records(f, self.name, None, self.covered)?;
-        records(f, 'S', self.name, self.stated, |w, s| {
+        records(f, 'S', self.name, self.positions, |w, s| {
             write!(w, "{} {} {}", s.field, s.unit.name(), s.pos)
         })
     }
@@ -372,7 +372,7 @@ impl fmt::Display for ChoiceRecords<'_> {
 mod tests {
     use super::*;
     use crate::buf::Buf;
-    use crate::table::StatedUnit;
+    use crate::table::PositionUnit;
     use crate::{Extent, Layout};
 
     const HEADER: &[FieldDef<'_>] =
@@ -380,11 +380,11 @@ mod tests {
 
     #[test]
     fn a_layout_renders_its_fields_its_claims_and_its_verdict() {
-        const STATED: &[StatedDef<'_>] = &[
-            StatedDef::new("magic", StatedUnit::Byte, 0),
-            StatedDef::new("count", StatedUnit::Bit, 32),
+        const POSITIONS: &[PositionDef<'_>] = &[
+            PositionDef::new("magic", PositionUnit::Byte, 0),
+            PositionDef::new("count", PositionUnit::Bit, 32),
         ];
-        let b = Buf::of(layout("Header", 40, HEADER).stated(STATED));
+        let b = Buf::of(layout("Header", 40, HEADER).positions(POSITIONS));
         assert_eq!(
             b.text(),
             "\
@@ -402,8 +402,8 @@ S Header count bit 32
     fn the_types_a_field_is_read_through_are_published_with_the_proven_records() {
         const TYPES: &[TypeDef<'_>] =
             &[TypeDef::new("magic", "u32"), TypeDef::new("count", "Reserved<U<8>,255>")];
-        const STATED: &[StatedDef<'_>] = &[StatedDef::new("magic", StatedUnit::Byte, 0)];
-        let b = Buf::of(layout("Header", 40, HEADER).types(TYPES).stated(STATED));
+        const POSITIONS: &[PositionDef<'_>] = &[PositionDef::new("magic", PositionUnit::Byte, 0)];
+        let b = Buf::of(layout("Header", 40, HEADER).types(TYPES).positions(POSITIONS));
         assert_eq!(
             b.text(),
             "\
@@ -752,8 +752,8 @@ E Element::Unknown 0
             const FIELDS: &'static [crate::table::FieldDef<'static>] = HEADER;
             const TYPES: &'static [crate::table::TypeDef<'static>] =
                 &[TypeDef::new("magic", "u32")];
-            const STATED: &'static [crate::table::StatedDef<'static>] =
-                &[StatedDef::new("count", StatedUnit::Byte, 4)];
+            const POSITIONS: &'static [crate::table::PositionDef<'static>] =
+                &[PositionDef::new("count", PositionUnit::Byte, 4)];
         }
         let b = Buf::of(<Hand as Layout>::audit());
         assert_eq!(

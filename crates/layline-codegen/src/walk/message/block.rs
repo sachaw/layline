@@ -204,13 +204,13 @@ impl Walk<'_> {
         for f in fields {
             let fname = ident(&f.name);
             let ty = kind_ty(&f.kind, root);
-            let (ty, value) = if f.framing {
+            let (ty, value) = if f.stated {
                 (quote!(#root::Stated<#ty>), quote!(#root::Stated::new(#sub_var.#fname)))
             } else {
                 (ty, quote!(#sub_var.#fname))
             };
             self.binds.push(Bind { name: fname.clone(), ty, value });
-            if f.framing
+            if f.stated
                 && let Some((_, Derived::Flags { bits, .. })) = self
                     .derived
                     .iter()
@@ -262,7 +262,7 @@ impl Walk<'_> {
                         }
                     }
                 },
-                None if f.framing => {
+                None if f.stated => {
                     return Err(Error::Internal(format!(
                         "{owner}: framing field `{}` has no attribute that writes it",
                         f.name

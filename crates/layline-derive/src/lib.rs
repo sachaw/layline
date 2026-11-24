@@ -80,7 +80,7 @@ fn refused(err: syn::Error, stub: proc_macro2::TokenStream) -> TokenStream {
 /// - `#[bytes(N)]`: a nested layout of `N` bytes, or an array of them. `N` must match its
 ///   `WIRE_BYTES`. Decode runs its checks and returns its error. `bytes` and `words` only.
 /// - `#[at(bit = N)]`, `#[at(byte = N)]`: the field's expected position. The build fails if the
-///   widths put it elsewhere. `STATED` lists these positions.
+///   widths put it elsewhere. `POSITIONS` lists these positions.
 /// - `#[overlay(name: T)]`: adds `name` and `set_name`, which read and write the field's bits as
 ///   the `FieldCodec` `T`. `bits` and `words` only.
 /// - `#[magic(0xAA55)]`, `#[magic(b"\x7fELF")]`: fixed bytes. Decode checks them and encode

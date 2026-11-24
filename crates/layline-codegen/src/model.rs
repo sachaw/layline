@@ -19,7 +19,7 @@ pub(crate) use expr::Ty;
 pub use expr::{Expr, Op, Test};
 #[cfg(feature = "walk")]
 pub(crate) use expr::{Inverse, Undo};
-pub use field::{Field, Kind, Len, Range, Scalar, Stated};
+pub use field::{Field, Kind, Len, Position, Range, Scalar};
 pub(crate) use layout::positioned;
 pub use layout::{BitOrder, Container, Endian, LayoutDef, Unit};
 pub use message::{Absence, Collection, Count, MessageDef, Param, Presence, Segment, split_ref};

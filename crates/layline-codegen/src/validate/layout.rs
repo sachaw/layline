@@ -14,7 +14,7 @@ pub(crate) fn validate_layout(layout: &LayoutDef) -> Result<(), Invalid> {
     ident("layout", &layout.name)?;
     for f in &layout.fields {
         field_names(f)?;
-        if f.framing {
+        if f.stated {
             return Err(Invalid::field(
                 &f.name,
                 String::from(
@@ -41,11 +41,11 @@ pub(crate) fn validate_layout(layout: &LayoutDef) -> Result<(), Invalid> {
                 return Err(Invalid::CrossesWord(f.name.clone()));
             }
         }
-        if let Some(stated) = f.stated {
+        if let Some(stated) = f.position {
             layout
                 .container
-                .check_stated(&f.name, &f.kind, stated, p.declared)
-                .map_err(Invalid::Stated)?;
+                .check_position(&f.name, &f.kind, stated, p.declared)
+                .map_err(Invalid::Position)?;
         }
     }
     for f in &layout.fields {

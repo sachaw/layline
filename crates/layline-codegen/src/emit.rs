@@ -264,7 +264,7 @@ mod tests {
                     bits: None,
                     needs: Vec::new(),
                     segments: vec![Segment::Switch {
-                        stated: None,
+                        position: None,
                         name: "form".into(),
                         on: Discriminant::BodyLength,
                         choice: "VelocityForm".into(),
@@ -306,7 +306,7 @@ mod tests {
                         vec![
                             Segment::Block(vec![Field::new("seq", Kind::Scalar(Scalar::U(16)))]),
                             Segment::Checksum {
-                                stated: None,
+                                position: None,
                                 name: "crc".into(),
                                 repr: Scalar::U(16),
                                 algorithm: "::wire::Crc16Ccitt".into(),
@@ -320,7 +320,7 @@ mod tests {
                         "Excised",
                         vec![
                             Segment::Checksum {
-                                stated: None,
+                                position: None,
                                 name: "sum".into(),
                                 repr: Scalar::U(16),
                                 algorithm: "::wire::Sum16NegLe".into(),
@@ -328,7 +328,7 @@ mod tests {
                                 doc: None,
                             },
                             Segment::Repeat {
-                                stated: None,
+                                position: None,
                                 collection: Collection::Vec,
                                 when: None,
                                 name: "tail".into(),
@@ -385,7 +385,7 @@ mod tests {
             segments: vec![
                 Segment::Block(vec![Field::new("magic", Kind::Scalar(Scalar::U(16)))]),
                 Segment::Checksum {
-                    stated: None,
+                    position: None,
                     name: "crc".into(),
                     repr: Scalar::U(16),
                     algorithm: "::wire::Crc16Ccitt".into(),
@@ -416,7 +416,7 @@ mod tests {
                 needs: Vec::new(),
                 segments: vec![
                     Segment::Checksum {
-                        stated: None,
+                        position: None,
                         name: "crc".into(),
                         repr: Scalar::U(16),
                         algorithm: "::wire::Crc16Ccitt".into(),
@@ -424,7 +424,7 @@ mod tests {
                         doc: None,
                     },
                     Segment::Repeat {
-                        stated: None,
+                        position: None,
                         collection: Collection::Vec,
                         when: None,
                         name: "items".into(),
@@ -481,7 +481,7 @@ mod tests {
 
         let out = message_parts(
             &msg(Segment::Repeat {
-                stated: None,
+                position: None,
                 collection: Collection::Vec,
                 when: None,
                 name: "items".into(),
@@ -522,7 +522,7 @@ mod tests {
                     segments: vec![
                         Segment::Block(vec![Field::new("kind", Kind::Scalar(Scalar::U(8)))]),
                         Segment::Switch {
-                            stated: None,
+                            position: None,
                             name: "body".into(),
                             on: Discriminant::Field(Expr::name("kind")),
                             choice: "Body".into(),

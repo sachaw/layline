@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::root::Prelude;
-use crate::{CoverFrom, CoverTo, Coverage, Endian, Field, Kind, Root, Scalar, Stated};
+use crate::{CoverFrom, CoverTo, Coverage, Endian, Field, Kind, Position, Root, Scalar};
 #[cfg(feature = "emit")]
 use crate::{Error, Invalid};
 
@@ -205,8 +205,8 @@ pub fn endian_arg(endian: Endian) -> TokenStream {
     }
 }
 
-fn stated_attr(stated: Option<Stated>) -> TokenStream {
-    let Some(s) = stated else {
+fn position_attr(position: Option<Position>) -> TokenStream {
+    let Some(s) = position else {
         return quote!();
     };
     let noun = ident(s.unit.name());
@@ -275,12 +275,12 @@ fn coverage_range(over: &Coverage) -> TokenStream {
 
 /// One field declaration, with its docs, width attribute, `#[at]` position and value checks.
 pub fn emit_field(f: &Field, bit_addressed: bool, root: &Root, skip: &TokenStream) -> TokenStream {
-    let Field { name, kind, doc, stated, magic: _, range: _, spare, framing: _, visibility } = f;
+    let Field { name, kind, doc, position, magic: _, range: _, spare, stated: _, visibility } = f;
     let skip = spare.then(|| skip.clone());
     let name = ident(name);
     let doc = doc_attr(doc);
     let attrs = field_attrs(kind, bit_addressed);
-    let at = stated_attr(*stated);
+    let at = position_attr(*position);
     let asserts = assert_attr(f);
     let ty = kind_ty(kind, root);
     let vis = visibility_tokens(visibility);
@@ -348,11 +348,11 @@ pub(crate) fn block_field(f: &Field, root: &Root) -> TokenStream {
         name,
         kind,
         doc: _,
-        stated: _,
+        position: _,
         magic: _,
         range: _,
         spare: _,
-        framing: _,
+        stated: _,
         visibility: _,
     } = f;
     let name = ident(name);
@@ -372,13 +372,13 @@ pub fn emit_message_field(
     skip: &TokenStream,
 ) -> TokenStream {
     let Prelude { option, .. } = root.prelude();
-    let Field { name, kind, doc, stated: _, magic: _, range: _, spare, framing, visibility } = f;
+    let Field { name, kind, doc, position: _, magic: _, range: _, spare, stated, visibility } = f;
     // Framing carries no information, as a spare field carries none.
-    let skip = (*spare || *framing).then(|| skip.clone());
+    let skip = (*spare || *stated).then(|| skip.clone());
     let name = ident(name);
     let doc = doc_attr(doc);
     let ty = kind_ty(kind, root);
-    let ty = if *framing { quote!(#root::Stated<#ty>) } else { ty };
+    let ty = if *stated { quote!(#root::Stated<#ty>) } else { ty };
     let ty = if optional { quote!(#option<#ty>) } else { ty };
     let vis = visibility_tokens(visibility);
     quote! { #doc #skip #vis #name: #ty, }

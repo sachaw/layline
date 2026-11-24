@@ -125,11 +125,11 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         span,
         walk_span,
         body: Body::Bits { kind, absent },
-        stated: None,
+        position: None,
         with: Vec::new(),
         align: None,
         valid: None,
-        framing: false,
+        stated: false,
     })
 }
 
@@ -261,7 +261,7 @@ pub(super) fn lower_bits(p: &Parsed, order: BitOrder) -> (MessageDef, Vec<TokenS
                 segments.push(Segment::Value {
                     name: f.name.clone(),
                     doc: None,
-                    stated: None,
+                    position: None,
                     kind: kind.clone(),
                 });
             }

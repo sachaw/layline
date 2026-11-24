@@ -78,7 +78,7 @@ struct MsgField {
     /// The attribute that makes this field variable-size, else the field itself.
     walk_span: Span,
     body: Body,
-    stated: Option<crate::claim::At>,
+    position: Option<crate::claim::At>,
     /// `#[with(..)]` names, kept for error spans.
     with: Vec<Ref>,
     /// `#[align(N)]`.
@@ -86,7 +86,7 @@ struct MsgField {
     /// `#[valid(..)]`: a condition the value must satisfy.
     valid: Option<Value>,
     /// Whether the type is `Stated<T>`: framing encode writes.
-    framing: bool,
+    stated: bool,
 }
 
 enum Body {

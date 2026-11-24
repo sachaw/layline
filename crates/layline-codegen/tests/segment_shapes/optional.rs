@@ -20,7 +20,7 @@ fn a_predicate_must_name_an_earlier_number() {
         "Wrong",
         vec![
             Segment::Value {
-                stated: None,
+                position: None,
                 name: "flags".into(),
                 kind: Kind::Text { len: Len::Until { terminator: 0 }, codec: None },
                 doc: None,
@@ -70,7 +70,7 @@ fn a_bare_flag_must_name_an_earlier_bool() {
         "Text",
         vec![
             Segment::Value {
-                stated: None,
+                position: None,
                 name: "label".into(),
                 kind: Kind::Text { len: Len::Until { terminator: 0 }, codec: None },
                 doc: None,

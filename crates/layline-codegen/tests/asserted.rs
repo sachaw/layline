@@ -142,7 +142,7 @@ fn a_blank_algorithm_is_refused_in_both_constructs() {
         vec![
             Segment::Block(vec![Field::new("body", u(8))]),
             Segment::Checksum {
-                stated: None,
+                position: None,
                 name: "x".into(),
                 repr: Scalar::U(16),
                 algorithm: "  ".into(),

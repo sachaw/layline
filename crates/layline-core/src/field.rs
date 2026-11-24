@@ -32,23 +32,23 @@ row! {
     }
 }
 
-/// The unit of a [`StatedDef`].
+/// The unit of a [`PositionDef`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum StatedUnit {
+pub enum PositionUnit {
     /// `#[at(bit = N)]`.
     Bit,
     /// `#[at(byte = N)]`.
     Byte,
 }
 
-impl StatedUnit {
+impl PositionUnit {
     /// Bits per unit.
     #[must_use]
     pub const fn bits(self) -> u64 {
         match self {
-            StatedUnit::Bit => 1,
-            StatedUnit::Byte => 8,
+            PositionUnit::Bit => 1,
+            PositionUnit::Byte => 8,
         }
     }
 
@@ -56,8 +56,8 @@ impl StatedUnit {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            StatedUnit::Bit => "bit",
-            StatedUnit::Byte => "byte",
+            PositionUnit::Bit => "bit",
+            PositionUnit::Byte => "byte",
         }
     }
 }
@@ -67,11 +67,11 @@ row! {
     ///
     /// Counted from the container's first bit after `order = msb` mirroring, so it matches
     /// [`FieldDef`]. Stored in the declared unit if the position divides evenly, and in bits otherwise.
-    StatedDef<'a> {
+    PositionDef<'a> {
         /// The field's name.
         field: &'a str,
         /// The unit of [`pos`](Self::pos).
-        unit: StatedUnit,
+        unit: PositionUnit,
         /// The position, in [`unit`](Self::unit)s.
         pos: u64,
     }
@@ -99,7 +99,7 @@ row! {
     }
 }
 
-impl StatedDef<'_> {
+impl PositionDef<'_> {
     /// The position in bits.
     #[must_use]
     pub const fn bits(self) -> u64 {
@@ -381,8 +381,8 @@ pub trait Layout: Sized {
     /// A `#[dispatch(.., prefix = K)]` catalogue checks that every arm agrees.
     const PREFIX_BITS: u32 = 0;
 
-    /// The [`StatedDef`] rows, in declaration order.
-    const STATED: &'static [crate::table::StatedDef<'static>] = &[];
+    /// The [`PositionDef`] rows, in declaration order.
+    const POSITIONS: &'static [crate::table::PositionDef<'static>] = &[];
 
     /// The type of each field, in declaration order.
     ///
@@ -401,7 +401,7 @@ pub trait Layout: Sized {
     /// The audit records for this layout.
     fn audit() -> crate::audit::LayoutRecords<'static> {
         crate::audit::layout(Self::NAME, Self::WIRE_BYTES as u64 * 8, Self::FIELDS)
-            .stated(Self::STATED)
+            .positions(Self::POSITIONS)
             .types(Self::TYPES)
             .constants(Self::CONSTANTS)
             .ranges(Self::RANGES)

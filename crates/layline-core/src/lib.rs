@@ -82,7 +82,7 @@ pub(crate) mod buf {
 /// Rows borrow for `'a` rather than `'static`, so a code generator can build them from its own model.
 pub mod table {
     pub use crate::field::{
-        ConstDef, FieldDef, ParamDef, RangeDef, StatedDef, StatedUnit, TypeDef, check_layout,
+        ConstDef, FieldDef, ParamDef, PositionDef, PositionUnit, RangeDef, TypeDef, check_layout,
         field_width, type_is,
     };
     pub use crate::segment::{

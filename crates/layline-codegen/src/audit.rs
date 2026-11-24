@@ -15,10 +15,10 @@ pub(crate) fn layout(l: &LayoutDef) -> String {
         l.fields.iter().map(|f| (f.name.as_str(), collection_ty(&f.kind))).collect();
     let types: Vec<table::TypeDef<'_>> =
         spellings.iter().map(|(field, ty)| table::TypeDef::new(field, ty)).collect();
-    let stated: Vec<table::StatedDef<'_>> = positioned(&l.fields, &l.container)
+    let stated: Vec<table::PositionDef<'_>> = positioned(&l.fields, &l.container)
         .filter_map(|p| {
-            let stated = p.field.stated?.published(p.physical);
-            Some(table::StatedDef::new(&p.field.name, stated.unit, stated.pos))
+            let stated = p.field.position?.published(p.physical);
+            Some(table::PositionDef::new(&p.field.name, stated.unit, stated.pos))
         })
         .collect();
     let constants: Vec<table::ConstDef<'_>> = l
@@ -52,7 +52,7 @@ pub(crate) fn layout(l: &LayoutDef) -> String {
         .constants(&constants)
         .ranges(&ranges)
         .covering(&covered)
-        .stated(&stated)
+        .positions(&stated)
         .to_string()
 }
 

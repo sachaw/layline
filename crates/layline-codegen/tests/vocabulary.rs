@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use layline_codegen::__derive::{field_rows, layout_parts};
 use layline_codegen::Root;
-use layline_codegen::{Container, Endian, Field, Kind, LayoutDef, Range, Scalar, Stated};
+use layline_codegen::{Container, Endian, Field, Kind, LayoutDef, Position, Range, Scalar};
 
 /// `Layout` attributes the model never produces, and why.
 const DERIVE_ONLY: &[(&str, &str)] = &[
@@ -76,7 +76,7 @@ fn every_spelling() -> Vec<LayoutDef> {
             "Bits",
             Container::word(32, Endian::Be, layline_codegen::BitOrder::Lsb),
             vec![
-                Field::new("tag", Kind::Scalar(Scalar::U(8))).with_stated(Stated::bit(0)),
+                Field::new("tag", Kind::Scalar(Scalar::U(8))).with_position(Position::bit(0)),
                 Field::new("rest", Kind::Scalar(Scalar::U(24))),
             ],
         ),
@@ -86,7 +86,7 @@ fn every_spelling() -> Vec<LayoutDef> {
             vec![
                 Field::new("level", Kind::Codec { ty: "Level".into(), bits: 8 }),
                 Field::new("sig", Kind::array(Scalar::U(8), 2))
-                    .with_stated(Stated::byte(1))
+                    .with_position(Position::byte(1))
                     .with_magic(&[0xA1, 0xB2]),
                 Field::new("head", Kind::Nested { ty: "Head".into(), bytes: 4 }),
                 Field::new("count", Kind::Scalar(Scalar::U(16)))

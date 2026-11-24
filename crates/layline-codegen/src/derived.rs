@@ -181,7 +181,7 @@ pub(crate) fn declares(segments: &[Segment], name: &str) -> bool {
 /// Whether `name` is a framing field of a block: `layline::Stated<T>`.
 pub(crate) fn framing(segments: &[Segment], name: &str) -> bool {
     segments.iter().any(|seg| match seg {
-        Segment::Block(fields) => fields.iter().any(|f| f.framing && f.name == name),
+        Segment::Block(fields) => fields.iter().any(|f| f.stated && f.name == name),
         _ => false,
     })
 }

@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use layline_core::table::StatedUnit;
+use layline_core::table::PositionUnit;
 
 use super::{Coverage, Expr};
 
@@ -15,30 +15,30 @@ use super::{Coverage, Expr};
 /// [`MessageDef`](crate::MessageDef) body. It catches a mistyped field width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Stated {
+pub struct Position {
     /// The unit of [`pos`](Self::pos).
-    pub unit: StatedUnit,
+    pub unit: PositionUnit,
     /// The position.
     pub pos: u64,
 }
 
-impl Stated {
+impl Position {
     /// `#[at(<unit> = pos)]`.
     #[must_use]
-    pub fn new(unit: StatedUnit, pos: u64) -> Self {
+    pub fn new(unit: PositionUnit, pos: u64) -> Self {
         Self { unit, pos }
     }
 
     /// `#[at(bit = pos)]`.
     #[must_use]
     pub fn bit(pos: u64) -> Self {
-        Self { unit: StatedUnit::Bit, pos }
+        Self { unit: PositionUnit::Bit, pos }
     }
 
     /// `#[at(byte = pos)]`.
     #[must_use]
     pub fn byte(pos: u64) -> Self {
-        Self { unit: StatedUnit::Byte, pos }
+        Self { unit: PositionUnit::Byte, pos }
     }
 
     /// The position in bits.
@@ -47,15 +47,15 @@ impl Stated {
         self.pos * self.unit.bits()
     }
 
-    /// The `STATED` table row for the bit position `physical`.
+    /// The `POSITIONS` table row for the bit position `physical`.
     ///
     /// Uses this position's unit if it divides `physical`, and bits otherwise.
     #[must_use]
-    pub fn published(self, physical: u64) -> Stated {
+    pub fn published(self, physical: u64) -> Position {
         if physical.is_multiple_of(self.unit.bits()) {
-            Stated { unit: self.unit, pos: physical / self.unit.bits() }
+            Position { unit: self.unit, pos: physical / self.unit.bits() }
         } else {
-            Stated::bit(physical)
+            Position::bit(physical)
         }
     }
 
@@ -69,7 +69,7 @@ impl Stated {
             return Ok(());
         }
         let noun = self.unit.name();
-        let landed = if self.unit == StatedUnit::Byte && !at.is_multiple_of(8) {
+        let landed = if self.unit == PositionUnit::Byte && !at.is_multiple_of(8) {
             format!("bit {at} — not a byte boundary")
         } else {
             format!("{noun} {}", at / self.unit.bits())
@@ -341,7 +341,7 @@ pub struct Field {
     /// Documentation.
     pub doc: Option<String>,
     /// The `#[at]` position.
-    pub stated: Option<Stated>,
+    pub position: Option<Position>,
     /// The `#[magic]` bytes the field must hold.
     pub magic: Option<Vec<u8>>,
     /// The `#[range]` of allowed values.
@@ -351,14 +351,14 @@ pub struct Field {
     /// The bits round-trip like any other field. Serde leaves a spare field out, under the same
     /// `cfg` as the module's serde derive.
     pub spare: bool,
-    /// Whether the field is framing: a number the wire states about other fields, away from
-    /// them, and that carries no information of its own. Its Rust type is
+    /// Whether the field is a `Stated<T>`: framing, a number the wire states about other fields,
+    /// away from them, that carries no information of its own. Its Rust type is
     /// `layline::Stated<T>`.
     ///
     /// Encode writes it, so an attribute must: a [`Count`](crate::Count), [`Len`], offset,
     /// stride, switch or presence test that works back to it. Decode reads it, and equality
     /// ignores it. Only a byte-addressed message's integer or `bool` field in a block can be one.
-    pub framing: bool,
+    pub stated: bool,
     /// The field's visibility, such as `pub(crate)`. `None` is `pub`.
     ///
     /// A field the generated type keeps in step with something else, such as a label that a
@@ -374,19 +374,19 @@ impl Field {
             name: String::from(name),
             kind,
             doc: None,
-            stated: None,
+            position: None,
             magic: None,
             range: None,
             spare: false,
-            framing: false,
+            stated: false,
             visibility: None,
         }
     }
 
-    /// Marks the field framing: its Rust type is `layline::Stated<T>`, and encode writes it.
+    /// Makes the field a `layline::Stated<T>`: framing, which encode writes.
     #[must_use]
-    pub fn with_framing(self) -> Self {
-        Self { framing: true, ..self }
+    pub fn with_stated(self) -> Self {
+        Self { stated: true, ..self }
     }
 
     /// Marks the field spare: its bits carry no information.
@@ -409,8 +409,8 @@ impl Field {
 
     /// Sets the `#[at]` position.
     #[must_use]
-    pub fn with_stated(self, stated: Stated) -> Self {
-        Self { stated: Some(stated), ..self }
+    pub fn with_position(self, stated: Position) -> Self {
+        Self { position: Some(stated), ..self }
     }
 
     /// Sets the `#[magic]` bytes.

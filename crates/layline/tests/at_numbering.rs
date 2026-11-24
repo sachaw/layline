@@ -3,7 +3,7 @@
 
 #![cfg(feature = "derive")]
 
-use layline::{Layout, table::StatedUnit};
+use layline::{Layout, table::PositionUnit};
 
 #[derive(Layout, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[layout(bits = 32, endian = be, order = msb)]
@@ -22,18 +22,18 @@ pub struct CanId {
     pub reserved: bool,
 }
 
-fn stated<T: Layout>() -> Vec<(&'static str, StatedUnit, u64)> {
-    T::STATED.iter().map(|s| (s.field, s.unit, s.pos)).collect()
+fn stated<T: Layout>() -> Vec<(&'static str, PositionUnit, u64)> {
+    T::POSITIONS.iter().map(|s| (s.field, s.unit, s.pos)).collect()
 }
 
 fn joins<T: Layout>() {
-    for s in T::STATED {
+    for s in T::POSITIONS {
         let f =
             T::FIELDS.iter().find(|f| f.name == s.field).expect("every `#[at]` field is in FIELDS");
         assert_eq!(
             s.bits(),
             f.extent.start(),
-            "`{}`: STATED and FIELDS have one bit numbering",
+            "`{}`: POSITIONS and FIELDS have one bit numbering",
             s.field
         );
     }
@@ -44,10 +44,10 @@ fn a_word_mode_msb_claim_is_published_where_it_landed() {
     assert_eq!(
         stated::<CanId>(),
         [
-            ("id", StatedUnit::Bit, 3),
-            ("ide", StatedUnit::Bit, 2),
-            ("rtr", StatedUnit::Bit, 1),
-            ("reserved", StatedUnit::Bit, 0),
+            ("id", PositionUnit::Bit, 3),
+            ("ide", PositionUnit::Bit, 2),
+            ("rtr", PositionUnit::Bit, 1),
+            ("reserved", PositionUnit::Bit, 0),
         ]
     );
     joins::<CanId>();
@@ -86,10 +86,10 @@ fn a_words_mode_msb_claim_is_published_where_it_landed() {
     assert_eq!(
         stated::<Pair>(),
         [
-            ("kind", StatedUnit::Bit, 12),
-            ("value", StatedUnit::Bit, 0),
-            ("hi", StatedUnit::Bit, 24),
-            ("lo", StatedUnit::Bit, 16),
+            ("kind", PositionUnit::Bit, 12),
+            ("value", PositionUnit::Bit, 0),
+            ("hi", PositionUnit::Bit, 24),
+            ("lo", PositionUnit::Bit, 16),
         ]
     );
     joins::<Pair>();

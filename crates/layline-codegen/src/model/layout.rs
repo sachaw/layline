@@ -6,9 +6,9 @@ use alloc::vec::Vec;
 
 use super::Derive;
 
-use layline_core::table::StatedUnit;
+use layline_core::table::PositionUnit;
 
-use super::{Field, Kind, Scalar, Stated};
+use super::{Field, Kind, Position, Scalar};
 use crate::Invalid;
 
 /// Byte order. Little-endian by default.
@@ -256,7 +256,7 @@ impl Container {
     /// The wire position of a field declared at bit `start`, after applying [`BitOrder`].
     ///
     /// Under `order = msb`, scalar and codec fields are mirrored within their word. `FIELDS` and
-    /// `STATED` use this position. [`check_stated`](Self::check_stated) uses declared positions.
+    /// `POSITIONS` use this position. [`check_position`](Self::check_position) uses declared positions.
     #[must_use]
     pub fn physical(&self, kind: &Kind, start: u64) -> u64 {
         let (region, order) = match self {
@@ -279,11 +279,11 @@ impl Container {
     /// # Errors
     ///
     /// The diagnostic text. Under `msb` it gives both positions.
-    pub fn check_stated(
+    pub fn check_position(
         &self,
         field: &str,
         kind: &Kind,
-        stated: Stated,
+        stated: Position,
         declared: u64,
     ) -> Result<(), String> {
         let msb = matches!(
@@ -322,7 +322,7 @@ impl Container {
 }
 
 /// A bit position in `unit`, such as `byte 3`, or `bit 27 (not a byte boundary)`.
-fn place(unit: StatedUnit, bits: u64) -> String {
+fn place(unit: PositionUnit, bits: u64) -> String {
     if bits.is_multiple_of(unit.bits()) {
         format!("{} {}", unit.name(), bits / unit.bits())
     } else {

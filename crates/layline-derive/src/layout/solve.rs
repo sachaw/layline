@@ -30,7 +30,7 @@ impl Plan<'_> {
             item.phys_bit = self.grid.physical(&kind, at);
             if let Some(assertion) = item.at {
                 self.grid
-                    .check_stated(&item.ident.to_string(), &kind, assertion.stated, at)
+                    .check_position(&item.ident.to_string(), &kind, assertion.position, at)
                     .map_err(|why| syn::Error::new(assertion.span, why))?;
             }
             at = end;

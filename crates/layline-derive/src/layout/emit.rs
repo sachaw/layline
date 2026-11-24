@@ -3,7 +3,7 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 
-use layline_codegen::{Root, StatedUnit};
+use layline_codegen::{PositionUnit, Root};
 
 use super::access::{Access, Place, Writing, wide_mask_of, win_literal, win_name, wire_fns};
 use super::{Body, Packed, Plan, Reading};
@@ -224,7 +224,7 @@ impl Plan<'_> {
 
         let tables = Tables {
             types: self.carrier_defs(),
-            stated: self.stated_defs(),
+            stated: self.position_defs(),
             constants: self.const_defs(),
             ranges: self.range_defs(),
             covered: self.cover_defs(),
@@ -344,21 +344,21 @@ impl Plan<'_> {
         })
     }
 
-    fn stated_defs(&self) -> Vec<TokenStream> {
+    fn position_defs(&self) -> Vec<TokenStream> {
         let root = self.root;
         self.items
             .iter()
             .filter_map(|item| {
-                let stated = item.at?.stated.published(item.phys_bit);
+                let stated = item.at?.position.published(item.phys_bit);
                 let field = item.ident.to_string();
                 let unit = match stated.unit {
-                    StatedUnit::Byte => quote!(Byte),
-                    StatedUnit::Bit => quote!(Bit),
+                    PositionUnit::Byte => quote!(Byte),
+                    PositionUnit::Bit => quote!(Bit),
                     _ => unreachable!("the `#[at]` parser builds bits and bytes"),
                 };
                 let pos = Literal::u64_suffixed(stated.pos);
                 Some(quote! {
-                    #root::table::StatedDef::new(#field, #root::table::StatedUnit::#unit, #pos)
+                    #root::table::PositionDef::new(#field, #root::table::PositionUnit::#unit, #pos)
                 })
             })
             .collect()
@@ -809,7 +809,7 @@ fn layout_impl(
     });
     let stated = (!stated.is_empty()).then(|| {
         quote! {
-            const STATED: &'static [#root::table::StatedDef<'static>] = &[ #(#stated),* ];
+            const POSITIONS: &'static [#root::table::PositionDef<'static>] = &[ #(#stated),* ];
         }
     });
     let constants = (!constants.is_empty()).then(|| {

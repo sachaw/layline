@@ -25,7 +25,7 @@ fn holds(field: &str, ty: &str, boxed: bool) -> Segment {
         name: field.into(),
         kind: Kind::Msg { ty: ty.into(), boxed, with: Vec::new() },
         doc: None,
-        stated: None,
+        position: None,
     }
 }
 
@@ -98,7 +98,7 @@ fn a_catalogue_with_no_terminating_arm_is_refused() {
             vec![
                 Segment::Block(vec![Field::new("kind", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Switch {
-                    stated: None,
+                    position: None,
                     name: "body".into(),
                     on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
@@ -127,7 +127,7 @@ fn one_bounded_arm_is_enough_for_a_catalogue() {
             vec![
                 Segment::Block(vec![Field::new("kind", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Switch {
-                    stated: None,
+                    position: None,
                     name: "body".into(),
                     on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
@@ -159,7 +159,7 @@ fn an_open_catalogue_is_its_own_way_out() {
             vec![
                 Segment::Block(vec![Field::new("kind", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Switch {
-                    stated: None,
+                    position: None,
                     name: "body".into(),
                     on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),
@@ -335,7 +335,7 @@ fn a_true_that_did_not_come_from_the_cycle_survives_it() {
             vec![
                 Segment::Block(vec![Field::new("kind", Kind::Scalar(Scalar::U(8)))]),
                 Segment::Switch {
-                    stated: None,
+                    position: None,
                     name: "body".into(),
                     on: Discriminant::Field(Expr::name("kind")),
                     choice: "Body".into(),

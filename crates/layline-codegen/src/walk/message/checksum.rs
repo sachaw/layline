@@ -271,7 +271,7 @@ impl Walk<'_> {
     ) -> Result<(), Error> {
         let Prelude { err, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
-        let Segment::Checksum { name: field, repr, algorithm, over, doc, stated: _ } = seg else {
+        let Segment::Checksum { name: field, repr, algorithm, over, doc, position: _ } = seg else {
             unreachable!("just matched")
         };
         let ident = ident(field);

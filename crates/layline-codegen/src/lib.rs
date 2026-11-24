@@ -29,11 +29,11 @@ mod root;
 #[cfg(feature = "emit")]
 mod source;
 
-pub use layline_core::table::StatedUnit;
+pub use layline_core::table::PositionUnit;
 pub use model::{
     Absence, Arm, BitOrder, ChoiceDef, Collection, Container, Count, CoverFrom, CoverTo, Coverage,
     Covered, Derive, Discriminant, DispatchArm, DispatchDef, Endian, EnumDef, Expr, Field, Item,
-    Kind, LayoutDef, Len, MessageDef, Op, Param, Presence, Range, Scalar, Segment, Stated, Test,
+    Kind, LayoutDef, Len, MessageDef, Op, Param, Position, Presence, Range, Scalar, Segment, Test,
     Unit, Variant,
 };
 #[cfg(feature = "walk")]

@@ -31,7 +31,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
     }
     let with: Vec<Ref> = a.with.iter().flat_map(|(refs, _)| refs).map(Ref::same).collect();
 
-    let stated = a.at;
+    let position = a.at;
     let align = a.align;
     let valid = a.valid.take();
     let walk_span = walked_by(&a)
@@ -104,11 +104,11 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
                     span,
                     walk_span,
                     body,
-                    stated,
+                    position,
                     with,
                     align,
                     valid,
-                    framing: false,
+                    stated: false,
                 });
             }
             return Err(syn::Error::new(
@@ -131,7 +131,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
         (None, None) => field_body(&f.ty, &name, span, a)?,
     };
-    Ok(MsgField { name, span, walk_span, body, stated, with, align, valid, framing: false })
+    Ok(MsgField { name, span, walk_span, body, position, with, align, valid, stated: false })
 }
 
 /// A `Stated<T>` field: an integer or `bool` in a block, which encode writes.
@@ -164,7 +164,7 @@ fn framing_field(
             ),
         ));
     }
-    let (stated, align, valid) = (a.at, a.align, a.valid);
+    let (position, align, valid) = (a.at, a.align, a.valid);
     let FieldAttrs { seek, bits, bytes, range, magic, until, stride, with, .. } = a;
     let placed = [seek.is_some(), magic.is_some(), bytes.is_some(), until.is_some()];
     if placed.into_iter().any(|p| p) || stride.is_some() || with.is_some() {
@@ -185,11 +185,11 @@ fn framing_field(
         span,
         walk_span: span,
         body,
-        stated,
+        position,
         with: Vec::new(),
         align,
         valid,
-        framing: true,
+        stated: true,
     })
 }
 

@@ -97,7 +97,7 @@ fn an_arm_binds_the_base_its_checksum_counts_from() {
         vec![
             Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(8)))]),
             Segment::Checksum {
-                stated: None,
+                position: None,
                 name: "ck".into(),
                 repr: Scalar::U(8),
                 algorithm: "Xor".into(),

@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use super::Derive;
 
-use super::{BitOrder, Coverage, Discriminant, Endian, Expr, Field, Kind, Len, Scalar, Stated};
+use super::{BitOrder, Coverage, Discriminant, Endian, Expr, Field, Kind, Len, Position, Scalar};
 
 /// How many elements a collection has.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -175,7 +175,7 @@ pub enum Segment {
         /// Documentation.
         doc: Option<String>,
         /// The `#[at]` position. Only allowed before any variable-length segment.
-        stated: Option<Stated>,
+        position: Option<Position>,
         /// The type.
         kind: Kind,
     },
@@ -186,7 +186,7 @@ pub enum Segment {
         /// Documentation.
         doc: Option<String>,
         /// The `#[at]` position. Only allowed before any variable-length segment.
-        stated: Option<Stated>,
+        position: Option<Position>,
         /// The element type.
         element: Kind,
         /// How many elements there are.
@@ -212,7 +212,7 @@ pub enum Segment {
         /// Documentation.
         doc: Option<String>,
         /// The `#[at]` position. Only allowed before any variable-length segment.
-        stated: Option<Stated>,
+        position: Option<Position>,
         /// The record: a [`Kind::Nested`] or a [`Kind::Msg`].
         kind: Kind,
         /// The byte offset. Encode writes the field it reads, if it is invertible.
@@ -231,7 +231,7 @@ pub enum Segment {
         /// Documentation.
         doc: Option<String>,
         /// The `#[at]` position. Only allowed before any variable-length segment.
-        stated: Option<Stated>,
+        position: Option<Position>,
         /// What selects the arm.
         on: Discriminant,
         /// The [`ChoiceDef`](crate::ChoiceDef) type.
@@ -263,7 +263,7 @@ pub enum Segment {
         /// Documentation.
         doc: Option<String>,
         /// The `#[at]` position. Only allowed before any variable-length segment.
-        stated: Option<Stated>,
+        position: Option<Position>,
         /// The integer type.
         repr: Scalar,
         /// The path of the `layline::Checksum` algorithm.
@@ -301,7 +301,7 @@ impl Segment {
     /// A [`Segment::Value`] with no documentation or `#[at]`.
     #[must_use]
     pub fn value(name: &str, kind: Kind) -> Self {
-        Segment::Value { name: String::from(name), doc: None, stated: None, kind }
+        Segment::Value { name: String::from(name), doc: None, position: None, kind }
     }
 
     /// A [`Segment::Repeat`].
@@ -318,7 +318,7 @@ impl Segment {
         Segment::Repeat {
             name: String::from(name),
             doc: None,
-            stated: None,
+            position: None,
             element,
             count,
             at,
@@ -340,7 +340,7 @@ impl Segment {
     /// A [`Segment::Placed`] at the byte offset `at`. Optional when `absent` is set.
     #[must_use]
     pub fn placed(name: &str, kind: Kind, at: Expr, absent: Option<Absence>) -> Self {
-        Segment::Placed { name: String::from(name), doc: None, stated: None, kind, at, absent }
+        Segment::Placed { name: String::from(name), doc: None, position: None, kind, at, absent }
     }
 
     /// A [`Segment::Switch`] on `on`, with arms from the choice type `choice`.
@@ -349,7 +349,7 @@ impl Segment {
         Segment::Switch {
             name: String::from(name),
             doc: None,
-            stated: None,
+            position: None,
             on,
             choice: String::from(choice),
             window,
@@ -368,7 +368,7 @@ impl Segment {
         Segment::Checksum {
             name: String::from(name),
             doc: None,
-            stated: None,
+            position: None,
             repr,
             algorithm: String::from(algorithm),
             over,
@@ -393,15 +393,15 @@ impl Segment {
 
     /// Sets the `#[at]` position. Does nothing on a [`Block`](Segment::Block).
     #[must_use]
-    pub fn with_stated(mut self, at: Stated) -> Self {
+    pub fn with_position(mut self, at: Position) -> Self {
         match &mut self {
             Segment::Block(_) => {}
-            Segment::Opt { field, .. } => field.stated = Some(at),
-            Segment::Value { stated, .. }
-            | Segment::Repeat { stated, .. }
-            | Segment::Placed { stated, .. }
-            | Segment::Switch { stated, .. }
-            | Segment::Checksum { stated, .. } => *stated = Some(at),
+            Segment::Opt { field, .. } => field.position = Some(at),
+            Segment::Value { position, .. }
+            | Segment::Repeat { position, .. }
+            | Segment::Placed { position, .. }
+            | Segment::Switch { position, .. }
+            | Segment::Checksum { position, .. } => *position = Some(at),
             Segment::Valid { .. } => {}
         }
         self
@@ -464,15 +464,15 @@ impl Segment {
 
     /// The `#[at]` position, if any.
     #[must_use]
-    pub fn stated(&self) -> Option<Stated> {
+    pub fn position(&self) -> Option<Position> {
         match self {
             Segment::Block(_) | Segment::Valid { .. } => None,
-            Segment::Opt { field, .. } => field.stated,
-            Segment::Value { stated, .. }
-            | Segment::Repeat { stated, .. }
-            | Segment::Placed { stated, .. }
-            | Segment::Switch { stated, .. }
-            | Segment::Checksum { stated, .. } => *stated,
+            Segment::Opt { field, .. } => field.position,
+            Segment::Value { position, .. }
+            | Segment::Repeat { position, .. }
+            | Segment::Placed { position, .. }
+            | Segment::Switch { position, .. }
+            | Segment::Checksum { position, .. } => *position,
         }
     }
 

@@ -24,9 +24,9 @@ fn record() -> Module {
             "Record",
             vec![
                 Segment::Block(vec![
-                    Field::new("n", Kind::Scalar(Scalar::U(8))).with_framing(),
+                    Field::new("n", Kind::Scalar(Scalar::U(8))).with_stated(),
                     Field::new("tag", Kind::Scalar(Scalar::U(16))),
-                    Field::new("flags", Kind::Scalar(Scalar::U(8))).with_framing(),
+                    Field::new("flags", Kind::Scalar(Scalar::U(8))).with_stated(),
                 ]),
                 Segment::opt(
                     Presence::When(Expr::binary(Op::BitAnd, Expr::name("flags"), Expr::int(0x01))),

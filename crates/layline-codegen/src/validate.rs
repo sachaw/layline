@@ -32,7 +32,7 @@ pub enum Invalid {
     /// A words-mode bit field crosses a 16-bit word boundary.
     CrossesWord(String),
     /// A field's `#[at]` position does not match its computed position.
-    Stated(String),
+    Position(String),
     /// A reference names no earlier field.
     UnknownReference(String),
     /// A count, length, offset or switch refers to a field that is not an integer.
@@ -71,7 +71,7 @@ impl core::fmt::Display for Invalid {
                 write!(f, "the fields cover {covered_bits} of the container's {declared_bits} bits")
             }
             Invalid::CrossesWord(m)
-            | Invalid::Stated(m)
+            | Invalid::Position(m)
             | Invalid::UnknownReference(m)
             | Invalid::NonIntegerReference(m)
             | Invalid::NotAFlagReference(m)

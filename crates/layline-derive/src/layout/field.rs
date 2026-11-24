@@ -5,7 +5,7 @@ use syn::Type;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 
-use layline_codegen::StatedUnit;
+use layline_codegen::PositionUnit;
 
 use super::declared::*;
 use super::misplaced::{no_assertions_in_bit_mode, refuse_message_vocabulary, refuse_unbound};
@@ -70,7 +70,7 @@ pub(super) fn word_field(f: &syn::Field) -> syn::Result<WordField> {
             crate::attr::once_attr(&mut bits, attr, &owner, || int_arg(attr))?;
         } else if attr.path().is_ident("at") {
             crate::attr::once_attr(&mut at, attr, &owner, || {
-                at_attr(attr, &ident.to_string(), StatedUnit::Bit)
+                at_attr(attr, &ident.to_string(), PositionUnit::Bit)
             })?;
         } else if attr.path().is_ident("overlay") {
             let args: OverlayArgs = attr.parse_args()?;
@@ -139,7 +139,7 @@ pub(super) fn byte_field(f: &syn::Field) -> syn::Result<ByteField> {
             ));
         } else if attr.path().is_ident("at") {
             crate::attr::once_attr(&mut at, attr, &owner, || {
-                at_attr(attr, &ident.to_string(), StatedUnit::Byte)
+                at_attr(attr, &ident.to_string(), PositionUnit::Byte)
             })?;
         } else {
             refuse_unbound(attr, &ident, "a `bytes = N` layout")?;
@@ -316,7 +316,7 @@ pub(super) fn words_field(f: &syn::Field) -> syn::Result<WordsField> {
             crate::attr::once_attr(&mut bytes, attr, &owner, || int_arg(attr))?;
         } else if attr.path().is_ident("at") {
             crate::attr::once_attr(&mut at, attr, &owner, || {
-                at_attr(attr, &ident.to_string(), StatedUnit::Bit)
+                at_attr(attr, &ident.to_string(), PositionUnit::Bit)
             })?;
         } else if attr.path().is_ident("overlay") {
             let args: OverlayArgs = attr.parse_args()?;

@@ -5,7 +5,7 @@ mod support;
 
 use layline_codegen::{
     BitOrder, Collection, Container, Count, Endian, Expr, Field, Invalid, Kind, LayoutDef, Len,
-    Presence, Scalar, Segment, Stated,
+    Position, Presence, Scalar, Segment,
 };
 use support::{msg, u, validate_layout, validate_message};
 
@@ -15,8 +15,8 @@ fn layout(container: &Container, fields: Vec<Field>) -> LayoutDef {
 
 fn refusal(why: Invalid) -> String {
     match why {
-        Invalid::Stated(text) => text,
-        other => panic!("expected `Invalid::Stated`, got {other:?}"),
+        Invalid::Position(text) => text,
+        other => panic!("expected `Invalid::Position`, got {other:?}"),
     }
 }
 
@@ -25,12 +25,12 @@ fn refusal(why: Invalid) -> String {
 fn a_bit_position_in_a_word_container_is_the_running_sum_under_lsb() {
     let container = Container::word(16, Endian::Le, BitOrder::Lsb);
     let fields = vec![
-        Field::new("a", u(2)).with_stated(Stated::bit(0)),
-        Field::new("b", u(14)).with_stated(Stated::bit(2)),
+        Field::new("a", u(2)).with_position(Position::bit(0)),
+        Field::new("b", u(14)).with_position(Position::bit(2)),
     ];
     validate_layout(&layout(&container, fields)).expect("both fields are where they say they are");
 
-    let wrong = vec![Field::new("a", u(2)), Field::new("b", u(14)).with_stated(Stated::bit(3))];
+    let wrong = vec![Field::new("a", u(2)), Field::new("b", u(14)).with_position(Position::bit(3))];
     let why = validate_layout(&layout(&container, wrong)).expect_err("bit 3 is not bit 2");
     assert_eq!(
         refusal(why),
@@ -44,12 +44,13 @@ fn a_bit_position_in_a_word_container_is_the_running_sum_under_lsb() {
 fn a_msb_container_states_the_declared_position() {
     let container = Container::word(16, Endian::Be, BitOrder::Msb);
     let fields = vec![
-        Field::new("a", u(2)).with_stated(Stated::bit(0)),
-        Field::new("b", u(14)).with_stated(Stated::bit(2)),
+        Field::new("a", u(2)).with_position(Position::bit(0)),
+        Field::new("b", u(14)).with_position(Position::bit(2)),
     ];
     validate_layout(&layout(&container, fields)).expect("the declared positions");
 
-    let physical = vec![Field::new("a", u(2)).with_stated(Stated::bit(14)), Field::new("b", u(14))];
+    let physical =
+        vec![Field::new("a", u(2)).with_position(Position::bit(14)), Field::new("b", u(14))];
     let why = validate_layout(&layout(&container, physical))
         .expect_err("bit 14 is physical, not declared");
     assert_eq!(
@@ -58,7 +59,8 @@ fn a_msb_container_states_the_declared_position() {
          solver placed it at physical bit 14 — declared bit 0",
     );
 
-    let beyond = vec![Field::new("a", u(2)).with_stated(Stated::bit(15)), Field::new("b", u(14))];
+    let beyond =
+        vec![Field::new("a", u(2)).with_position(Position::bit(15)), Field::new("b", u(14))];
     let why =
         validate_layout(&layout(&container, beyond)).expect_err("bits 15..17 are not in the word");
     assert_eq!(
@@ -70,9 +72,9 @@ fn a_msb_container_states_the_declared_position() {
 
 #[test]
 fn a_stated_position_is_published_where_it_landed() {
-    assert_eq!(Stated::bit(0).published(14), Stated::bit(14));
-    assert_eq!(Stated::byte(1).published(16), Stated::byte(2));
-    assert_eq!(Stated::byte(0).published(12), Stated::bit(12));
+    assert_eq!(Position::bit(0).published(14), Position::bit(14));
+    assert_eq!(Position::byte(1).published(16), Position::byte(2));
+    assert_eq!(Position::byte(0).published(12), Position::bit(12));
 }
 
 /// Declared, `a`, `b` and `c` are at bytes 0, 1 and 2. Physically, they are at bytes 3, 2 and 0.
@@ -80,16 +82,16 @@ fn a_stated_position_is_published_where_it_landed() {
 fn a_byte_unit_states_a_position_in_a_bit_addressed_container() {
     let container = Container::word(32, Endian::Be, BitOrder::Msb);
     let fields = vec![
-        Field::new("a", u(8)).with_stated(Stated::byte(0)),
-        Field::new("b", u(8)).with_stated(Stated::byte(1)),
-        Field::new("c", u(16)).with_stated(Stated::byte(2)),
+        Field::new("a", u(8)).with_position(Position::byte(0)),
+        Field::new("b", u(8)).with_position(Position::byte(1)),
+        Field::new("c", u(16)).with_position(Position::byte(2)),
     ];
     validate_layout(&layout(&container, fields)).expect("byte positions in a word container");
 
     let wrong = vec![
-        Field::new("a", u(8)).with_stated(Stated::byte(0)),
-        Field::new("b", u(8)).with_stated(Stated::byte(2)),
-        Field::new("c", u(16)).with_stated(Stated::byte(2)),
+        Field::new("a", u(8)).with_position(Position::byte(0)),
+        Field::new("b", u(8)).with_position(Position::byte(2)),
+        Field::new("c", u(16)).with_position(Position::byte(2)),
     ];
     let why = validate_layout(&layout(&container, wrong)).expect_err("byte 2 is not byte 1");
     assert_eq!(
@@ -104,7 +106,8 @@ fn a_byte_unit_states_a_position_in_a_bit_addressed_container() {
 #[test]
 fn a_byte_claim_about_a_field_between_bytes_reports_in_bits() {
     let container = Container::word(16, Endian::Le, BitOrder::Lsb);
-    let fields = vec![Field::new("a", u(3)), Field::new("b", u(13)).with_stated(Stated::byte(0))];
+    let fields =
+        vec![Field::new("a", u(3)), Field::new("b", u(13)).with_position(Position::byte(0))];
     let why =
         validate_layout(&layout(&container, fields)).expect_err("bit 3 is not a byte boundary");
     assert_eq!(
@@ -117,18 +120,18 @@ fn a_byte_claim_about_a_field_between_bytes_reports_in_bits() {
 fn byte_mode_states_byte_positions() {
     let container = Container::Bytes { bytes: 12, endian: Endian::Le };
     let fields = vec![
-        Field::new("id", u(8)).with_stated(Stated::byte(0)),
-        Field::new("t", u(32)).with_stated(Stated::byte(1)),
-        Field::new("pad", Kind::bytes(3)).with_stated(Stated::byte(5)),
-        Field::new("sample", Kind::Scalar(Scalar::F32)).with_stated(Stated::byte(8)),
+        Field::new("id", u(8)).with_position(Position::byte(0)),
+        Field::new("t", u(32)).with_position(Position::byte(1)),
+        Field::new("pad", Kind::bytes(3)).with_position(Position::byte(5)),
+        Field::new("sample", Kind::Scalar(Scalar::F32)).with_position(Position::byte(8)),
     ];
     validate_layout(&layout(&container, fields)).expect("positions match");
 
     let wrong = vec![
-        Field::new("id", u(8)).with_stated(Stated::byte(0)),
-        Field::new("t", u(32)).with_stated(Stated::byte(4)),
-        Field::new("pad", Kind::bytes(3)).with_stated(Stated::byte(5)),
-        Field::new("sample", Kind::Scalar(Scalar::F32)).with_stated(Stated::byte(8)),
+        Field::new("id", u(8)).with_position(Position::byte(0)),
+        Field::new("t", u(32)).with_position(Position::byte(4)),
+        Field::new("pad", Kind::bytes(3)).with_position(Position::byte(5)),
+        Field::new("sample", Kind::Scalar(Scalar::F32)).with_position(Position::byte(8)),
     ];
     let why = validate_layout(&layout(&container, wrong)).expect_err("byte 4 is not byte 1");
     assert_eq!(
@@ -142,8 +145,8 @@ fn byte_mode_states_byte_positions() {
 fn byte_mode_accepts_a_bit_unit_too() {
     let container = Container::Bytes { bytes: 5, endian: Endian::Le };
     let fields = vec![
-        Field::new("id", u(8)).with_stated(Stated::bit(0)),
-        Field::new("t", u(32)).with_stated(Stated::bit(8)),
+        Field::new("id", u(8)).with_position(Position::bit(0)),
+        Field::new("t", u(32)).with_position(Position::bit(8)),
     ];
     validate_layout(&layout(&container, fields)).expect("bits count in byte mode too");
 }
@@ -153,16 +156,16 @@ fn byte_mode_accepts_a_bit_unit_too() {
 fn words_mode_states_positions_across_the_word_grid() {
     let container = Container::Words { words: 2, endian: Endian::Be, order: BitOrder::Lsb };
     let fields = vec![
-        Field::new("f0", u(4)).with_stated(Stated::bit(0)),
-        Field::new("f1", u(12)).with_stated(Stated::bit(4)),
-        Field::new("f2", u(16)).with_stated(Stated::byte(2)),
+        Field::new("f0", u(4)).with_position(Position::bit(0)),
+        Field::new("f1", u(12)).with_position(Position::bit(4)),
+        Field::new("f2", u(16)).with_position(Position::byte(2)),
     ];
     validate_layout(&layout(&container, fields)).expect("positions match");
 
     let wrong = vec![
         Field::new("f0", u(4)),
         Field::new("f1", u(12)),
-        Field::new("f2", u(16)).with_stated(Stated::byte(0)),
+        Field::new("f2", u(16)).with_position(Position::byte(0)),
     ];
     let why = validate_layout(&layout(&container, wrong)).expect_err("byte 0 is word 0");
     assert_eq!(refusal(why), "field `f2`: #[at(byte = 0)] but the solver placed it at byte 2");
@@ -173,8 +176,8 @@ fn words_mode_states_positions_across_the_word_grid() {
 fn a_run_of_whole_words_is_not_mirrored() {
     let container = Container::Words { words: 3, endian: Endian::Be, order: BitOrder::Msb };
     let fields = vec![
-        Field::new("f0", u(16)).with_stated(Stated::byte(0)),
-        Field::new("f1", Kind::array(Scalar::U(16), 2)).with_stated(Stated::byte(2)),
+        Field::new("f0", u(16)).with_position(Position::byte(0)),
+        Field::new("f1", Kind::array(Scalar::U(16), 2)).with_position(Position::byte(2)),
     ];
     validate_layout(&layout(&container, fields)).expect("a whole-word array keeps its position");
 }
@@ -185,14 +188,14 @@ fn a_run_of_whole_words_is_not_mirrored() {
 fn msb_mirrors_within_each_word_and_not_across_them() {
     let container = Container::Words { words: 2, endian: Endian::Be, order: BitOrder::Msb };
     let fields = vec![
-        Field::new("hi", u(8)).with_stated(Stated::byte(0)),
-        Field::new("lo", u(8)).with_stated(Stated::byte(1)),
-        Field::new("raw", Kind::bytes(2)).with_stated(Stated::byte(2)),
+        Field::new("hi", u(8)).with_position(Position::byte(0)),
+        Field::new("lo", u(8)).with_position(Position::byte(1)),
+        Field::new("raw", Kind::bytes(2)).with_position(Position::byte(2)),
     ];
     validate_layout(&layout(&container, fields)).expect("positions match");
 
     let wrong = vec![
-        Field::new("hi", u(8)).with_stated(Stated::byte(1)),
+        Field::new("hi", u(8)).with_position(Position::byte(1)),
         Field::new("lo", u(8)),
         Field::new("raw", Kind::bytes(2)),
     ];
@@ -205,7 +208,7 @@ fn msb_mirrors_within_each_word_and_not_across_them() {
     );
 
     let across = vec![
-        Field::new("hi", u(8)).with_stated(Stated::bit(12)),
+        Field::new("hi", u(8)).with_position(Position::bit(12)),
         Field::new("lo", u(8)),
         Field::new("raw", Kind::bytes(2)),
     ];
@@ -222,16 +225,16 @@ fn msb_mirrors_within_each_word_and_not_across_them() {
 fn a_stated_position_in_a_message_block_counts_from_the_body() {
     let segments = vec![
         Segment::Block(vec![
-            Field::new("sync", u(8)).with_stated(Stated::byte(0)),
-            Field::new("len", u(8)).with_stated(Stated::byte(1)),
+            Field::new("sync", u(8)).with_position(Position::byte(0)),
+            Field::new("len", u(8)).with_position(Position::byte(1)),
         ]),
-        Segment::Block(vec![Field::new("kind", u(16)).with_stated(Stated::byte(2))]),
+        Segment::Block(vec![Field::new("kind", u(16)).with_position(Position::byte(2))]),
     ];
     validate_message(&msg("M", segments)).expect("positions continue across blocks");
 
     let restarted = vec![
         Segment::Block(vec![Field::new("sync", u(8)), Field::new("len", u(8))]),
-        Segment::Block(vec![Field::new("kind", u(16)).with_stated(Stated::byte(0))]),
+        Segment::Block(vec![Field::new("kind", u(16)).with_position(Position::byte(0))]),
     ];
     let why = validate_message(&msg("M", restarted)).expect_err("byte 0 is the sync byte");
     assert_eq!(refusal(why), "field `kind`: #[at(byte = 0)] but the solver placed it at byte 2");
@@ -241,9 +244,9 @@ fn a_stated_position_in_a_message_block_counts_from_the_body() {
 #[test]
 fn a_checksum_and_a_byte_bounded_run_advance_the_stated_numbering() {
     let segments = vec![
-        Segment::Block(vec![Field::new("a", u(8)).with_stated(Stated::byte(0))]),
+        Segment::Block(vec![Field::new("a", u(8)).with_position(Position::byte(0))]),
         Segment::Checksum {
-            stated: None,
+            position: None,
             name: "crc".into(),
             repr: Scalar::U(16),
             algorithm: "Crc16".into(),
@@ -251,7 +254,7 @@ fn a_checksum_and_a_byte_bounded_run_advance_the_stated_numbering() {
             doc: None,
         },
         Segment::repeat("payload", u(8), Count::Window(Len::Bytes(4)), None, Collection::Vec),
-        Segment::Block(vec![Field::new("b", u(8)).with_stated(Stated::byte(7))]),
+        Segment::Block(vec![Field::new("b", u(8)).with_position(Position::byte(7))]),
     ];
     validate_message(&msg("M", segments)).expect("everything before `b` has a fixed size");
 }
@@ -263,12 +266,12 @@ fn a_fixed_run_of_text_advances_the_stated_numbering() {
         vec![
             Segment::Block(vec![Field::new("a", u(8))]),
             Segment::Value {
-                stated: None,
+                position: None,
                 name: "name".into(),
                 kind: Kind::Text { len: Len::Bytes(8), codec: Some("Ascii".into()) },
                 doc: None,
             },
-            Segment::Block(vec![Field::new("b", u(8)).with_stated(Stated::byte(pos))]),
+            Segment::Block(vec![Field::new("b", u(8)).with_position(Position::byte(pos))]),
         ]
     };
     validate_message(&msg("M", segments(9))).expect("1 + 8 bytes puts `b` at byte 9");
@@ -299,7 +302,7 @@ fn the_published_table_starts_where_a_stated_position_says() {
         vec![
             Segment::Block(vec![Field::new("a", u(8))]),
             Segment::Checksum {
-                stated: None,
+                position: None,
                 name: "crc".into(),
                 repr: Scalar::U(16),
                 algorithm: "Crc16".into(),
@@ -307,14 +310,14 @@ fn the_published_table_starts_where_a_stated_position_says() {
                 doc: None,
             },
             Segment::repeat("payload", u(8), Count::Window(Len::Bytes(4)), None, Collection::Vec),
-            Segment::Block(vec![Field::new("b", u(8)).with_stated(Stated::byte(7))]),
+            Segment::Block(vec![Field::new("b", u(8)).with_position(Position::byte(7))]),
         ]
     };
     validate_message(&msg("M", segments())).expect("`b` is at byte 7");
 
     let mut wrong = segments();
     wrong.pop();
-    wrong.push(Segment::Block(vec![Field::new("b", u(8)).with_stated(Stated::byte(8))]));
+    wrong.push(Segment::Block(vec![Field::new("b", u(8)).with_position(Position::byte(8))]));
     let why = validate_message(&msg("M", wrong)).expect_err("byte 8 is not byte 7");
     assert_eq!(refusal(why), "field `b`: #[at(byte = 8)] but the solver placed it at byte 7");
 
@@ -334,14 +337,14 @@ fn the_published_table_starts_where_a_stated_position_says() {
 #[test]
 fn an_optional_field_may_state_the_position_it_has_when_it_is_there() {
     let present = vec![
-        Segment::Block(vec![Field::new("flags", u(8)).with_stated(Stated::byte(0))]),
+        Segment::Block(vec![Field::new("flags", u(8)).with_position(Position::byte(0))]),
         Segment::Opt {
             when: Presence::When(Expr::binary(
                 layline_codegen::Op::BitAnd,
                 Expr::name("flags"),
                 Expr::int(0x01),
             )),
-            field: Field::new("extra", u(16)).with_stated(Stated::byte(1)),
+            field: Field::new("extra", u(16)).with_position(Position::byte(1)),
         },
     ];
     validate_message(&msg("M", present)).expect("`extra` is at byte 1 when present");
@@ -354,7 +357,7 @@ fn an_optional_field_may_state_the_position_it_has_when_it_is_there() {
                 Expr::name("flags"),
                 Expr::int(0x01),
             )),
-            field: Field::new("extra", u(16)).with_stated(Stated::byte(2)),
+            field: Field::new("extra", u(16)).with_position(Position::byte(2)),
         },
     ];
     let why = validate_message(&msg("M", wrong)).expect_err("byte 2 is not byte 1");
@@ -369,13 +372,13 @@ fn a_position_cannot_be_stated_behind_an_extent_the_wire_decides() {
             name: "tag".into(),
             kind: Kind::Var { ty: "Uleb128".into() },
             doc: None,
-            stated: None,
+            position: None,
         },
-        Segment::Block(vec![Field::new("x", u(8)).with_stated(Stated::byte(2))]),
+        Segment::Block(vec![Field::new("x", u(8)).with_position(Position::byte(2))]),
     ];
     let why = validate_message(&msg("M", segments)).expect_err("a varint has no fixed width");
     assert!(
-        !matches!(why, Invalid::Stated(_)),
+        !matches!(why, Invalid::Position(_)),
         "an unknown offset is not a position mismatch: {why:?}",
     );
     let text = why.to_string();
@@ -396,7 +399,7 @@ fn a_counted_run_ends_the_stated_numbering() {
             None,
             Collection::Vec,
         ),
-        Segment::Block(vec![Field::new("x", u(8)).with_stated(Stated::byte(2))]),
+        Segment::Block(vec![Field::new("x", u(8)).with_position(Position::byte(2))]),
     ];
     let why = validate_message(&msg("M", segments)).expect_err("the offset of `x` depends on `n`");
     assert!(why.to_string().contains("only known at run time"), "the reason: {why:?}",);
@@ -407,7 +410,7 @@ mod emitted {
     use super::{layout, u};
     use layline_codegen::Item;
     use layline_codegen::emit::{Module, generate};
-    use layline_codegen::{BitOrder, Container, Endian, Field, Kind, Scalar, Stated};
+    use layline_codegen::{BitOrder, Container, Endian, Field, Kind, Position, Scalar};
 
     fn module(items: Vec<Item>) -> Module {
         Module::new(items)
@@ -421,8 +424,8 @@ mod emitted {
     fn an_emitted_declaration_carries_the_stated_position() {
         let container = Container::Bytes { bytes: 6, endian: Endian::Le };
         let fields = vec![
-            Field::new("id", u(16)).with_stated(Stated::byte(0)),
-            Field::new("sample", Kind::Scalar(Scalar::F32)).with_stated(Stated::byte(2)),
+            Field::new("id", u(16)).with_position(Position::byte(0)),
+            Field::new("sample", Kind::Scalar(Scalar::F32)).with_position(Position::byte(2)),
         ];
         let out = emit_module(&module(vec![Item::Layout(layout(&container, fields))]))
             .expect("a well-formed layout emits");
@@ -435,8 +438,8 @@ mod emitted {
     fn an_emitted_bit_position_is_written_in_bits() {
         let container = Container::word(16, Endian::Be, BitOrder::Msb);
         let fields = vec![
-            Field::new("a", u(4)).with_stated(Stated::bit(0)),
-            Field::new("b", u(12)).with_stated(Stated::bit(4)),
+            Field::new("a", u(4)).with_position(Position::bit(0)),
+            Field::new("b", u(12)).with_position(Position::bit(4)),
         ];
         let out = emit_module(&module(vec![Item::Layout(layout(&container, fields))]))
             .expect("a well-formed layout emits");
@@ -448,8 +451,8 @@ mod emitted {
     fn a_wrong_stated_position_is_refused_before_anything_is_written() {
         let container = Container::Bytes { bytes: 6, endian: Endian::Le };
         let fields = vec![
-            Field::new("id", u(16)).with_stated(Stated::byte(0)),
-            Field::new("sample", Kind::Scalar(Scalar::F32)).with_stated(Stated::byte(4)),
+            Field::new("id", u(16)).with_position(Position::byte(0)),
+            Field::new("sample", Kind::Scalar(Scalar::F32)).with_position(Position::byte(4)),
         ];
         let why = emit_module(&module(vec![Item::Layout(layout(&container, fields))]))
             .expect_err("byte 4 is not byte 2");

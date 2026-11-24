@@ -109,7 +109,7 @@ fn a_switch_may_discriminate_on_a_discovered_value() {
         "Tlv",
         vec![
             Segment::Value {
-                stated: None,
+                position: None,
                 name: "tag".into(),
                 kind: Kind::Var { ty: "layline_core::num::Uleb128".into() },
                 doc: None,
@@ -185,7 +185,7 @@ fn one_record_at_a_stated_offset() {
         ])
     };
     let placed = |name: &str, kind: Kind, at: &str, optional: bool| Segment::Placed {
-        stated: None,
+        position: None,
         name: name.into(),
         kind,
         at: layline_codegen::Expr::name(at),
@@ -248,7 +248,7 @@ fn a_placed_record_may_be_gated_on_the_length_that_measures_it() {
                     field("table_size", Kind::Scalar(Scalar::U(16))),
                 ]),
                 Segment::Placed {
-                    stated: None,
+                    position: None,
                     name: "table".into(),
                     kind: Kind::Msg { ty: "Table".into(), boxed: false, with: Vec::new() },
                     at: layline_codegen::Expr::name("table_at"),
@@ -282,7 +282,7 @@ fn a_run_the_wire_places_may_not_state_a_literal_window() {
             vec![
                 Segment::Block(vec![field("off", Kind::Scalar(Scalar::U(16)))]),
                 Segment::Repeat {
-                    stated: None,
+                    position: None,
                     collection: Collection::Vec,
                     when: None,
                     name: "tables".into(),

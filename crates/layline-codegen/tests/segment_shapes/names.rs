@@ -15,7 +15,7 @@ fn a_count_may_not_name_a_later_discovered_value() {
                 Collection::Vec,
             ),
             Segment::Value {
-                stated: None,
+                position: None,
                 name: "len".into(),
                 kind: Kind::Var { ty: "Uleb128".into() },
                 doc: None,
@@ -31,7 +31,7 @@ fn a_reference_must_name_something_with_a_number_in_it() {
     let m = msg(
         "Bad",
         vec![
-            Segment::Value { name: "label".into(), kind: text, doc: None, stated: None },
+            Segment::Value { name: "label".into(), kind: text, doc: None, position: None },
             Segment::repeat(
                 "items",
                 Kind::Scalar(Scalar::U(8)),

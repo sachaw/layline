@@ -193,8 +193,8 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
             format!(
                 "field `{name}`: `#[at({} = {})]` conflicts with `#[seek({seek})]`, which reads the position from `{seek}`. \
                  Remove `#[at]`",
-                at.stated.unit.name(),
-                at.stated.pos,
+                at.position.unit.name(),
+                at.position.pos,
             ),
         ));
     }
@@ -569,7 +569,7 @@ fn when_shape(span: Span, name: &str) -> syn::Error {
 }
 
 fn parse_at(attr: &syn::Attribute, name: &str) -> syn::Result<crate::claim::At> {
-    crate::claim::at_attr(attr, name, layline_codegen::StatedUnit::Byte)
+    crate::claim::at_attr(attr, name, layline_codegen::PositionUnit::Byte)
 }
 
 fn parse_seek(attr: &syn::Attribute, name: &str) -> syn::Result<Value> {

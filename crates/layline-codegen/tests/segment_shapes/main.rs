@@ -3,7 +3,7 @@ mod support;
 
 use layline_codegen::{
     Absence, Arm, ChoiceDef, Collection, Container, Count, Discriminant, Endian, Expr, Field,
-    Invalid, Kind, LayoutDef, Len, MessageDef, Presence, Scalar, Segment, Stated,
+    Invalid, Kind, LayoutDef, Len, MessageDef, Position, Presence, Scalar, Segment,
 };
 
 use support::{field, msg, validate_choice, validate_layout, validate_message};
@@ -38,7 +38,7 @@ fn switch(name: &str, on: Discriminant, ty: &str) -> Segment {
         choice: ty.into(),
         window: None,
         doc: None,
-        stated: None,
+        position: None,
     }
 }
 
@@ -49,7 +49,7 @@ fn switch_in(name: &str, on: Discriminant, ty: &str, n: usize) -> Segment {
         choice: ty.into(),
         window: Some(Len::Bytes(n)),
         doc: None,
-        stated: None,
+        position: None,
     }
 }
 

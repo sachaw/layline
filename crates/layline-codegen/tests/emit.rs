@@ -7,7 +7,9 @@
 use layline_codegen::__derive::field_rows;
 use layline_codegen::Derive;
 use layline_codegen::emit::{Module, generate};
-use layline_codegen::{BitOrder, Container, Endian, Field, Item, Kind, LayoutDef, Scalar, Stated};
+use layline_codegen::{
+    BitOrder, Container, Endian, Field, Item, Kind, LayoutDef, Position, Scalar,
+};
 
 #[test]
 fn a_word_container_emits_as_one_extent() {
@@ -15,9 +17,9 @@ fn a_word_container_emits_as_one_extent() {
         "Status",
         Container::word(16, Endian::Be, BitOrder::Msb),
         vec![
-            Field::new("version", Kind::Scalar(Scalar::U(4))).with_stated(Stated::bit(0)),
-            Field::new("kind", Kind::Scalar(Scalar::U(8))).with_stated(Stated::bit(4)),
-            Field::new("spare", Kind::Scalar(Scalar::U(4))).with_stated(Stated::bit(12)),
+            Field::new("version", Kind::Scalar(Scalar::U(4))).with_position(Position::bit(0)),
+            Field::new("kind", Kind::Scalar(Scalar::U(8))).with_position(Position::bit(4)),
+            Field::new("spare", Kind::Scalar(Scalar::U(4))).with_position(Position::bit(12)),
         ],
     ))]);
 

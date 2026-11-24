@@ -63,7 +63,7 @@ fn a_prefix_is_a_whole_byte_integer() {
 fn a_framing_field_must_be_written() {
     let counted = |by: &str| {
         vec![
-            Segment::block(vec![Field::new("n", u(8)).with_framing(), Field::new("m", u(8))]),
+            Segment::block(vec![Field::new("n", u(8)).with_stated(), Field::new("m", u(8))]),
             Segment::repeat(
                 "items",
                 u(8),
@@ -78,7 +78,7 @@ fn a_framing_field_must_be_written() {
     refused_field(validate_message(&msg("M", counted("n * m"))), "n", "no attribute writes it");
 
     let flagged = vec![
-        Segment::block(vec![Field::new("has", Kind::Scalar(Scalar::ByteBool)).with_framing()]),
+        Segment::block(vec![Field::new("has", Kind::Scalar(Scalar::ByteBool)).with_stated()]),
         Segment::opt(Presence::When(Expr::name("has")), Field::new("x", u(16))),
     ];
     validate_message(&msg("M", flagged)).expect("a presence test writes a flag");
@@ -86,13 +86,13 @@ fn a_framing_field_must_be_written() {
 
 #[test]
 fn a_framing_field_is_a_number_or_a_flag_in_a_message() {
-    let arr = vec![Segment::block(vec![Field::new("n", Kind::bytes(2)).with_framing()])];
+    let arr = vec![Segment::block(vec![Field::new("n", Kind::bytes(2)).with_stated()])];
     refused_field(validate_message(&msg("M", arr)), "n", "framing is a number or a flag");
 
-    let layout = bytes(1, vec![Field::new("n", u(8)).with_framing()]);
+    let layout = bytes(1, vec![Field::new("n", u(8)).with_stated()]);
     refused_field(validate_layout(&layout), "n", "a layout states nothing about other fields");
 
-    let bits = msg("M", vec![Segment::block(vec![Field::new("n", u(8)).with_framing()])])
+    let bits = msg("M", vec![Segment::block(vec![Field::new("n", u(8)).with_stated()])])
         .with_bits(BitOrder::Lsb);
     refused_field(validate_message(&bits), "n", "a bit-addressed message writes no framing");
 }
@@ -132,7 +132,7 @@ fn the_walk_gives_each_prefix_a_row_and_writes_a_framing_field() {
     use layline_codegen::Root;
 
     let mut segments =
-        vec![Segment::block(vec![Field::new("n", u(8)).with_framing(), Field::new("tag", u(16))])];
+        vec![Segment::block(vec![Field::new("n", u(8)).with_stated(), Field::new("tag", u(16))])];
     segments.push(Segment::repeat(
         "items",
         u(16),

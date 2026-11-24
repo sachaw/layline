@@ -10,8 +10,8 @@ use super::expr;
 use super::names::{Known, Seen, read_only, stated_with};
 use super::{Invalid, field_names, ident, kind_paths, type_path};
 use crate::{
-    Absence, ChoiceDef, Collection, Count, Discriminant, Kind, Len, MessageDef, Param, Presence,
-    Scalar, Segment, Stated,
+    Absence, ChoiceDef, Collection, Count, Discriminant, Kind, Len, MessageDef, Param, Position,
+    Presence, Scalar, Segment,
 };
 
 /// Checks a message: every reference names an earlier field, and nothing follows a segment that
@@ -189,7 +189,7 @@ fn advance(pos: Cursor, bits: Option<u64>) -> Cursor {
 }
 
 /// Checks an `#[at]` position against the cursor.
-fn stated_here(pos: Cursor, name: &str, stated: Stated) -> Result<(), Invalid> {
+fn position_here(pos: Cursor, name: &str, position: Position) -> Result<(), Invalid> {
     let Some(pos) = pos else {
         return Err(Invalid::field(
             name,
@@ -199,7 +199,7 @@ fn stated_here(pos: Cursor, name: &str, stated: Stated) -> Result<(), Invalid> {
             ),
         ));
     };
-    stated.check(name, pos).map_err(Invalid::Stated)
+    position.check(name, pos).map_err(Invalid::Position)
 }
 
 fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result<(), Invalid> {
@@ -218,8 +218,8 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
         if let Some(name) = seg.name() {
             ident("field", name)?;
         }
-        if let Some(stated) = seg.stated() {
-            stated_here(pos, seg.name().unwrap_or("?"), stated)?;
+        if let Some(position) = seg.position() {
+            position_here(pos, seg.name().unwrap_or("?"), position)?;
         }
         if let Some(align) = seg.align()
             && align < 2
@@ -257,7 +257,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                             ),
                         ));
                     }
-                    if f.framing
+                    if f.stated
                         && !matches!(
                             f.kind,
                             Kind::Scalar(Scalar::U(_) | Scalar::I(_) | Scalar::ByteBool)
@@ -273,8 +273,8 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                             ),
                         ));
                     }
-                    if let Some(stated) = f.stated {
-                        stated_here(at, &f.name, stated)?;
+                    if let Some(position) = f.position {
+                        position_here(at, &f.name, position)?;
                     }
                     at = advance(at, f.kind.bits());
                     seen.push(Known::field(&f.name, &f.kind));
@@ -533,7 +533,7 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
 fn written(segments: &[Segment]) -> Result<(), Invalid> {
     let derived = crate::derived::derivations(segments);
     let framing = segments.iter().flat_map(|seg| match seg {
-        Segment::Block(fields) => fields.iter().filter(|f| f.framing).collect(),
+        Segment::Block(fields) => fields.iter().filter(|f| f.stated).collect(),
         _ => Vec::new(),
     });
     for f in framing {

@@ -84,7 +84,8 @@ fn switch_with_a_fixed_footprint() {
             ]),
             switch_in("args", Discriminant::Field(Expr::name("command")), "Args", 8),
             Segment::Block(vec![
-                Field::new("payload", Kind::Scalar(Scalar::U(32))).with_stated(Stated::byte(12)),
+                Field::new("payload", Kind::Scalar(Scalar::U(32)))
+                    .with_position(Position::byte(12)),
             ]),
         ],
     );
@@ -97,7 +98,8 @@ fn switch_with_a_fixed_footprint() {
             Segment::Block(vec![field("command", Kind::Scalar(Scalar::U(8)))]),
             switch("args", Discriminant::Field(Expr::name("command")), "Args"),
             Segment::Block(vec![
-                Field::new("payload", Kind::Scalar(Scalar::U(32))).with_stated(Stated::byte(12)),
+                Field::new("payload", Kind::Scalar(Scalar::U(32)))
+                    .with_position(Position::byte(12)),
             ]),
         ],
     );
@@ -129,7 +131,7 @@ fn switch_in_a_window_the_wire_states() {
         choice: "Value".into(),
         window: Some(Len::Field { by: Expr::name(field), cap: None, align: None }),
         doc: None,
-        stated: None,
+        position: None,
     };
     let m = msg(
         "Tlv",
@@ -172,7 +174,7 @@ fn switch_in_a_window_the_wire_states() {
                 choice: "Value".into(),
                 window: Some(Len::Field { by: Expr::name("len"), cap: None, align: None }),
                 doc: None,
-                stated: None,
+                position: None,
             },
         ],
     );
@@ -188,7 +190,7 @@ fn switch_in_a_window_the_wire_states() {
                 choice: "Value".into(),
                 window: Some(Len::Fill),
                 doc: None,
-                stated: None,
+                position: None,
             },
         ],
     );

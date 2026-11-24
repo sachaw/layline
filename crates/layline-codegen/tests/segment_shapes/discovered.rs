@@ -16,7 +16,7 @@ fn the_string_shapes_are_extents_not_features() {
             vec![
                 Segment::Block(vec![field("n", Kind::Scalar(Scalar::U(16)))]),
                 Segment::Value {
-                    stated: None,
+                    position: None,
                     name: "name".into(),
                     kind: Kind::Text { len: len.clone(), codec: None },
                     doc: None,
@@ -37,7 +37,7 @@ fn a_length_prefix_must_name_an_earlier_field() {
     let m = msg(
         "Record",
         vec![Segment::Value {
-            stated: None,
+            position: None,
             name: "name".into(),
             kind: Kind::Text {
                 len: Len::Field { by: Expr::name("nowhere"), cap: None, align: None },
@@ -111,7 +111,7 @@ fn a_value_segment_rejects_a_solved_kind() {
             name: "n".into(),
             kind: Kind::Scalar(Scalar::U(32)),
             doc: None,
-            stated: None,
+            position: None,
         }],
     );
     assert!(validate_message(&m).is_err());

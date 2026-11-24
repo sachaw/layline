@@ -111,7 +111,7 @@ fn segment_word(seg: &Segment) -> &'static str {
 /// `alone` is true for a segment of its own, which may be a `#[var]` value.
 fn bit_field(f: &Field, alone: bool) -> Result<(), Invalid> {
     field_names(f)?;
-    if f.framing {
+    if f.stated {
         return Err(Invalid::field(
             &f.name,
             String::from(

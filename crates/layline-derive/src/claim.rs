@@ -4,7 +4,7 @@ use proc_macro2::Span;
 use syn::LitInt;
 use syn::spanned::Spanned;
 
-use layline_codegen::{CoverFrom, CoverTo, Coverage, Endian, Stated, StatedUnit};
+use layline_codegen::{CoverFrom, CoverTo, Coverage, Endian, Position, PositionUnit};
 
 /// A reference to another field of this struct.
 ///
@@ -26,12 +26,12 @@ impl Ref {
 /// Numbered as declared, so MSB0 under `order = msb`.
 #[derive(Debug, Clone, Copy)]
 pub struct At {
-    pub stated: Stated,
+    pub position: Position,
     pub span: Span,
 }
 
 /// `natural` is the unit suggested when the attribute gives a bare number.
-pub(crate) fn at_attr(attr: &syn::Attribute, name: &str, natural: StatedUnit) -> syn::Result<At> {
+pub(crate) fn at_attr(attr: &syn::Attribute, name: &str, natural: PositionUnit) -> syn::Result<At> {
     let span = attr.meta.span();
     if let Ok(lit) = attr.parse_args::<LitInt>() {
         return Err(syn::Error::new(span, bare_at_needs_a_unit(&lit, natural)));
@@ -40,9 +40,9 @@ pub(crate) fn at_attr(attr: &syn::Attribute, name: &str, natural: StatedUnit) ->
     let mut at: Option<At> = None;
     attr.parse_nested_meta(|meta| {
         let unit = if meta.path.is_ident("bit") {
-            StatedUnit::Bit
+            PositionUnit::Bit
         } else if meta.path.is_ident("byte") {
-            StatedUnit::Byte
+            PositionUnit::Byte
         } else {
             return Err(meta
                 .error(format!("field `{name}`: expected `#[at(bit = N)]` or `#[at(byte = N)]`")));
@@ -53,7 +53,7 @@ pub(crate) fn at_attr(attr: &syn::Attribute, name: &str, natural: StatedUnit) ->
             );
         }
         let pos = meta.value()?.parse::<LitInt>()?.base10_parse()?;
-        at = Some(At { stated: Stated::new(unit, pos), span });
+        at = Some(At { position: Position::new(unit, pos), span });
         Ok(())
     })?;
 
@@ -65,7 +65,7 @@ pub(crate) fn at_attr(attr: &syn::Attribute, name: &str, natural: StatedUnit) ->
     })
 }
 
-fn bare_at_needs_a_unit(lit: &LitInt, natural: StatedUnit) -> String {
+fn bare_at_needs_a_unit(lit: &LitInt, natural: PositionUnit) -> String {
     let n = lit.base10_digits();
     format!("`#[at({n})]` needs a unit. Write `#[at({} = {n})]`", natural.name(),)
 }

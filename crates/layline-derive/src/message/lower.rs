@@ -27,7 +27,7 @@ fn solved_field(
     name: &str,
     kind: &Kind,
     claims: &Claims,
-    stated: Option<layline_codegen::Stated>,
+    position: Option<layline_codegen::Position>,
     p: &Parsed,
 ) -> syn::Result<Field> {
     let width = (kind.bits().unwrap_or(0) / 8) as usize;
@@ -50,7 +50,7 @@ fn solved_field(
         .transpose()?;
     let mut field = Field::new(name, kind.clone());
     field.range = claims.range;
-    field.stated = stated;
+    field.position = position;
     field.magic = magic;
     Ok(field)
 }
@@ -96,8 +96,9 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                 unreachable!("a bit-addressed message is lowered by `lower_bits`")
             }
             Body::Fixed { kind, claims } => {
-                let mut field = solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?;
-                field.framing = f.framing;
+                let mut field =
+                    solved_field(&f.name, kind, claims, f.position.map(|a| a.position), p)?;
+                field.stated = f.stated;
                 block.push(field);
             }
             Body::Value { kind, .. } => {
@@ -109,7 +110,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     }
                 }
                 segments.push(Segment::Value {
-                    stated: f.stated.map(|a| a.stated),
+                    position: f.position.map(|a| a.position),
                     name: f.name.clone(),
                     kind: kind.clone(),
                     doc: None,
@@ -124,7 +125,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     checks.push(var_codec_check(&f.name, ty, f.span, &p.root));
                 }
                 segments.push(Segment::Repeat {
-                    stated: f.stated.map(|a| a.stated),
+                    position: f.position.map(|a| a.position),
                     name: f.name.clone(),
                     element: element.clone(),
                     collection: *collection,
@@ -166,7 +167,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     checks.push(element_size_check(&f.name, a, &p.root));
                 }
                 segments.push(Segment::Placed {
-                    stated: f.stated.map(|a| a.stated),
+                    position: f.position.map(|a| a.position),
                     name: f.name.clone(),
                     kind: kind.clone(),
                     at: at.expr.clone(),
@@ -183,7 +184,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
             Body::Checksum { repr, algorithm, over, .. } => {
                 flush(&mut segments, &mut block);
                 segments.push(Segment::Checksum {
-                    stated: f.stated.map(|a| a.stated),
+                    position: f.position.map(|a| a.position),
                     name: f.name.clone(),
                     repr: *repr,
                     algorithm: algorithm.clone(),
@@ -194,7 +195,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
             Body::Switch { on, ty, window } => {
                 flush(&mut segments, &mut block);
                 segments.push(Segment::Switch {
-                    stated: f.stated.map(|a| a.stated),
+                    position: f.position.map(|a| a.position),
                     name: f.name.clone(),
                     on: match on {
                         SwitchOn::Field(on) => Discriminant::Field(on.expr.clone()),
@@ -242,7 +243,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                 let otherwise = if *present { Presence::Prefix } else { Presence::Remaining };
                 segments.push(Segment::Opt {
                     when: when.as_ref().map_or(otherwise, WhenSpec::presence),
-                    field: solved_field(&f.name, kind, claims, f.stated.map(|a| a.stated), p)?,
+                    field: solved_field(&f.name, kind, claims, f.position.map(|a| a.position), p)?,
                 });
             }
         }

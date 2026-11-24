@@ -256,7 +256,7 @@ fn arm_body(v: &syn::Variant) -> syn::Result<Vec<Segment>> {
 
     let Some(attr) = bytes else {
         return Ok(vec![Segment::Value {
-            stated: None,
+            position: None,
             name: String::from("inner"),
             kind: Kind::Msg { ty: crate::attr::spelled(ty), boxed, with: Vec::new() },
             doc: None,
