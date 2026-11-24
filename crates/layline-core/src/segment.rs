@@ -591,14 +591,37 @@ pub trait Choice: Sized {
     /// The deepest this catalogue decodes, as [`Message::MAX_DEPTH`].
     const MAX_DEPTH: u32 = crate::MAX_NESTING_DEPTH;
 
+    /// Values the holder passes in, or `()` if there are none: the holder's fields an arm reads,
+    /// as `#[message(needs(..))]` on the enum declares them.
+    type Ctx;
+
+    /// The parameters, in declaration order.
+    const PARAMS: &'static [crate::table::ParamDef<'static>] = &[];
+
     /// Decode the arm `discriminant` selects. Returns the value and the bytes consumed.
     ///
     /// # Errors
     ///
     /// Any error from the arm, or [`Malformed`](crate::ParseError::Malformed) for an unlisted
     /// discriminant when there is no `#[other]` arm.
-    fn decode_with(discriminant: i64, bytes: &[u8]) -> Result<(Self, usize), crate::ParseError> {
-        Self::decode_with_nested(discriminant, bytes, 0)
+    fn decode_with(
+        discriminant: i64,
+        bytes: &[u8],
+        ctx: Self::Ctx,
+    ) -> Result<(Self, usize), crate::ParseError> {
+        Self::decode_with_nested(discriminant, bytes, 0, ctx)
+    }
+
+    /// [`decode_with`](Self::decode_with) for a catalogue with no parameters.
+    ///
+    /// # Errors
+    ///
+    /// As [`decode_with`](Self::decode_with).
+    fn decode(discriminant: i64, bytes: &[u8]) -> Result<(Self, usize), crate::ParseError>
+    where
+        Self: Choice<Ctx = ()>,
+    {
+        Self::decode_with(discriminant, bytes, ())
     }
 
     /// [`decode_with`](Self::decode_with) at nesting depth `depth`.
@@ -611,6 +634,7 @@ pub trait Choice: Sized {
         discriminant: i64,
         bytes: &[u8],
         depth: u32,
+        ctx: Self::Ctx,
     ) -> Result<(Self, usize), crate::ParseError>;
 
     /// This arm's discriminant, or `None` for the `#[other]` arm. Encode writes it into the parent.
@@ -631,22 +655,48 @@ pub trait Choice: Sized {
     /// Read by a holder, since a derive cannot see a field's type.
     const ENCODE_FALLIBLE: bool = false;
 
-    /// Append the arm's body to `out`.
+    /// Append the arm's body to `out`. Parameters belong to the holder and are not written.
     ///
     /// # Errors
     ///
     /// As [`Message::encode_into_with`].
-    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::EncodeError>;
+    fn encode_into_with<B: crate::Buffer>(
+        &self,
+        out: &mut B,
+        ctx: Self::Ctx,
+    ) -> Result<(), crate::EncodeError>;
 
-    /// [`encode_into`](Self::encode_into) into a new vector, as [`Message::encode_with`].
+    /// [`encode_into_with`](Self::encode_into_with) for a catalogue with no parameters.
+    ///
+    /// # Errors
+    ///
+    /// As [`encode_into_with`](Self::encode_into_with).
+    fn encode_into<B: crate::Buffer>(&self, out: &mut B) -> Result<(), crate::EncodeError>
+    where
+        Self: Choice<Ctx = ()>,
+    {
+        self.encode_into_with(out, ())
+    }
+
+    /// [`encode_into_with`](Self::encode_into_with) into a new vector, as
+    /// [`Message::encode_with`].
     #[cfg(feature = "alloc")]
-    fn encode(&self) -> Result<crate::__private::Vec<u8>, crate::EncodeError> {
-        crate::buffer::to_vec(|out| self.encode_into(out))
+    fn encode_with(&self, ctx: Self::Ctx) -> Result<crate::__private::Vec<u8>, crate::EncodeError> {
+        crate::buffer::to_vec(|out| self.encode_into_with(out, ctx))
+    }
+
+    /// [`encode_with`](Self::encode_with) for a catalogue with no parameters.
+    #[cfg(feature = "alloc")]
+    fn encode(&self) -> Result<crate::__private::Vec<u8>, crate::EncodeError>
+    where
+        Self: Choice<Ctx = ()>,
+    {
+        self.encode_with(())
     }
 
     /// The audit records for every arm.
     fn audit() -> crate::audit::ChoiceRecords<'static> {
-        crate::audit::choice(Self::NAME, Self::ARMS).covering(Self::COVERED)
+        crate::audit::choice(Self::NAME, Self::ARMS).covering(Self::COVERED).params(Self::PARAMS)
     }
 }
 

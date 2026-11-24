@@ -79,6 +79,11 @@ pub(super) fn read_only(seen: &Seen<'_>, at: &crate::Expr, what: &str) -> Result
 /// parameter, a field of this message, a field of a nested layout in it, or a parameter.
 pub(super) fn stated_with(seen: &Seen<'_>, kind: &Kind) -> Result<(), Invalid> {
     let Kind::Msg { with, .. } = kind else { return Ok(()) };
+    stated_args(seen, with)
+}
+
+/// Checks a `#[with(..)]` list, of a nested message or a switch's catalogue.
+pub(super) fn stated_args(seen: &Seen<'_>, with: &[alloc::string::String]) -> Result<(), Invalid> {
     for arg in with {
         if resolve(seen, arg, Reads::Flag).is_err() {
             resolve(seen, arg, Reads::Number)?;

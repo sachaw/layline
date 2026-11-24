@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use super::Derive;
 
-use super::{Endian, Expr, Segment};
+use super::{Endian, Expr, Param, Segment};
 
 /// What a switch selects on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub enum Discriminant {
 
 /// One arm of a switch.
 ///
-/// An arm's fields can refer only to each other.
+/// An arm's fields can refer to each other and to the choice's [`needs`](ChoiceDef::needs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Arm {
@@ -83,6 +83,16 @@ pub struct ChoiceDef {
     /// The deepest the choice decodes, as `Choice::MAX_DEPTH`. `None` is
     /// `layline::MAX_NESTING_DEPTH`.
     pub depth: Option<u32>,
+    /// The parameters, which generate a `<Name>Ctx` struct used as `Choice::Ctx`.
+    ///
+    /// The holder passes them with [`Segment::Switch::with`], and an arm reads them as it would
+    /// a field: in an expression, or passed on to a message it holds with
+    /// [`Kind::Msg::with`](crate::Kind::Msg). So an arm can take the holder's length, or its
+    /// mask, count and byte order.
+    pub needs: Vec<Param>,
+    /// The `bool` [parameter](Self::needs) that picks the byte order of the arms' own fields:
+    /// big-endian when `true`, as [`MessageDef::endian_from`](crate::MessageDef::endian_from).
+    pub endian_from: Option<String>,
 }
 
 impl ChoiceDef {
@@ -98,7 +108,21 @@ impl ChoiceDef {
             doc: None,
             derives: Vec::new(),
             depth: None,
+            needs: Vec::new(),
+            endian_from: None,
         }
+    }
+
+    /// Sets the parameters.
+    #[must_use]
+    pub fn with_needs(self, needs: Vec<Param>) -> Self {
+        Self { needs, ..self }
+    }
+
+    /// Picks the arms' byte order from the `bool` parameter `param`: big-endian when `true`.
+    #[must_use]
+    pub fn with_endian_from(self, param: &str) -> Self {
+        Self { endian_from: Some(String::from(param)), ..self }
     }
 
     /// Sets the deepest the choice decodes, as `Choice::MAX_DEPTH`.

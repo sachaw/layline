@@ -357,13 +357,13 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
     let at = seek;
 
     if let Some((_, wspan)) = &with
-        && !matches!(kind, Some((KindWord::Message, _)))
+        && !matches!(kind, Some((KindWord::Message | KindWord::Switch(_), _)))
     {
         return Err(syn::Error::new(
             *wspan,
             format!(
-                "field `{name}`: `#[with(..)]` needs a `#[message]` field. \
-                 Add `#[message]`, or remove `#[with]`"
+                "field `{name}`: `#[with(..)]` needs a `#[message]` or `#[switch]` field. \
+                 Add one, or remove `#[with]`"
             ),
         ));
     }

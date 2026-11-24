@@ -41,7 +41,7 @@ impl Walk<'_> {
     ) -> Result<(), Error> {
         let i64 = self.root.prelude().i64;
         let (root, owner) = (self.root, self.owner);
-        let Segment::Switch { name: field, on, choice, window, doc, .. } = seg else {
+        let Segment::Switch { name: field, on, choice, window, doc, with, .. } = seg else {
             unreachable!("just matched")
         };
         let ident = ident(field);
@@ -77,6 +77,11 @@ impl Walk<'_> {
         }
         self.rows.push(Row::new(field, span).decoded_by(Some(choice)));
 
+        let ctx = self.ctx_of(&quote!(<#cty as #root::Choice>::Ctx), with, own)?;
+        let (read_ctx, write_ctx) = match ctx {
+            Some(c) => (c.decode, c.encode),
+            None => (quote!(()), quote!(())),
+        };
         let disc = match on {
             Discriminant::Field(on) => self.env.number(owner, "#[switch]", on)?,
             Discriminant::BodyLength => match window {
@@ -96,7 +101,7 @@ impl Walk<'_> {
         match window {
             None => self.parse_steps.extend(quote! {
                 let (#ident, __used) =
-                    <#cty as #root::Choice>::decode_with_nested(#disc, &__body[__at..], __depth)
+                    <#cty as #root::Choice>::decode_with_nested(#disc, &__body[__at..], __depth, #read_ctx)
                         .map_err(|__err| __err.rebased(__at))?;
                 __at += __used;
             }),
@@ -107,7 +112,7 @@ impl Walk<'_> {
                 };
                 let arm = quote! {
                     let (__e, __used) =
-                        <#cty as #root::Choice>::decode_with_nested(#disc, __body, __depth)?;
+                        <#cty as #root::Choice>::decode_with_nested(#disc, __body, __depth, #read_ctx)?;
                     __at += __used;
                 };
                 let stated = matches!(len, Len::Field { .. } | Len::Prefix { .. });
@@ -166,7 +171,7 @@ impl Walk<'_> {
         self.byte_steps.extend(quote! {
             #reserve
             let __chosen = out.len();
-            #root::Choice::encode_into(&#held, out)?;
+            #root::Choice::encode_into_with(&#held, out, #write_ctx)?;
             #stamp
             #filled
             #agree

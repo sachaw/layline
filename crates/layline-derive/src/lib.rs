@@ -370,13 +370,14 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// - `#[message(endian = le | be)]`: byte order. Default `le`.
 /// - `#[message(endian = needs(p))]`: the byte order is the `bool` parameter `p`, big-endian when
-///   `true`. Decode and encode pick it once per message. The message's own fixed fields follow it,
-///   counts and checksums included. A nested layout keeps its own `endian`, and an integer
-///   `#[magic]` wider than a byte is refused: write its bytes.
+///   `true`. Decode and encode pick it once per message, or per arm on an enum. The type's own
+///   fixed fields follow it, counts and checksums included. A nested layout keeps its own
+///   `endian`, and an integer `#[magic]` wider than a byte is refused: write its bytes.
 /// - `#[message(bits)]`, `#[message(bits, order = lsb | msb)]`: all fields are bit fields, padded
 ///   with zero bits to a whole byte. Default order `lsb`.
-/// - `#[message(needs(a: u8, b: bool))]`: integer and `bool` parameters the parent message
-///   supplies. They become `Message::Ctx`, a generated `<Name>Ctx` struct. The holder writes a
+/// - `#[message(needs(a: u8, b: bool))]`: integer and `bool` parameters the holder supplies.
+///   They become `Message::Ctx`, or `Choice::Ctx` on an enum, a generated `<Name>Ctx` struct. An
+///   enum's arms read them as fields, and pass them on with `#[with]`. The holder writes a
 ///   parameter, so encode cannot derive it: encode returns `EncodeError::Mismatch` when a
 ///   `#[count]`, `#[len]`, `#[switch]` or `#[when]` it drives disagrees with the value.
 /// - `#[message(depth = N)]`: decode refuses this type nested more than `N` messages and
@@ -419,8 +420,10 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - `#[var]`: a `VarCodec` value, whose size is read from the wire.
 /// - `#[text]`, `#[text(Codec)]`: a `String`, as UTF-8 or through the `TextCodec` `Codec`.
 /// - `#[message]`: a nested `Message`, boxed or not.
-/// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's `needs`: integers,
-///   `bool`s, fields of a nested layout (`hdr.f`) or parameters. Use with `#[message]`.
+/// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's or the switch's
+///   enum's `needs`: integers, `bool`s, fields of a nested layout (`hdr.f`) or parameters. Use
+///   with `#[message]` or `#[switch]`. JEL's DW payload is
+///   `#[switch(payload_type)] #[with(mask, num_elements, flags.big_endian)] payload: Payload`.
 /// - `#[switch(e)]`: an enum whose variant the value of `e` selects. `#[switch(..)]` selects by
 ///   the remaining length.
 /// - `#[when(c)]`: an `Option<T>` present when the condition `c` holds. `#[when(flags & MASK)]`,
@@ -496,6 +499,9 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   layout.
 /// - `#[other]`: a one-field variant for every unlisted discriminant. It holds `Vec<u8>`, or
 ///   `[u8; N]` in a fixed-size enum.
+/// - `#[with(a, b)]`: the enum's parameters, or other names an arm can read, passed in order as
+///   the payload message's `needs`. Kaitai's `rfextgeo_ext(len)` is
+///   `#[value(1)] #[with(len)] RfExtGeo(RfExtGeo)` in an enum that `needs(len: u16)`.
 ///
 /// ```
 /// # use layline::{Layout, Message};

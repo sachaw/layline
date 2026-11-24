@@ -26,11 +26,7 @@ fn refuse_misplaced_on_arm(v: &syn::Variant) -> syn::Result<()> {
                 "variant `{}`: `#[message(..)]` belongs on the enum. Move it above the enum",
                 v.ident,
             ),
-            "with" => format!(
-                "variant `{}`: `#[with(..)]` does not apply to a variant. \
-                 Wrap the message in a `#[derive(Message)]` struct and use that struct as the arm",
-                v.ident,
-            ),
+            "with" => continue,
             other => format!(
                 "variant `{}`: `#[{other}]` belongs on a field, not a variant. \
                  Move it to a field of the arm's type",
@@ -70,26 +66,6 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let MessageAttr { endian, endian_from, root, closed, bits, needs, depth } =
         container_attr(input)?;
-    if let Some(p) = endian_from {
-        return Err(syn::Error::new(
-            p.span(),
-            format!(
-                "`{}`: an enum takes no parameters to read its byte order from. \
-                 Write `endian = le` or `endian = be`, or move `needs` to an arm's type",
-                input.ident
-            ),
-        ));
-    }
-    if let Some((_, span)) = needs {
-        return Err(syn::Error::new(
-            span,
-            format!(
-                "`{}`: `needs` does not apply to an enum. \
-                 Put `#[message(needs(..))]` on an arm's type",
-                input.ident
-            ),
-        ));
-    }
     if let Some((_, span)) = bits {
         return Err(syn::Error::new(
             span,
@@ -153,6 +129,21 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
                 }
                 seen.push((value, lit.span()));
                 arms.push(Arm::new(value, &crate::attr::name(&v.ident), arm_body(v)?));
+                if let Some(attr) = v.attrs.iter().find(|a| a.path().is_ident("with"))
+                    && !matches!(
+                        arms.last().map(|a| a.body.as_slice()),
+                        Some([Segment::Value { .. }])
+                    )
+                {
+                    return Err(syn::Error::new(
+                        attr.meta.span(),
+                        format!(
+                            "variant `{}`: `#[with(..)]` passes parameters to a message, and this \
+                             arm holds none. Remove `#[with]`",
+                            v.ident,
+                        ),
+                    ));
+                }
             }
         }
     }
@@ -171,7 +162,12 @@ pub(super) fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     }
 
-    let mut choice = ChoiceDef::new(&crate::attr::name(&input.ident), arms).with_endian(endian);
+    let mut choice = ChoiceDef::new(&crate::attr::name(&input.ident), arms)
+        .with_endian(endian)
+        .with_needs(needs.map(|(params, _)| params).unwrap_or_default());
+    if let Some(p) = &endian_from {
+        choice = choice.with_endian_from(&crate::attr::name(p));
+    }
     if let Some(depth) = depth {
         choice = choice.with_depth(depth);
     }
@@ -259,10 +255,19 @@ fn arm_body(v: &syn::Variant) -> syn::Result<Vec<Segment>> {
     }
 
     let Some(attr) = bytes else {
+        let with = match v.attrs.iter().find(|a| a.path().is_ident("with")) {
+            Some(attr) => {
+                crate::message::attrs::parse_with(attr, &format!("variant `{}`", v.ident))?
+                    .into_iter()
+                    .map(|r| r.name)
+                    .collect()
+            }
+            None => Vec::new(),
+        };
         return Ok(vec![Segment::Value {
             position: None,
             name: String::from("inner"),
-            kind: Kind::Msg { ty: crate::attr::spelled(ty), boxed, with: Vec::new() },
+            kind: Kind::Msg { ty: crate::attr::spelled(ty), boxed, with },
             doc: None,
         }]);
     };

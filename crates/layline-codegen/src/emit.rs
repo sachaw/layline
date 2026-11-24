@@ -176,7 +176,7 @@ fn emit_source(module: &Module, audit: &mut String) -> Result<String, Error> {
             Item::Dispatch(d) => emit_dispatch(d, derives, root)?,
             Item::Choice(c) => {
                 let (code, arms) = emit_choice(c, derives, root)?;
-                audit.push_str(&crate::audit::choice(&c.name, &arms));
+                audit.push_str(&crate::audit::choice(&c.name, &c.needs, &arms));
                 code
             }
             Item::Message(m) => {
@@ -229,6 +229,8 @@ mod tests {
             items: vec![
                 Item::Choice(ChoiceDef {
                     depth: None,
+                    needs: Vec::new(),
+                    endian_from: None,
                     name: "VelocityForm".into(),
                     endian: Endian::Le,
                     arms: vec![
@@ -268,6 +270,7 @@ mod tests {
                         choice: "VelocityForm".into(),
                         window: None,
                         doc: None,
+                        with: Vec::new(),
                     }],
                     doc: None,
                     derives: Vec::new(),
@@ -291,6 +294,8 @@ mod tests {
         let module = Module {
             items: vec![Item::Choice(ChoiceDef {
                 depth: None,
+                needs: Vec::new(),
+                endian_from: None,
                 name: "Body".into(),
                 endian: Endian::Le,
                 arms: vec![
@@ -504,6 +509,8 @@ mod tests {
             items: vec![
                 Item::Choice(ChoiceDef {
                     depth: None,
+                    needs: Vec::new(),
+                    endian_from: None,
                     name: "Body".into(),
                     endian: Endian::Le,
                     arms: vec![Arm::new(
@@ -532,6 +539,7 @@ mod tests {
                             choice: "Body".into(),
                             window: None,
                             doc: None,
+                            with: Vec::new(),
                         },
                         Segment::Block(vec![Field::new("trailer", Kind::Scalar(Scalar::U(8)))]),
                     ],

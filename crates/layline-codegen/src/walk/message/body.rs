@@ -207,14 +207,29 @@ pub(super) fn walk_segments(
         }
     }
 
-    for (_, d) in &w.derived {
-        if let Derived::ArmLen { of, .. } = d {
+    let measured: Vec<String> = w
+        .derived
+        .iter()
+        .filter_map(|(_, d)| match d {
+            Derived::ArmLen { of, .. } => Some(of.clone()),
+            _ => None,
+        })
+        .collect();
+    for of in &measured {
+        {
             let arm = arm_ident(of);
             let held = own.get(of);
+            let ctx = match segments.iter().find(|s| s.name() == Some(of.as_str())) {
+                Some(Segment::Switch { choice, with, .. }) if !with.is_empty() => {
+                    let cty = crate::walk::path(choice);
+                    w.ctx_encode(&quote!(<#cty as #root::Choice>::Ctx), with, own)?
+                }
+                _ => quote!(()),
+            };
             w.byte_steps.extend(quote! {
                 let #arm = {
                     let __mark = out.len();
-                    let __wrote = #root::Choice::encode_into(&#held, out);
+                    let __wrote = #root::Choice::encode_into_with(&#held, out, #ctx);
                     let __n = out.len() - __mark;
                     out.rewind(__mark);
                     __wrote?;

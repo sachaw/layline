@@ -39,6 +39,7 @@ fn switch(name: &str, on: Discriminant, ty: &str) -> Segment {
         window: None,
         doc: None,
         position: None,
+        with: Vec::new(),
     }
 }
 
@@ -50,6 +51,7 @@ fn switch_in(name: &str, on: Discriminant, ty: &str, n: usize) -> Segment {
         window: Some(Len::Bytes(n)),
         doc: None,
         position: None,
+        with: Vec::new(),
     }
 }
 

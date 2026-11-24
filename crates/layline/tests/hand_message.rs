@@ -102,7 +102,7 @@ fn the_hand_written_refusal_is_the_parents_refusal() {
         Err(ParseError::Short { need_bytes: 6, got_bytes: 2, at: 1 })
     );
     assert_eq!(
-        Body::decode_with(1, &[9]),
+        Body::decode(1, &[9]),
         Err(ParseError::Short { need_bytes: 10, got_bytes: 1, at: 0 }),
         "`decode_with` returns the arm's own error, with `at` counted from the arm's first byte"
     );

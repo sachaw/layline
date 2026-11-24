@@ -180,15 +180,16 @@ pub enum Arms {
 }
 
 #[test]
-fn needs_on_a_catalogue_of_arms() {
+fn a_parameter_passed_to_an_arm_with_no_message() {
     refused(
         r#"#[derive(Message)]
 #[message(needs(stride: u8), closed)]
 pub enum Body {
     #[value(1)]
+    #[with(stride)]
     A(u8),
 }"#,
-        "`Body`: `needs` does not apply to an enum",
+        "variant `A`: `#[with(..)]` passes parameters to a message, and this arm holds none",
     );
 }
 

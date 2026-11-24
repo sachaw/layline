@@ -70,7 +70,7 @@ pub struct M {
     #[with(n)]
     pub items: Vec<u8>,
 }"#,
-        "field `items`: `#[with(..)]` needs a `#[message]` field",
+        "field `items`: `#[with(..)]` needs a `#[message]` or `#[switch]` field",
     );
 }
 
@@ -155,14 +155,14 @@ pub struct M {
 }
 
 #[test]
-fn a_byte_order_from_a_parameter_on_an_enum() {
+fn a_byte_order_from_a_missing_parameter_on_an_enum() {
     refused(
         r#"#[derive(Message)]
-#[message(endian = needs(big))]
+#[message(endian = needs(big), closed)]
 pub enum Body {
     #[value(1)] A(u16),
 }"#,
-        "`Body`: an enum takes no parameters to read its byte order from",
+        "the byte order reads `big`, which is not a parameter",
     );
 }
 

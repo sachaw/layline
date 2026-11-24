@@ -140,7 +140,7 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
             crate::attr::once_attr(&mut a.when, attr, &owner, || parse_when(attr, name))?;
         } else if path.is_ident("with") {
             crate::attr::once_attr(&mut a.with, attr, &owner, || {
-                Ok((parse_with(attr, name)?, aspan))
+                Ok((parse_with(attr, &format!("field `{name}`"))?, aspan))
             })?;
         } else if path.is_ident("checksum") {
             set_kind(&mut a.kind, KindWord::Checksum(parse_checksum(attr, name)?), aspan, name)?;
@@ -466,11 +466,12 @@ fn unknown_key(name: &str, path: &syn::Path, keys: &str) -> String {
     }
 }
 
-/// `#[with(a, b)]`: one earlier field per parameter of the nested message, in order.
-fn parse_with(attr: &syn::Attribute, name: &str) -> syn::Result<Vec<Ref>> {
+/// `#[with(a, b)]`: one earlier field per parameter of the nested message, in order. `owner`
+/// starts a refusal: "field `f`" or "variant `V`".
+pub(super) fn parse_with(attr: &syn::Attribute, owner: &str) -> syn::Result<Vec<Ref>> {
     let shape = || {
         format!(
-            "field `{name}`: `#[with(..)]` takes one earlier field name per parameter, \
+            "{owner}: `#[with(..)]` takes one earlier field name per parameter, \
              such as `#[with(a, b)]` or `#[with(hdr.n)]`"
         )
     };

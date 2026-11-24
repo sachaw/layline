@@ -97,6 +97,7 @@ impl ::layline::Message for Object {
                     })?,
                 &__body[__at..],
                 __depth,
+                (),
             )
             .map_err(|__err| __err.rebased(__at))?;
         __at += __used;
@@ -155,7 +156,7 @@ impl ::layline::Message for Object {
                 .encode_in::<__O>()?,
         )?;
         let __chosen = out.len();
-        ::layline::Choice::encode_into(&self.body, out)?;
+        ::layline::Choice::encode_into_with(&self.body, out, ())?;
         if ::layline::Choice::discriminant(&self.body).is_none() {
             let __stated = match Some(
                 match ::layline::Choice::discriminant(&self.body) {
@@ -255,6 +256,7 @@ pub struct __BodyBlock0 {
 }
 impl ::layline::Choice for Body {
     const NAME: &'static str = "Body";
+    type Ctx = ();
     /// The arms in declaration order, open arm last, each with its value and segment table.
     ///
     /// Positions count from the arm's first bit.
@@ -311,6 +313,7 @@ impl ::layline::Choice for Body {
         discriminant: i64,
         body: &[u8],
         __depth: u32,
+        __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
         if __depth > <Self as ::layline::Choice>::MAX_DEPTH {
@@ -372,9 +375,10 @@ impl ::layline::Choice for Body {
             Self::ConnectionId { .. } => Some(120),
         }
     }
-    fn encode_into<__B: ::layline::Buffer>(
+    fn encode_into_with<__B: ::layline::Buffer>(
         &self,
         out: &mut __B,
+        __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
         type __O = ::layline::__private::Be;
         match self {
@@ -397,6 +401,37 @@ impl Body {
 
 `Overflow` if `out` has no room, or, when a held type refuses values, `EncodeError` naming that too.*/
     #[inline]
+    pub fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        ctx: <Self as ::layline::Choice>::Ctx,
+    ) -> ::core::result::Result<
+        (),
+        ::layline::__private::Buffered<{ <Body as ::layline::Choice>::ENCODE_FALLIBLE }>,
+    > {
+        <::layline::__private::Fallibility<
+            { <Body as ::layline::Choice>::ENCODE_FALLIBLE },
+        > as ::layline::__private::Buffers>::finish(
+            <Self as ::layline::Choice>::encode_into_with(self, out, ctx),
+        )
+    }
+    ::layline::__private::alloc_only! {
+        #[doc =
+        "The wire bytes, in a new vector.\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse."]
+        #[inline] pub fn encode_with(& self, ctx : < Self as ::layline::Choice > ::Ctx)
+        -> ::layline::__private::Encoded < ::layline::__private::Vec <
+        ::core::primitive::u8 >, { < Body as ::layline::Choice > ::ENCODE_FALLIBLE } > {
+        < ::layline::__private::Fallibility < { < Body as ::layline::Choice >
+        ::ENCODE_FALLIBLE } > as ::layline::__private::Encodes <
+        ::layline::__private::Vec < ::core::primitive::u8 > >> ::finish(< Self as
+        ::layline::Choice > ::encode_with(self, ctx)) }
+    }
+    /**Append the wire bytes to `out`.
+
+# Errors
+
+`Overflow` if `out` has no room, or, when a held type refuses values, `EncodeError` naming that too.*/
+    #[inline]
     pub fn encode_into<__B: ::layline::Buffer>(
         &self,
         out: &mut __B,
@@ -407,7 +442,7 @@ impl Body {
         <::layline::__private::Fallibility<
             { <Body as ::layline::Choice>::ENCODE_FALLIBLE },
         > as ::layline::__private::Buffers>::finish(
-            <Self as ::layline::Choice>::encode_into(self, out),
+            <Self as ::layline::Choice>::encode_into_with(self, out, ()),
         )
     }
     ::layline::__private::alloc_only! {
@@ -418,7 +453,7 @@ impl Body {
         ::layline::Choice > ::ENCODE_FALLIBLE } > { < ::layline::__private::Fallibility <
         { < Body as ::layline::Choice > ::ENCODE_FALLIBLE } > as
         ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
-        > >> ::finish(< Self as ::layline::Choice > ::encode(self)) }
+        > >> ::finish(< Self as ::layline::Choice > ::encode_with(self, ())) }
     }
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -745,7 +780,7 @@ impl ::layline::Message for NullArray {
         out.push(&[::core::primitive::u8::from(self.items.is_some())])?;
         if let Some(items) = &self.items {
             {
-                let __len: ::core::primitive::usize = (items).len();
+                let __len: ::core::primitive::usize = (*items).len();
                 let __v = ::core::primitive::i64::try_from(__len)
                     .unwrap_or(::core::primitive::i64::MAX);
                 ::layline::EncodeError::fit::<i16>("items", __v, 0)?;

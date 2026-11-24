@@ -46,11 +46,13 @@ pub fn message(input: &DeriveInput) -> TokenStream {
             #[automatically_derived]
             impl #root::Choice for #ident {
                 const NAME: &'static ::core::primitive::str = "";
+                type Ctx = ();
                 const ARMS: &'static [#root::table::ArmDef<'static>] = &[];
                 fn decode_with_nested(
                     _: ::core::primitive::i64,
                     _: &[::core::primitive::u8],
                     _: ::core::primitive::u32,
+                    _: (),
                 ) -> ::core::result::Result<(Self, ::core::primitive::usize), #root::ParseError>
                 {
                     ::core::unimplemented!()
@@ -58,10 +60,11 @@ pub fn message(input: &DeriveInput) -> TokenStream {
                 fn discriminant(&self) -> ::core::option::Option<::core::primitive::i64> {
                     ::core::unimplemented!()
                 }
-                fn encode_into<__B: #root::Buffer>(
+                fn encode_into_with<__B: #root::Buffer>(
                     &self,
                     _: &mut __B,
-                ) -> ::core::result::Result<(), #root::Overflow> {
+                    _: (),
+                ) -> ::core::result::Result<(), #root::EncodeError> {
                     ::core::unimplemented!()
                 }
             }

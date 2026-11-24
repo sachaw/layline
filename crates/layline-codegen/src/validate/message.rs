@@ -45,7 +45,7 @@ pub(crate) fn validate_message(msg: &MessageDef) -> Result<(), Invalid> {
 
 /// Checks a choice: distinct arm values, and each arm a valid body.
 ///
-/// An arm cannot refer to fields outside itself.
+/// An arm refers to its own fields and the choice's parameters, and to nothing else.
 pub(crate) fn validate_choice(choice: &ChoiceDef) -> Result<(), Invalid> {
     ident("choice", &choice.name)?;
     if let Some(other) = &choice.other {
@@ -59,7 +59,11 @@ pub(crate) fn validate_choice(choice: &ChoiceDef) -> Result<(), Invalid> {
         }
         values.push(arm.value);
         borrowed(&arm.body, false)?;
-        validate_segments(&arm.body, &mut Vec::new())?;
+        let mut seen = params("choice", &choice.name, &choice.needs, &declared(&arm.body))?;
+        validate_segments(&arm.body, &mut seen)?;
+    }
+    if let Some(from) = &choice.endian_from {
+        order_param("choice", &choice.name, &choice.needs, from)?;
     }
     if choice.arms.is_empty() && choice.other.is_none() {
         return Err(Invalid::Other(format!(
@@ -119,53 +123,60 @@ fn needs(msg: &MessageDef) -> Result<Seen<'_>, Invalid> {
             msg.name
         )));
     }
+    let seen = params("message", &msg.name, &msg.needs, &declared(&msg.segments))?;
+    if let Some(from) = &msg.endian_from {
+        order_param("message", &msg.name, &msg.needs, from)?;
+    }
+    Ok(seen)
+}
+
+/// Checks the parameters of the `what` called `owner`, whose body declares `fields`, and returns
+/// them as the first names the body can refer to.
+fn params<'a>(
+    what: &str,
+    owner: &str,
+    needs: &'a [Param],
+    fields: &[&str],
+) -> Result<Seen<'a>, Invalid> {
     let mut seen: Seen<'_> = Vec::new();
-    let fields = declared(&msg.segments);
-    for Param { name, repr } in &msg.needs {
+    for Param { name, repr } in needs {
         ident("parameter", name)?;
         if seen.iter().any(|k| k.name == name.as_str()) {
             return Err(Invalid::Other(format!(
-                "message `{}` declares the parameter `{name}` twice. Rename one",
-                msg.name
+                "{what} `{owner}` declares the parameter `{name}` twice. Rename one"
             )));
         }
         if fields.contains(&name.as_str()) {
             return Err(Invalid::Other(format!(
-                "message `{}`: `{name}` is both a parameter and a field. Rename one",
-                msg.name
+                "{what} `{owner}`: `{name}` is both a parameter and a field. Rename one"
             )));
         }
         if !Kind::Scalar(*repr).is_integer() && *repr != Scalar::Bool {
             return Err(Invalid::Other(format!(
-                "message `{}`: parameter `{name}` is `{}`. A parameter must be an integer or a \
-                 `bool`",
-                msg.name,
+                "{what} `{owner}`: parameter `{name}` is `{}`. A parameter must be an integer or \
+                 a `bool`",
                 repr.primitive(),
             )));
         }
         seen.push(Known { name, kind: Kind::Scalar(*repr), param: true });
     }
-    if let Some(from) = &msg.endian_from {
-        match msg.needs.iter().find(|p| p.name == *from) {
-            Some(Param { repr: Scalar::Bool, .. }) => {}
-            Some(Param { repr, .. }) => {
-                return Err(Invalid::Other(format!(
-                    "message `{}`: the byte order reads parameter `{from}`, which is `{}`. \
-                     Declare it `{from}: bool`, true for big-endian",
-                    msg.name,
-                    repr.primitive(),
-                )));
-            }
-            None => {
-                return Err(Invalid::Other(format!(
-                    "message `{}`: the byte order reads `{from}`, which is not a parameter. \
-                     Declare it in `needs`: `needs({from}: bool)`",
-                    msg.name,
-                )));
-            }
-        }
-    }
     Ok(seen)
+}
+
+/// Checks that the byte order reads `from`, a `bool` parameter.
+fn order_param(what: &str, owner: &str, needs: &[Param], from: &str) -> Result<(), Invalid> {
+    match needs.iter().find(|p| p.name == *from) {
+        Some(Param { repr: Scalar::Bool, .. }) => Ok(()),
+        Some(Param { repr, .. }) => Err(Invalid::Other(format!(
+            "{what} `{owner}`: the byte order reads parameter `{from}`, which is `{}`. \
+             Declare it `{from}: bool`, true for big-endian",
+            repr.primitive(),
+        ))),
+        None => Err(Invalid::Other(format!(
+            "{what} `{owner}`: the byte order reads `{from}`, which is not a parameter. \
+             Declare it in `needs`: `needs({from}: bool)`",
+        ))),
+    }
 }
 
 /// Every field name the body declares.
@@ -421,8 +432,9 @@ fn validate_segments<'a>(segments: &'a [Segment], seen: &mut Seen<'a>) -> Result
                     }
                 }
             }
-            Segment::Switch { name, on, choice, window, .. } => {
+            Segment::Switch { name, on, choice, window, with, .. } => {
                 type_path(name, "the catalogue", choice)?;
+                super::names::stated_args(seen, with)?;
                 if let Discriminant::Field(on) = on {
                     expr::number(seen, on)?;
                 }

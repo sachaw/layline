@@ -132,6 +132,7 @@ fn switch_in_a_window_the_wire_states() {
         window: Some(Len::Field { by: Expr::name(field), cap: None, align: None }),
         doc: None,
         position: None,
+        with: Vec::new(),
     };
     let m = msg(
         "Tlv",
@@ -175,6 +176,7 @@ fn switch_in_a_window_the_wire_states() {
                 window: Some(Len::Field { by: Expr::name("len"), cap: None, align: None }),
                 doc: None,
                 position: None,
+                with: Vec::new(),
             },
         ],
     );
@@ -191,6 +193,7 @@ fn switch_in_a_window_the_wire_states() {
                 window: Some(Len::Fill),
                 doc: None,
                 position: None,
+                with: Vec::new(),
             },
         ],
     );

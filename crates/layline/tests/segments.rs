@@ -219,7 +219,7 @@ fn the_open_arm_has_no_discriminant_and_keeps_everything() {
     assert_eq!(Open::Known(Ping { seq: 0x0102 }).encode(), vec![0x01, 0x02]);
     let kept = Open::Unrecognised(vec![0xDE, 0xAD, 0xBE]);
     assert_eq!(kept.encode(), vec![0xDE, 0xAD, 0xBE]);
-    assert_eq!(Open::decode_with(7, &kept.encode()), Ok((kept, 3)));
+    assert_eq!(Open::decode(7, &kept.encode()), Ok((kept, 3)));
 }
 
 #[derive(Debug, Clone, PartialEq, Message)]

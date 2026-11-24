@@ -84,7 +84,7 @@ fn lower_choice(
     crate::validate::validate_choice(c).map_err(|why| Error::Invalid(c.name.clone(), why))?;
     let name = ident(&c.name);
     let skip = crate::walk::tokens::serde_skip(derives, &c.derives);
-    let mut item = Item::new(&c.name, c.endian, root, &[], skip);
+    let mut item = Item::new(&c.name, c.endian, root, &c.needs, skip);
 
     let mut variants = TokenStream::new();
     let mut decode_arms = TokenStream::new();
@@ -250,8 +250,11 @@ fn lower_choice(
     let (owner, str_ty) = (c.name.as_str(), root.prelude().primitive("str"));
     let too_deep = too_deep(&quote!(#root::Choice), root);
     let max_depth = super::max_depth(c.depth, root);
-    let parse_order = super::fixed_order(c.endian, &decode_arms, root);
-    let bytes_order = super::fixed_order(c.endian, &encode_arms, root);
+    let fixed = |body: &TokenStream| match &c.endian_from {
+        Some(_) => quote!(),
+        None => super::fixed_order(c.endian, body, root),
+    };
+    let (parse_order, bytes_order) = (fixed(&decode_arms), fixed(&encode_arms));
     let own = super::refuse::refusal(super::refuse::refuses_itself(&encode_arms), &item.via);
     let consts = super::refuse::constants(
         &own,
@@ -262,10 +265,63 @@ fn lower_choice(
         root,
     );
     let (constants, fallible) = (consts.all(), consts.fallible);
-    let inherent = super::inherent_encodes(&fallible, &quote!(#root::Choice), None, root);
+    let inherent =
+        super::inherent_encodes(&fallible, &quote!(#root::Choice), Some(!c.needs.is_empty()), root);
+    let (ctx_decl, ctx_ty, params) = if c.needs.is_empty() {
+        (quote!(), quote!(()), quote!())
+    } else {
+        let ctx_name = quote::format_ident!("{}Ctx", c.name);
+        let rows = c.needs.iter().map(|p| {
+            let (name, ty) = (p.name.as_str(), p.repr.primitive());
+            quote! { #root::table::ParamDef::new(#name, #ty), }
+        });
+        (
+            super::context_struct(&c.name, &c.needs),
+            quote!(#ctx_name),
+            quote! {
+                /// The parameters the holder supplies, in declaration order.
+                const PARAMS: &'static [#root::table::ParamDef<'static>] = &[#(#rows)*];
+            },
+        )
+    };
+    let decode = quote! {
+        #parse_order
+        #too_deep
+        let __body = body;
+        match discriminant {
+            #decode_arms
+            #decode_tail
+        }
+    };
+    let encode = quote! {
+        #bytes_order
+        match self {
+            #encode_arms
+            #encode_tail
+        }
+        #ok(())
+    };
+    let ordered = super::names_order(&decode) || super::names_order(&encode);
+    let (decode, encode, held) = match &c.endian_from {
+        Some(param) if ordered => super::held_order(
+            &name,
+            param,
+            decode,
+            encode,
+            &quote!(#root::EncodeError),
+            &quote!(#root::Choice),
+            (quote!(discriminant: #i64,), quote!(discriminant,)),
+            root,
+        ),
+        _ => (decode, encode, quote!()),
+    };
     let codec = quote! {
+        #ctx_decl
+
         impl #root::Choice for #name {
             const NAME: &'static #str_ty = #owner;
+
+            type Ctx = #ctx_ty;
 
             /// The arms in declaration order, open arm last, each with its value and segment table.
             ///
@@ -273,6 +329,8 @@ fn lower_choice(
             const ARMS: &'static [#root::table::ArmDef<'static>] = &[#(#arm_tables)*];
 
             #covered
+
+            #params
 
             #constants
 
@@ -282,14 +340,9 @@ fn lower_choice(
                 discriminant: #i64,
                 body: &[#u8],
                 __depth: #u32,
+                __ctx: Self::Ctx,
             ) -> #result<(Self, #usize), #root::ParseError> {
-                #parse_order
-                #too_deep
-                let __body = body;
-                match discriminant {
-                    #decode_arms
-                    #decode_tail
-                }
+                #decode
             }
 
             fn discriminant(&self) -> #option<#i64> {
@@ -299,21 +352,19 @@ fn lower_choice(
                 }
             }
 
-            fn encode_into<__B: #root::Buffer>(
+            fn encode_into_with<__B: #root::Buffer>(
                 &self,
                 out: &mut __B,
+                __ctx: Self::Ctx,
             ) -> #result<(), #root::EncodeError> {
-                #bytes_order
-                match self {
-                    #encode_arms
-                    #encode_tail
-                }
-                #ok(())
+                #encode
             }
         }
         impl #name {
             #inherent
         }
+
+        #held
     };
 
     Ok((ChoiceParts { variants, checks: item.checks, blocks: item.items, codec }, arm_rows))

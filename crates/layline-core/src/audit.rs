@@ -33,12 +33,13 @@ pub struct MessageRecords<'a> {
     params: &'a [ParamDef<'a>],
 }
 
-/// Audit records for a catalogue: `C`, then an `A` and a segment table per arm.
+/// Audit records for a catalogue: `C`, a `P` per parameter, then an `A` and a segment table per arm.
 #[derive(Debug, Clone, Copy)]
 pub struct ChoiceRecords<'a> {
     name: &'a str,
     arms: &'a [ArmDef<'a>],
     covered: &'a [ArmCover<'a>],
+    params: &'a [ParamDef<'a>],
 }
 
 /// Records for a field table in a container of `bits` bits. `V` reports whether the fields cover it exactly.
@@ -111,7 +112,7 @@ impl<'a> MessageRecords<'a> {
 /// Records for a catalogue's arms.
 #[must_use]
 pub fn choice<'a>(name: &'a str, arms: &'a [ArmDef<'a>]) -> ChoiceRecords<'a> {
-    ChoiceRecords { name, arms, covered: &[] }
+    ChoiceRecords { name, arms, covered: &[], params: &[] }
 }
 
 impl<'a> ChoiceRecords<'a> {
@@ -119,6 +120,12 @@ impl<'a> ChoiceRecords<'a> {
     #[must_use]
     pub fn covering(self, covered: &'a [ArmCover<'a>]) -> Self {
         Self { covered, ..self }
+    }
+
+    /// Add the parameters as `P` records.
+    #[must_use]
+    pub fn params(self, params: &'a [ParamDef<'a>]) -> Self {
+        Self { params, ..self }
     }
 }
 
@@ -355,6 +362,7 @@ impl fmt::Display for MessageRecords<'_> {
 impl fmt::Display for ChoiceRecords<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "C {}", self.name)?;
+        records(f, 'P', self.name, self.params, |w, p| write!(w, "{} {}", p.name, p.ty))?;
         for arm in self.arms {
             match arm.value {
                 Some(value) => writeln!(f, "A {} {} {value}", self.name, arm.name)?,

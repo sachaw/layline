@@ -760,7 +760,7 @@ impl ::layline::Message for Record {
         out.push(&[::core::primitive::u8::from(self.path.is_some())])?;
         if let Some(path) = &self.path {
             {
-                let __len: ::core::primitive::usize = (path).len();
+                let __len: ::core::primitive::usize = (*path).len();
                 let __v = ::core::primitive::i64::try_from(__len)
                     .unwrap_or(::core::primitive::i64::MAX);
                 ::layline::EncodeError::fit::<i16>("path", __v, 0)?;

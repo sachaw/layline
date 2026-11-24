@@ -417,6 +417,10 @@ impl Walk<'_> {
             },
         }
         let held = own.by_ref(coll);
+        let len = {
+            let plain = own.get(coll);
+            quote!(#plain.len())
+        };
         let mut each = TokenStream::new();
         if matches!(count, Count::Window(_) | Count::Terminated { .. } | Count::Fill { .. })
             && matches!(step, Step::Discovered { .. })
@@ -431,7 +435,7 @@ impl Walk<'_> {
         let (before, after) = match count {
             Count::Prefix { .. } => {
                 let p = prefix.expect("a prefix count");
-                (p.write(coll, quote!((#held).len()), root), quote!())
+                (p.write(coll, len.clone(), root), quote!())
             }
             Count::Window(Len::Prefix { .. }) => {
                 prefix.expect("a prefix length").reserve(coll, root)
@@ -451,7 +455,7 @@ impl Walk<'_> {
                 let mut checks = TokenStream::new();
                 let counts = |d: &Derived| matches!(d, Derived::Count { of, .. } if of == coll);
                 if !self.writes(counts) {
-                    checks.extend(self.agree(own, coll, quote!((#held).len()), by)?);
+                    checks.extend(self.agree(own, coll, len.clone(), by)?);
                 }
                 if let Count::Strided { stride, .. } = count {
                     let widths = |d: &Derived| matches!(d, Derived::Stride { elem, by } if elem == element && by == stride);
@@ -507,7 +511,7 @@ impl Walk<'_> {
             }
             Count::Fill { cap: Some(cap) } => {
                 let lit = Literal::usize_unsuffixed(*cap);
-                (quote! { #root::EncodeError::cap(#coll, (#held).len(), #lit)?; }, quote!())
+                (quote! { #root::EncodeError::cap(#coll, #len, #lit)?; }, quote!())
             }
             _ => (quote!(), quote!()),
         };

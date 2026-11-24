@@ -238,46 +238,75 @@ impl Walk<'_> {
     ///
     /// Each `#[with]` name is a parameter of this body or an earlier field.
     pub(super) fn with_ctx(&self, kind: &Kind, own: Own) -> Result<Option<WithCtx>, Error> {
-        let (root, owner) = (self.root, self.owner);
         let Kind::Msg { ty, with, .. } = kind else { return Ok(None) };
+        let p = path(ty);
+        let root = self.root;
+        self.ctx_of(&quote!(<#p as #root::Message>::Ctx), with, own)
+    }
+
+    /// The context `with` builds for the `Ctx` type `ctx`, or `None` when it passes nothing.
+    pub(super) fn ctx_of(
+        &self,
+        ctx: &TokenStream,
+        with: &[String],
+        own: Own,
+    ) -> Result<Option<WithCtx>, Error> {
         if with.is_empty() {
             return Ok(None);
         }
-        let p = path(ty);
+        let owner = self.owner;
         let mut read = Vec::new();
-        let mut held = Vec::new();
         for name in with {
             if self.is_param(name) {
                 let id = ident(name);
                 read.push(quote!(__ctx.#id));
-                held.push(quote!(__ctx.#id));
                 continue;
             }
-            let Some((access, flag)) = self.env.argument(name) else {
+            let Some((access, _)) = self.env.argument(name) else {
                 return Err(Error::Refused(format!(
                     "{owner}: `#[with({name})]`: `{name}` is not an earlier integer or `bool` \
                      field, a field of an earlier nested layout, or a parameter. Name one of those"
                 )));
             };
             read.push(access);
+        }
+        let held = self.ctx_encode(ctx, with, own)?;
+        Ok(Some(WithCtx { decode: quote!(#ctx::new(#(#read),*)), encode: held }))
+    }
+
+    /// The context `with` builds for encode, from the value as encode writes it: a parameter
+    /// from this body's context, a written field as encode writes it, and any other field as the
+    /// value holds it.
+    pub(super) fn ctx_encode(
+        &self,
+        ctx: &TokenStream,
+        with: &[String],
+        own: Own,
+    ) -> Result<TokenStream, Error> {
+        let root = self.root;
+        let mut held = Vec::new();
+        for name in with {
+            if self.is_param(name) {
+                let id = ident(name);
+                held.push(quote!(__ctx.#id));
+                continue;
+            }
             // A derived field passes the number encode writes, a framing field only that.
             if self.derived.iter().any(|(f, _)| f == name) {
-                let want = if flag { Ty::Bool } else { Ty::Int };
-                let (value, _) = self.written(own, name, want)?;
-                held.push(match flag {
-                    true => value,
-                    false => quote!(#root::WireInt::from_i64(#value)),
+                let (value, ty) = self.written(own, name, Ty::Int)?;
+                held.push(match ty {
+                    Ty::Bool => value,
+                    Ty::Int => quote!(#root::WireInt::from_i64(#value)),
                 });
                 continue;
             }
             let value = own.get(name);
-            held.push(match flag {
-                true => quote!(#root::__private::WireFlag::to_flag(&#value)),
-                false => value,
+            held.push(match self.env.argument(name) {
+                Some((_, true)) => quote!(#root::__private::WireFlag::to_flag(&#value)),
+                _ => value,
             });
         }
-        let ctx = quote!(<#p as #root::Message>::Ctx::new);
-        Ok(Some(WithCtx { decode: quote!(#ctx(#(#read),*)), encode: quote!(#ctx(#(#held),*)) }))
+        Ok(quote!(#ctx::new(#(#held),*)))
     }
 
     pub(super) fn value(

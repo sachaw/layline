@@ -86,8 +86,8 @@ pub(crate) fn message(name: &str, needs: &[Param], rows: &[row::SegmentDef]) -> 
     audit::message(name, &segments).covering(&covered).params(&params).to_string()
 }
 
-/// The records for a choice: `C`, then an `A` row and segment table per arm.
-pub(crate) fn choice(name: &str, arms: &[row::ArmDef]) -> String {
+/// The records for a choice: `C`, a `P` per parameter, then an `A` row and segment table per arm.
+pub(crate) fn choice(name: &str, needs: &[Param], arms: &[row::ArmDef]) -> String {
     let tables: Vec<Vec<Vec<table::FieldDef<'_>>>> =
         arms.iter().map(|arm| table_views(&arm.segments)).collect();
     let spans: Vec<Vec<table::Span<'_>>> =
@@ -110,7 +110,9 @@ pub(crate) fn choice(name: &str, arms: &[row::ArmDef]) -> String {
         .filter(|(i, _)| !covers[*i].is_empty())
         .map(|(i, arm)| table::ArmCover::new(&arm.name, &covers[i]))
         .collect();
-    audit::choice(name, &arm_defs).covering(&covered).to_string()
+    let params: Vec<table::ParamDef<'_>> =
+        needs.iter().map(|p| table::ParamDef::new(&p.name, p.repr.primitive())).collect();
+    audit::choice(name, &arm_defs).covering(&covered).params(&params).to_string()
 }
 
 fn field_views(rows: &[row::FieldDef]) -> Vec<table::FieldDef<'_>> {

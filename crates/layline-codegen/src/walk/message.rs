@@ -200,7 +200,7 @@ fn lower_message(
             quote! { #root::table::ParamDef::new(#name, #ty), }
         });
         (
-            context_struct(m),
+            context_struct(&m.name, &m.needs),
             quote!(#ctx_name),
             quote! {
                 /// The parameters the holder supplies, in declaration order.
@@ -272,9 +272,20 @@ fn lower_message(
     let (constants, fallible) = (consts.all(), consts.fallible);
     let inherent =
         inherent_encodes(&fallible, &quote!(#root::Message), Some(!m.needs.is_empty()), root);
+    // A body with no fixed field of its own reads nothing in the order: its holdings pick theirs.
+    let ordered = names_order(&decode) || names_order(&encode);
     let (decode, encode, held) = match &m.endian_from {
-        None => (decode, encode, quote!()),
-        Some(param) => held_order(&name, param, decode, encode, &buffered, root),
+        Some(param) if ordered => held_order(
+            &name,
+            param,
+            decode,
+            encode,
+            &buffered,
+            &quote!(#root::Message),
+            (quote!(), quote!()),
+            root,
+        ),
+        _ => (decode, encode, quote!()),
     };
     let codec = quote! {
         #ctx_decl
@@ -442,13 +453,6 @@ pub(super) fn inherent_encodes(
 /// `type __O = Le;` or `Be`: the order a body with a fixed `endian` reads and writes in, if
 /// `body` reads or writes a scalar.
 pub(super) fn fixed_order(endian: Endian, body: &TokenStream, root: &Root) -> TokenStream {
-    fn names_order(body: &TokenStream) -> bool {
-        body.clone().into_iter().any(|t| match t {
-            proc_macro2::TokenTree::Ident(i) => i == "__O",
-            proc_macro2::TokenTree::Group(g) => names_order(&g.stream()),
-            _ => false,
-        })
-    }
     if !names_order(body) {
         return quote!();
     }
@@ -459,14 +463,29 @@ pub(super) fn fixed_order(endian: Endian, body: &TokenStream, root: &Root) -> To
     quote! { type __O = #order; }
 }
 
-/// A message whose order is the parameter `param`: `decode` and `encode` bodies generic over
-/// `__O`, and the trait methods that pick `Be` or `Le` once from the context.
-fn held_order(
+/// Whether `body` reads or writes in the order `__O`.
+pub(super) fn names_order(body: &TokenStream) -> bool {
+    body.clone().into_iter().any(|t| match t {
+        proc_macro2::TokenTree::Ident(i) => i == "__O",
+        proc_macro2::TokenTree::Group(g) => names_order(&g.stream()),
+        _ => false,
+    })
+}
+
+/// An item whose order is the parameter `param`: `decode` and `encode` bodies generic over `__O`,
+/// and the trait methods that pick `Be` or `Le` once from the context.
+///
+/// `of` is the trait, and `lead` the parameters decode takes before `body`, declared and passed:
+/// a catalogue's discriminant.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn held_order(
     name: &proc_macro2::Ident,
     param: &str,
     decode: TokenStream,
     encode: TokenStream,
     buffered: &TokenStream,
+    of: &TokenStream,
+    (lead_decl, lead): (TokenStream, TokenStream),
     root: &Root,
 ) -> (TokenStream, TokenStream, TokenStream) {
     let Prelude { result, u8, u32, usize, .. } = root.prelude();
@@ -478,9 +497,10 @@ fn held_order(
             /// Decode in the byte order `__O`.
             #[doc(hidden)]
             fn __layline_decode<__O: #order>(
+                #lead_decl
                 body: &[#u8],
                 __depth: #u32,
-                __ctx: <Self as #root::Message>::Ctx,
+                __ctx: <Self as #of>::Ctx,
             ) -> #result<(Self, #usize), #root::ParseError> {
                 #decode
             }
@@ -490,7 +510,7 @@ fn held_order(
             fn __layline_encode<__O: #order, __B: #root::Buffer>(
                 &self,
                 out: &mut __B,
-                __ctx: <Self as #root::Message>::Ctx,
+                __ctx: <Self as #of>::Ctx,
             ) -> #result<(), #buffered> {
                 #encode
             }
@@ -499,9 +519,9 @@ fn held_order(
     (
         quote! {
             if __ctx.#p {
-                Self::__layline_decode::<#be>(body, __depth, __ctx)
+                Self::__layline_decode::<#be>(#lead body, __depth, __ctx)
             } else {
-                Self::__layline_decode::<#le>(body, __depth, __ctx)
+                Self::__layline_decode::<#le>(#lead body, __depth, __ctx)
             }
         },
         quote! {
@@ -519,22 +539,21 @@ fn held_order(
 ///
 /// Use sites call `<Name as Message>::Ctx::new(..)` positionally, because a proc macro cannot see
 /// the callee's parameter names.
-fn context_struct(m: &MessageDef) -> TokenStream {
-    let name = format_ident!("{}Ctx", m.name);
-    let owner = m.name.as_str();
+pub(super) fn context_struct(owner: &str, needs: &[crate::Param]) -> TokenStream {
+    let name = format_ident!("{}Ctx", owner);
     let doc = format!("The parameters `{owner}` reads from its holder.");
-    let fields = m.needs.iter().map(|p| {
+    let fields = needs.iter().map(|p| {
         let id = ident(&p.name);
         let ty = scalar_ty(p.repr);
         let doc = format!("Parameter `{}`.", p.name);
         quote! { #[doc = #doc] pub #id: #ty, }
     });
-    let args = m.needs.iter().map(|p| {
+    let args = needs.iter().map(|p| {
         let id = ident(&p.name);
         let ty = scalar_ty(p.repr);
         quote! { #id: #ty, }
     });
-    let inits = m.needs.iter().map(|p| {
+    let inits = needs.iter().map(|p| {
         let id = ident(&p.name);
         quote! { #id, }
     });

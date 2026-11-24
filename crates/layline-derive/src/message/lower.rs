@@ -213,6 +213,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         }
                     },
                     doc: None,
+                    with: f.with.iter().map(|r| r.name.clone()).collect(),
                 });
             }
             Body::Opt { when, present, kind, claims } => {
