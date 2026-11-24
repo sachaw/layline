@@ -89,6 +89,24 @@ pub struct M {
 }
 
 #[test]
+fn with_takes_one_expression_per_parameter() {
+    let child = |with: &str| {
+        format!(
+            "#[derive(Message)]\npub struct M {{\n    pub n: u8,\n    pub on: bool,\n    \
+             #[with({with})]\n    #[message]\n    pub child: Block,\n}}"
+        )
+    };
+    refused(
+        &child("n + missing"),
+        "field `child`: #[with] names `missing`, which is not an integer field of this message",
+    );
+    refused(&child("n +"), "field `child`: `#[with(..)]` takes an expression");
+    refused(&child("n,, on"), "`#[with(..)]` takes one expression per parameter");
+    refused(&child("on * 2"), "needs an integer, and `on` is a bool");
+    expands_with(&child("n, n - 1, on && n > 2"), quote::quote!(::layline::EncodeError::passed));
+}
+
+#[test]
 fn a_parameter_that_is_also_a_field() {
     refused(
         r#"#[derive(Message)]

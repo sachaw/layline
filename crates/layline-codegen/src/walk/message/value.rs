@@ -6,6 +6,7 @@ use quote::quote;
 use super::body::{Bind, Item, Own, Walk};
 use super::cursor::{consumed_nothing, take};
 use super::env::Env;
+use super::eval::{argument, blamed};
 use super::patch::{Target, derived_value, fits};
 use super::prefix::Prefix;
 use super::table::{Row, deferred_type, span_of_kind};
@@ -14,7 +15,7 @@ use crate::model::Ty;
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, doc_attr, kind_ty, path};
-use crate::{Error, Kind, Len, Root, Segment};
+use crate::{Error, Expr, Kind, Len, Root, Segment};
 
 /// The `Message::Ctx` a use site builds, for decode and for encode.
 ///
@@ -236,27 +237,49 @@ pub(super) fn value_write(
 impl Walk<'_> {
     /// The context passed to a nested message, or `None` if it takes no parameters.
     ///
-    /// Each `#[with]` name is a parameter of this body or an earlier field.
-    pub(super) fn with_ctx(&self, kind: &Kind, own: Own) -> Result<Option<WithCtx>, Error> {
+    /// Each `#[with]` value is an expression over this body's parameters and earlier fields.
+    /// `field` holds the message, and is what a refusal names.
+    pub(super) fn with_ctx(
+        &self,
+        kind: &Kind,
+        field: &str,
+        own: Own,
+    ) -> Result<Option<WithCtx>, Error> {
         let Kind::Msg { ty, with, .. } = kind else { return Ok(None) };
         let p = path(ty);
         let root = self.root;
-        self.ctx_of(&quote!(<#p as #root::Message>::Ctx), with, own)
+        self.ctx_of(&quote!(<#p as #root::Message>::Ctx), field, with, own)
     }
 
     /// The context `with` builds for the `Ctx` type `ctx`, or `None` when it passes nothing.
+    ///
+    /// A bare name passes the value at its own type. Any other expression is evaluated in `i64`,
+    /// and passed at the parameter's type: decode refuses a value it has not, or the parameter
+    /// cannot hold, with `Malformed`, and encode with `Inexact` or `Unfit`, naming `field`.
     pub(super) fn ctx_of(
         &self,
         ctx: &TokenStream,
-        with: &[String],
+        field: &str,
+        with: &[Expr],
         own: Own,
     ) -> Result<Option<WithCtx>, Error> {
         if with.is_empty() {
             return Ok(None);
         }
-        let owner = self.owner;
+        let (root, owner) = (self.root, self.owner);
         let mut read = Vec::new();
-        for name in with {
+        for arg in with {
+            let Some(name) = arg.as_name() else {
+                let look = |name: &str, want| self.env.read(owner, "#[with]", name, want);
+                let (value, ty) = argument(arg, &look, root)?;
+                let blamed = blamed(arg, field);
+                let refuse = quote!(#root::ParseError::Malformed { field: #blamed, at: __at });
+                read.push(match ty {
+                    Ty::Int => quote!(#root::__private::value::narrow(#value).ok_or(#refuse)?),
+                    Ty::Bool => quote!(#value.ok_or(#refuse)?),
+                });
+                continue;
+            };
             if self.is_param(name) {
                 let id = ident(name);
                 read.push(quote!(__ctx.#id));
@@ -270,22 +293,34 @@ impl Walk<'_> {
             };
             read.push(access);
         }
-        let held = self.ctx_encode(ctx, with, own)?;
+        let held = self.ctx_encode(ctx, field, with, own)?;
         Ok(Some(WithCtx { decode: quote!(#ctx::new(#(#read),*)), encode: held }))
     }
 
     /// The context `with` builds for encode, from the value as encode writes it: a parameter
     /// from this body's context, a written field as encode writes it, and any other field as the
-    /// value holds it.
+    /// value holds it. Encode reads each value and writes none back.
     pub(super) fn ctx_encode(
         &self,
         ctx: &TokenStream,
-        with: &[String],
+        field: &str,
+        with: &[Expr],
         own: Own,
     ) -> Result<TokenStream, Error> {
         let root = self.root;
         let mut held = Vec::new();
-        for name in with {
+        for arg in with {
+            let Some(name) = arg.as_name() else {
+                let look = |name: &str, want| self.written(own, name, want);
+                let (value, ty) = argument(arg, &look, root)?;
+                held.push(match ty {
+                    Ty::Int => quote!(#root::EncodeError::passed(#field, #value)?),
+                    Ty::Bool => quote! {
+                        #value.ok_or(#root::EncodeError::Inexact { field: #field, value: 0 })?
+                    },
+                });
+                continue;
+            };
             if self.is_param(name) {
                 let id = ident(name);
                 held.push(quote!(__ctx.#id));
@@ -333,7 +368,7 @@ impl Walk<'_> {
             self.rows.advance(Some(p.repr.bits()));
         }
         self.rows.push(Row::new(field, span_of_kind(kind, field)).decoded_by(deferred_type(kind)));
-        let ctx = self.with_ctx(kind, own)?;
+        let ctx = self.with_ctx(kind, field, own)?;
         self.parse_steps.extend(value_read(
             &self.env,
             self.owner,

@@ -20,9 +20,15 @@ impl Value {
     /// Parses `tokens` with the one expression parser, `Expr::parse`. `what` is the attribute,
     /// such as `#[count]`, as a refusal names it.
     pub(crate) fn parse(tokens: &TokenStream, name: &str, what: &str) -> syn::Result<Self> {
+        Self::parse_in(tokens, &format!("field `{name}`"), what)
+    }
+
+    /// [`parse`](Self::parse), with `owner` naming what the attribute is on, as in
+    /// ``variant `Pdw` ``.
+    pub(crate) fn parse_in(tokens: &TokenStream, owner: &str, what: &str) -> syn::Result<Self> {
         let span = tokens.span();
         let expr = Expr::parse(&tokens.to_string()).map_err(|why| {
-            syn::Error::new(span, format!("field `{name}`: {what} takes an expression. {why}"))
+            syn::Error::new(span, format!("{owner}: {what} takes an expression. {why}"))
         })?;
         let mut refs = Vec::new();
         names(tokens.clone(), &mut refs);
@@ -30,6 +36,11 @@ impl Value {
         let read = expr.names();
         refs.retain(|r: &Ref| read.contains(&r.name.as_str()));
         Ok(Self { expr, refs, span })
+    }
+
+    /// Copies `v`. `Value` is not `Clone`, as [`Ref`] is not.
+    pub(crate) fn same(v: &Value) -> Value {
+        Value { expr: v.expr.clone(), refs: v.refs.iter().map(Ref::same).collect(), span: v.span }
     }
 
     /// The reference to `target`, if the expression reads it.

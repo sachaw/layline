@@ -202,7 +202,7 @@ impl Walk<'_> {
         self.public_fields.extend(quote! { #d pub #coll_ident: #coll_ty, });
         self.binds.push(Bind { name: coll_ident.clone(), ty: coll_ty, value: coll_val });
 
-        let ctx = self.with_ctx(element, own)?;
+        let ctx = self.with_ctx(element, coll, own)?;
         let step = element_step(element, coll, ctx.as_ref(), root)?;
 
         let each = match &step {

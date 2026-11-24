@@ -230,8 +230,10 @@ pub enum Kind {
         ty: String,
         /// Whether the Rust field is a `Box`, as a type that contains itself needs.
         boxed: bool,
-        /// The fields passed as the message's [`needs`](crate::MessageDef::needs), in order.
-        with: Vec<String>,
+        /// The values passed as the message's [`needs`](crate::MessageDef::needs), in order: each an
+        /// [`Expr`](crate::Expr) the holder evaluates, as [`Segment::Switch::with`](crate::Segment)
+        /// is.
+        with: Vec<crate::Expr>,
     },
     /// A `#[checksum(..)]` field in a fixed layout.
     ///

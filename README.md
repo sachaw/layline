@@ -210,7 +210,8 @@ selector against the arm, and writes the field of one it can work back to.
 
 A switch passes its holder's fields to the arm it selects with `#[with(..)]`, as a nested
 message takes them: the enum declares `#[message(needs(..))]`, and an arm reads them, or passes
-them to its own message with `#[with(..)]`.
+them to its own message with `#[with(..)]`. Each value is an expression in the holder's
+fields, such as Kaitai's `#[with(extension_len - 1 - len)]`, which encode reads and never writes.
 
 Every attribute is documented on its derive.
 

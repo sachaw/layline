@@ -181,6 +181,19 @@ impl EncodeError {
         }
     }
 
+    /// `value` as the integer type `T` of the parameter it is passed to.
+    ///
+    /// # Errors
+    ///
+    /// [`Inexact`](Self::Inexact) where the expression has no value, and [`Unfit`](Self::Unfit)
+    /// where `T` cannot hold it, naming `field`.
+    #[doc(hidden)]
+    pub fn passed<T: WireInt>(field: &'static str, value: Option<i64>) -> Result<T, Self> {
+        let Some(value) = value else { return Err(Self::Inexact { field, value: 0 }) };
+        Self::fit::<T>(field, value, 0)?;
+        Ok(T::from_i64(value))
+    }
+
     /// [`Mismatch`](Self::Mismatch) unless `value == stated`.
     ///
     /// # Errors

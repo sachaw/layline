@@ -332,6 +332,26 @@ pub(crate) fn back_patched(segments: &[Segment]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Every value a segment passes to a nested message's or a switch's parameters, which encode reads
+/// and never writes.
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
+pub(crate) fn arguments(segments: &[Segment]) -> Vec<&Expr> {
+    segments
+        .iter()
+        .flat_map(|seg| match seg {
+            Segment::Switch { with, .. }
+            | Segment::Value { kind: Kind::Msg { with, .. }, .. }
+            | Segment::Placed { kind: Kind::Msg { with, .. }, .. }
+            | Segment::Repeat { element: Kind::Msg { with, .. }, .. } => with.as_slice(),
+            Segment::Opt { field, .. } => match &field.kind {
+                Kind::Msg { with, .. } => with.as_slice(),
+                _ => &[],
+            },
+            _ => &[],
+        })
+        .collect()
+}
+
 /// Every expression in the segments, and whether it gives a number or a condition.
 #[cfg_attr(not(feature = "walk"), allow(dead_code))]
 pub(crate) fn expressions(segments: &[Segment]) -> Vec<(Expr, Ty)> {

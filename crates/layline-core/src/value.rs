@@ -142,6 +142,13 @@ pub fn pick<T>(
     if c? { a() } else { b() }
 }
 
+/// `a` as the integer type `T` a parameter takes, if it has a value and `T` holds it.
+#[must_use]
+pub fn narrow<T: crate::WireInt>(a: Option<i64>) -> Option<T> {
+    let a = a?;
+    crate::bound::fits_in_field::<T>(a, 0).then(|| T::from_i64(a))
+}
+
 /// A parameter's value as a number: an integer's own, or 1 for a `bool` that holds.
 pub trait Number {
     /// The number.

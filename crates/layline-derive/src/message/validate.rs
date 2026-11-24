@@ -26,7 +26,7 @@ pub(super) fn reference_site<'a>(
     target: &str,
 ) -> Option<(&'a Ref, usize, &'static str)> {
     for (i, f) in p.fields.iter().enumerate() {
-        if let Some(r) = f.with.iter().find(|r| r.name == target) {
+        if let Some(r) = f.with.iter().find_map(|v| v.find(target)) {
             return Some((r, i, "#[with]"));
         }
         let found = |v: Option<&'a Value>| v.and_then(|v| v.find(target));

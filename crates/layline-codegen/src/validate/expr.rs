@@ -24,6 +24,11 @@ pub(super) fn number(seen: &Seen<'_>, e: &Expr) -> Result<(), Invalid> {
     }
 }
 
+/// Checks that `e` gives a value to pass to a parameter: a number or a condition.
+pub(super) fn argument(seen: &Seen<'_>, e: &Expr) -> Result<(), Invalid> {
+    check(seen, e, Ty::Int).map(|_| ())
+}
+
 /// Checks that `e` is a condition: a `bool`, or a bit test that holds when any bit is set.
 pub(super) fn condition(seen: &Seen<'_>, e: &Expr) -> Result<(), Invalid> {
     let ty = check(seen, e, Ty::Bool)?;

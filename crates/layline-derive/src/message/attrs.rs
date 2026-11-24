@@ -9,40 +9,8 @@ use layline_codegen::Scalar;
 use super::container::MESSAGE_ATTRS;
 use super::*;
 use crate::attr::bare;
-use crate::claim::{Ref, parse_checksum};
+use crate::claim::parse_checksum;
 use crate::value::{Args, Value, args};
-
-fn field_ref(input: syn::parse::ParseStream<'_>) -> syn::Result<Ref> {
-    let first: syn::Ident = input.parse()?;
-    let span = first.span();
-    let mut name = crate::attr::name(&first);
-    dotted_tail(input, &mut name)?;
-    Ok(Ref { name, span })
-}
-
-fn dotted_tail(input: syn::parse::ParseStream<'_>, name: &mut String) -> syn::Result<()> {
-    if !input.peek(syn::Token![.]) {
-        return Ok(());
-    }
-    input.parse::<syn::Token![.]>()?;
-    let inner: syn::Ident = input.parse()?;
-    name.push('.');
-    name.push_str(&crate::attr::name(&inner));
-    if input.peek(syn::Token![.]) {
-        return Err(too_deep(inner.span(), name));
-    }
-    Ok(())
-}
-
-fn too_deep(span: Span, so_far: &str) -> syn::Error {
-    syn::Error::new(
-        span,
-        format!(
-            "`{so_far}.…` reaches more than one level deep. \
-             Name a field of this struct, or a field of one of its nested layouts"
-        ),
-    )
-}
 
 fn set_kind(
     slot: &mut Option<(KindWord, Span)>,
@@ -483,24 +451,33 @@ fn unknown_key(name: &str, path: &syn::Path, keys: &str) -> String {
 
 /// `#[with(a, b)]`: one earlier field per parameter of the nested message, in order. `owner`
 /// starts a refusal: "field `f`" or "variant `V`".
-pub(super) fn parse_with(attr: &syn::Attribute, owner: &str) -> syn::Result<Vec<Ref>> {
+pub(super) fn parse_with(attr: &syn::Attribute, owner: &str) -> syn::Result<Vec<Value>> {
     let shape = || {
-        format!(
-            "{owner}: `#[with(..)]` takes one earlier field name per parameter, \
-             such as `#[with(a, b)]` or `#[with(hdr.n)]`"
+        syn::Error::new(
+            attr.meta.span(),
+            format!(
+                "{owner}: `#[with(..)]` takes one expression per parameter, \
+                 such as `#[with(a, b)]`, `#[with(hdr.n)]` or `#[with(len - 1)]`"
+            ),
         )
     };
-    let refs = attr
-        .parse_args_with(|input: syn::parse::ParseStream<'_>| {
-            syn::punctuated::Punctuated::<Ref, syn::Token![,]>::parse_terminated_with(
-                input, field_ref,
-            )
-        })
-        .map_err(|_| syn::Error::new(attr.meta.span(), shape()))?;
-    if refs.is_empty() {
-        return Err(syn::Error::new(attr.meta.span(), shape()));
+    let syn::Meta::List(list) = &attr.meta else { return Err(shape()) };
+    let mut parts: Vec<proc_macro2::TokenStream> = vec![proc_macro2::TokenStream::new()];
+    for t in list.tokens.clone() {
+        match &t {
+            proc_macro2::TokenTree::Punct(p) if p.as_char() == ',' => {
+                parts.push(proc_macro2::TokenStream::new());
+            }
+            _ => parts.last_mut().expect("one part").extend([t]),
+        }
     }
-    Ok(refs.into_iter().collect())
+    if parts.last().is_some_and(proc_macro2::TokenStream::is_empty) {
+        parts.pop();
+    }
+    if parts.is_empty() || parts.iter().any(proc_macro2::TokenStream::is_empty) {
+        return Err(shape());
+    }
+    parts.iter().map(|part| Value::parse_in(part, owner, "`#[with(..)]`")).collect()
 }
 
 fn parse_switch(attr: &syn::Attribute, name: &str) -> syn::Result<SwitchOn> {

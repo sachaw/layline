@@ -2,7 +2,7 @@
 mod support;
 
 use layline_codegen::{
-    Collection, Container, Count, Discriminant, Endian, Field, Invalid, Kind, LayoutDef,
+    Collection, Container, Count, Discriminant, Endian, Expr, Field, Invalid, Kind, LayoutDef,
     MessageDef, Scalar, Segment,
 };
 use support::{bytes, validate_layout, validate_message};
@@ -279,7 +279,7 @@ fn a_with_reads_a_field_of_a_nested_layout_or_a_bool() {
                 Kind::Msg {
                     ty: "Block".into(),
                     boxed: false,
-                    with: vec![String::from("head.n"), String::from("big")],
+                    with: vec![Expr::name("head.n"), Expr::name("big")],
                 },
             ),
         ],
@@ -306,7 +306,7 @@ fn a_with_that_names_nothing_is_refused() {
         "M",
         vec![Segment::value(
             "child",
-            Kind::Msg { ty: "Block".into(), boxed: false, with: vec![String::from("missing")] },
+            Kind::Msg { ty: "Block".into(), boxed: false, with: vec![Expr::name("missing")] },
         )],
     );
     assert!(matches!(validate_message(&m), Err(Invalid::UnknownReference(_))));

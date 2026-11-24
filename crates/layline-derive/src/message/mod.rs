@@ -82,7 +82,7 @@ struct MsgField {
     body: Body,
     position: Option<crate::claim::At>,
     /// `#[with(..)]` names, kept for error spans.
-    with: Vec<Ref>,
+    with: Vec<Value>,
     /// `#[align(N)]`.
     align: Option<(u64, Span)>,
     /// `#[valid(..)]`: a condition the value must satisfy.
@@ -572,7 +572,7 @@ struct FieldAttrs {
     until: Option<(UntilSpec, Span)>,
     when: Option<WhenSpec>,
     /// `#[with(f, g)]`: arguments for a nested message's parameters.
-    with: Option<(Vec<Ref>, Span)>,
+    with: Option<(Vec<Value>, Span)>,
     range: Option<crate::claim::Range>,
     magic: Option<crate::claim::Magic>,
     /// `#[align(N)]`: padding after the field that its length does not count.

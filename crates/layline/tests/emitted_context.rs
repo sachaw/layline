@@ -40,7 +40,7 @@ fn packets() -> Module {
     let msg = |ty: &str, with: &[&str]| Kind::Msg {
         ty: ty.into(),
         boxed: false,
-        with: with.iter().map(|w| String::from(*w)).collect(),
+        with: with.iter().map(|w| Expr::name(w)).collect(),
     };
     Module::new(vec![
         Item::Message(
@@ -60,9 +60,9 @@ fn packets() -> Module {
                         None,
                     )
                     .with_context(vec![
-                        "mask".into(),
-                        "num_elements".into(),
-                        "big_endian".into(),
+                        Expr::name("mask"),
+                        Expr::name("num_elements"),
+                        Expr::name("big_endian"),
                     ]),
                 ],
             )

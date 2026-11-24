@@ -54,7 +54,7 @@ fn packets() -> Module {
                         Field::new("wide", flag()),
                     ]),
                     Segment::switch("payload", Discriminant::Field(selector), "Payload", None)
-                        .with_context(vec!["wide".into()]),
+                        .with_context(vec![Expr::name("wide")]),
                 ],
             )
             .with_endian(Endian::Be),

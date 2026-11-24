@@ -7,7 +7,6 @@ use syn::spanned::Spanned;
 use layline_codegen::{Collection, Kind, Len, Scalar};
 
 use super::*;
-use crate::claim::Ref;
 use crate::ty::{
     array_of, box_element, is_generic_path, is_plain_path, is_string, scalar_of, variable_size,
 };
@@ -275,8 +274,8 @@ pub(super) struct MsgAttrs<'a> {
     pub(super) bytes: Option<(usize, Span)>,
     pub(super) at: Option<Value>,
     pub(super) elem: Option<&'a Type>,
-    /// `#[with(f, g)]`: one earlier field per parameter of the nested message.
-    pub(super) with: Vec<Ref>,
+    /// `#[with(a, b)]`: one expression per parameter of the nested message.
+    pub(super) with: Vec<layline_codegen::Expr>,
 }
 
 pub(super) fn message_field(
@@ -313,7 +312,6 @@ pub(super) fn message_field(
         ));
     }
 
-    let with: Vec<String> = with.into_iter().map(|r| r.name).collect();
     let kind = Kind::Msg { ty: crate::attr::spelled(ty), boxed, with };
     match (elem, count) {
         (Some(_), Some((count, _))) => Ok(Body::Repeat {

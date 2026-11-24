@@ -35,7 +35,7 @@ impl Walk<'_> {
         self.binds.push(Bind { name: ident.clone(), ty, value: quote!(#ident) });
 
         item.hold(super::refuse::held_refusal(kind, owner, root));
-        let ctx = self.with_ctx(kind, own)?;
+        let ctx = self.with_ctx(kind, field, own)?;
         let step = element_step(kind, field, ctx.as_ref(), root)?;
         let mut row =
             Row::new(field, span_of_kind(kind, field)).decoded_by(deferred_type(kind)).seek(at);

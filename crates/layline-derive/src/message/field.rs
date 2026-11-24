@@ -29,7 +29,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
     if let Some(inner) = crate::ty::stated_element(&f.ty) {
         return framing_field(f, inner, &name, span, a, (when, present));
     }
-    let with: Vec<Ref> = a.with.iter().flat_map(|(refs, _)| refs).map(Ref::same).collect();
+    let with: Vec<Value> = a.with.iter().flat_map(|(values, _)| values).map(Value::same).collect();
 
     let position = a.at;
     let align = a.align;
@@ -755,7 +755,8 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
             return var_field(ty, name, span, VarAttrs { count, bytes, at, elem });
         }
         Some((KindWord::Message, _)) => {
-            let with = with.map_or_else(Vec::new, |(refs, _)| refs);
+            let with = with
+                .map_or_else(Vec::new, |(values, _)| values.into_iter().map(|v| v.expr).collect());
             return message_field(ty, name, span, MsgAttrs { count, bits, bytes, at, elem, with });
         }
         Some((KindWord::Switch(_) | KindWord::Checksum(_), _)) => {

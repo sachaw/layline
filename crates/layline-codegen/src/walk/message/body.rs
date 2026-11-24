@@ -7,13 +7,13 @@ use super::Check;
 use super::checksum::Marked;
 use super::cursor::{seek_to, skip_padding, write_padding};
 use super::env::Env;
-use super::eval::{condition, number};
+use super::eval::{argument, condition, number};
 use super::patch::{Slot, arm_ident, derived_flag, derived_value, nested_in_blocks, nested_probe};
 use super::table::{Row, Rows};
 use crate::model::{Ty, split_ref};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{Derived, derivations, endian_arg, expressions, row};
+use crate::walk::{Derived, arguments, derivations, endian_arg, expressions, row};
 use crate::{Absence, Count, Endian, Error, Expr, Kind, Len, Param, Presence, Root, Segment};
 
 /// Where encode reads a body's values from.
@@ -227,7 +227,7 @@ pub(super) fn walk_segments(
             let ctx = match segments.iter().find(|s| s.name() == Some(of.as_str())) {
                 Some(Segment::Switch { choice, with, .. }) if !with.is_empty() => {
                     let cty = crate::walk::path(choice);
-                    w.ctx_encode(&quote!(<#cty as #root::Choice>::Ctx), with, own)?
+                    w.ctx_encode(&quote!(<#cty as #root::Choice>::Ctx), of, with, own)?
                 }
                 _ => quote!(()),
             };
@@ -246,21 +246,25 @@ pub(super) fn walk_segments(
 
     // Every field of a nested layout an expression reads, and whether it reads it as a number.
     let nested: core::cell::RefCell<Vec<(String, bool)>> = core::cell::RefCell::default();
-    for (e, want) in expressions(segments) {
-        let record = |name: &str, ty: Ty| -> Result<(TokenStream, Ty), Error> {
-            if split_ref(name).1.is_some() {
-                let mut nested = nested.borrow_mut();
-                match nested.iter_mut().find(|(n, _)| n == name) {
-                    Some((_, number)) => *number |= ty == Ty::Int,
-                    None => nested.push((String::from(name), ty == Ty::Int)),
-                }
+    let record = |name: &str, ty: Ty| -> Result<(TokenStream, Ty), Error> {
+        if split_ref(name).1.is_some() {
+            let mut nested = nested.borrow_mut();
+            match nested.iter_mut().find(|(n, _)| n == name) {
+                Some((_, number)) => *number |= ty == Ty::Int,
+                None => nested.push((String::from(name), ty == Ty::Int)),
             }
-            Ok((quote!(0), ty))
-        };
+        }
+        Ok((quote!(0), ty))
+    };
+    for (e, want) in expressions(segments) {
         match want {
             Ty::Int => number(&e, &record, root)?,
             Ty::Bool => condition(&e, &record, root)?,
         };
+    }
+    // A bare `#[with]` name passes the field itself, and any other value reads as expressions do.
+    for e in arguments(segments).into_iter().filter(|e| e.as_name().is_none()) {
+        argument(e, &record, root)?;
     }
     for (field, number) in nested.into_inner() {
         let (outer, Some(inner)) = split_ref(&field) else { continue };
@@ -433,20 +437,11 @@ fn tail_point(segments: &[Segment], tail: usize) -> usize {
     }
     let names: Vec<&str> = segments[tail..].iter().flat_map(declared).collect();
     let reads = |seg: &Segment| {
-        let mut read: Vec<String> = crate::walk::expressions(core::slice::from_ref(seg))
-            .iter()
-            .flat_map(|(e, _)| e.names().into_iter().map(String::from).collect::<Vec<_>>())
-            .collect();
-        match seg {
-            Segment::Switch { with, .. } => read.extend(with.iter().cloned()),
-            Segment::Value { kind: Kind::Msg { with, .. }, .. }
-            | Segment::Placed { kind: Kind::Msg { with, .. }, .. }
-            | Segment::Repeat { element: Kind::Msg { with, .. }, .. } => {
-                read.extend(with.iter().cloned());
-            }
-            _ => {}
-        }
-        read.iter().any(|r| names.contains(&split_ref(r).0))
+        let one = core::slice::from_ref(seg);
+        let exprs = crate::walk::expressions(one);
+        let mut read: Vec<&Expr> = exprs.iter().map(|(e, _)| e).collect();
+        read.extend(crate::walk::arguments(one));
+        read.iter().flat_map(|e| e.names()).any(|r| names.contains(&split_ref(r).0))
     };
     let reaches_end = |seg: &Segment| {
         seg.open_ended()

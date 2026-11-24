@@ -86,6 +86,16 @@ fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStre
     })
 }
 
+/// `e` as an `Option<i64>` or `Option<bool>`, as its operators type it, and which: a value passed to
+/// a parameter.
+pub(super) fn argument(
+    e: &Expr,
+    look: &Lookup<'_>,
+    root: &Root,
+) -> Result<(TokenStream, Ty), Error> {
+    eval(e, Ty::Int, look, root)
+}
+
 /// `e` as an `Option<i64>`.
 pub(super) fn number(e: &Expr, look: &Lookup<'_>, root: &Root) -> Result<TokenStream, Error> {
     let (tokens, ty) = eval(e, Ty::Int, look, root)?;

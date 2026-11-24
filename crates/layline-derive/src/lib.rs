@@ -317,7 +317,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// # Expressions
 ///
 /// Every attribute that takes a value, `#[count]`, `#[len]`, `#[stride]`, `#[seek]`,
-/// `#[switch]`, `#[when]` and `#[valid]`, takes one expression in one language. Its operands are
+/// `#[switch]`, `#[when]`, `#[valid]` and each of `#[with]`'s, takes one expression in one
+/// language. Its operands are
 /// integer literals (`12`, `0x0f`, `0b1010`, `1_000`), constants (a `SCREAMING_CASE` name or a
 /// path with `::`), earlier fields (`n`, or `hdr.n` in an earlier nested layout), parameters, and
 /// parenthesised expressions. Its operators bind as Rust's do, loosest first:
@@ -370,7 +371,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// Where two attributes would write one field, the first writes it and the second is checked. A
 /// `Stated<T>` that no attribute writes is refused when the type is built: `#[count(n * m)]` reads
-/// two fields, so it writes neither. A `#[with(n)]` passes a written field as encode writes it.
+/// two fields, so it writes neither. A `#[with(..)]` value is only read: `#[with(n)]` passes a
+/// written field as encode writes it, and `#[with(n - 1)]` writes nothing back to `n`.
 /// An `#[other]` arm has no discriminant, so encode refuses one with `EncodeError::Unstated` when
 /// a `Stated<T>` selects it. In a `Stated<T>` flags word, bits no `#[when]` tests are zero:
 /// encode writes them so, and decode refuses them set.
@@ -443,10 +445,15 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   refuses a character the codec has no bytes for, as decode refuses bytes it reads no character
 ///   from, and is fallible exactly when the codec's `ENCODE_FALLIBLE` says so.
 /// - `#[message]`: a nested `Message`, boxed or not.
-/// - `#[with(f, g)]`: earlier fields passed, in order, as the nested message's or the switch's
-///   enum's `needs`: integers, `bool`s, fields of a nested layout (`hdr.f`) or parameters. Use
-///   with `#[message]` or `#[switch]`. JEL's DW payload is
-///   `#[switch(payload_type)] #[with(mask, num_elements, flags.big_endian)] payload: Payload`.
+/// - `#[with(a, b)]`: one expression per parameter, passed in order as the nested message's or the
+///   switch's enum's `needs`. A bare name passes an integer, a `bool`, a field of a nested layout
+///   (`hdr.f`) or a parameter at its own type; any other expression is evaluated and passed at the
+///   parameter's type, which decode refuses with `Malformed` and encode with `Unfit` where it
+///   does not hold the value. Encode reads the values and writes none back. Use with
+///   `#[message]` or `#[switch]`. JEL's DW payload is
+///   `#[switch(payload_type)] #[with(mask, num_elements, flags.big_endian)] payload: Payload`,
+///   and Kaitai's `compound_ext((extension_len - 1) - len)` is
+///   `#[with(extension_len - 1 - len)] #[message] compound: Compound`.
 /// - `#[switch(e)]`: an enum whose variant the value of `e` selects. `#[switch(..)]` selects by
 ///   the remaining length.
 /// - `#[when(c)]`: an `Option<T>` present when the condition `c` holds. `#[when(flags & MASK)]`,

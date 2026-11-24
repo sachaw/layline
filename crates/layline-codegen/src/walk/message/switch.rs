@@ -77,7 +77,7 @@ impl Walk<'_> {
         }
         self.rows.push(Row::new(field, span).decoded_by(Some(choice)));
 
-        let ctx = self.ctx_of(&quote!(<#cty as #root::Choice>::Ctx), with, own)?;
+        let ctx = self.ctx_of(&quote!(<#cty as #root::Choice>::Ctx), field, with, own)?;
         let (read_ctx, write_ctx) = match ctx {
             Some(c) => (c.decode, c.encode),
             None => (quote!(()), quote!(())),

@@ -75,18 +75,24 @@ pub(super) fn read_only(seen: &Seen<'_>, at: &crate::Expr, what: &str) -> Result
     )))
 }
 
-/// Checks the `#[with(..)]` list of a nested message: one earlier integer or `bool` per
-/// parameter, a field of this message, a field of a nested layout in it, or a parameter.
+/// Checks the `#[with(..)]` list of a nested message: one expression per parameter, over earlier
+/// fields of this message, fields of a nested layout in it, and parameters.
 pub(super) fn stated_with(seen: &Seen<'_>, kind: &Kind) -> Result<(), Invalid> {
     let Kind::Msg { with, .. } = kind else { return Ok(()) };
     stated_args(seen, with)
 }
 
-/// Checks a `#[with(..)]` list, of a nested message or a switch's catalogue.
-pub(super) fn stated_args(seen: &Seen<'_>, with: &[alloc::string::String]) -> Result<(), Invalid> {
+/// Checks a `#[with(..)]` list, of a nested message or a switch's catalogue. A bare name is an
+/// integer or a `bool`; any other expression is typed by its operators.
+pub(super) fn stated_args(seen: &Seen<'_>, with: &[crate::Expr]) -> Result<(), Invalid> {
     for arg in with {
-        if resolve(seen, arg, Reads::Flag).is_err() {
-            resolve(seen, arg, Reads::Number)?;
+        match arg.as_name() {
+            Some(name) => {
+                if resolve(seen, name, Reads::Flag).is_err() {
+                    resolve(seen, name, Reads::Number)?;
+                }
+            }
+            None => super::expr::argument(seen, arg)?,
         }
     }
     Ok(())

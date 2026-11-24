@@ -74,7 +74,7 @@ impl Walk<'_> {
             )
         } else {
             item.hold(held_refusal(&f.kind, owner, root));
-            let ctx = self.with_ctx(&f.kind, own)?;
+            let ctx = self.with_ctx(&f.kind, &f.name, own)?;
             let inner = value_read(&self.env, owner, &f.name, &f.kind, ctx.as_ref(), root)?;
             if let Kind::Text { len, .. } = &f.kind
                 && let Some(p) = Prefix::of_len(len)

@@ -259,7 +259,7 @@ fn arm_body(v: &syn::Variant) -> syn::Result<Vec<Segment>> {
             Some(attr) => {
                 crate::message::attrs::parse_with(attr, &format!("variant `{}`", v.ident))?
                     .into_iter()
-                    .map(|r| r.name)
+                    .map(|v| v.expr)
                     .collect()
             }
             None => Vec::new(),

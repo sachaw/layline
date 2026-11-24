@@ -164,7 +164,7 @@ fn a_switch_passes_earlier_fields_to_its_choice() {
             vec![
                 Segment::Block(vec![Field::new("kind", u(8)), Field::new("words", u(16))]),
                 Segment::switch("body", Discriminant::Field(Expr::name("kind")), "Body", None)
-                    .with_context(vec![with.into()]),
+                    .with_context(vec![Expr::name(with)]),
             ],
         )
     };

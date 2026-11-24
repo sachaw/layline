@@ -242,9 +242,10 @@ pub enum Segment {
         /// [`arms_fit`](layline_core::table::arms_fit). [`Len::Field`] reads the size from an
         /// earlier field, and encode writes it. With a window, fields can follow the switch.
         window: Option<Len>,
-        /// The fields passed, in order, as the choice's [`needs`](crate::ChoiceDef::needs): earlier
-        /// fields, fields of an earlier nested layout, or this body's parameters.
-        with: Vec<String>,
+        /// The values passed, in order, as the choice's [`needs`](crate::ChoiceDef::needs): each an
+        /// [`Expr`] over earlier fields, fields of an earlier nested layout, and this body's
+        /// parameters. Encode reads them and writes nothing back.
+        with: Vec<Expr>,
     },
     /// An optional field.
     ///
@@ -363,7 +364,7 @@ impl Segment {
     /// Passes `with`, in order, as a [`Segment::Switch`]'s choice's
     /// [`needs`](crate::ChoiceDef::needs). Does nothing on any other segment.
     #[must_use]
-    pub fn with_context(mut self, args: Vec<String>) -> Self {
+    pub fn with_context(mut self, args: Vec<Expr>) -> Self {
         if let Segment::Switch { with, .. } = &mut self {
             *with = args;
         }
