@@ -205,11 +205,11 @@ impl ::layline::Message for Packet {
     }
 }
 impl Packet {
-    /**Append the wire bytes to `out`.
-
-# Errors
-
-`EncodeError`: a full buffer, or a value the type's declarations refuse.*/
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
     #[inline]
     pub fn encode_into_with<__B: ::layline::Buffer>(
         &self,
@@ -223,19 +223,20 @@ impl Packet {
         )
     }
     ::layline::__private::alloc_only! {
-        #[doc =
-        "The wire bytes, in a new vector.\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse."]
-        #[inline] pub fn encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx)
-        -> ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx) ->
+        ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
         ::layline::EncodeError > { < ::layline::__private::Fallibility < true > as
         ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
         > >> ::finish(< Self as ::layline::Message > ::encode_with(self, ctx)) }
     }
-    /**Append the wire bytes to `out`.
-
-# Errors
-
-`EncodeError`: a full buffer, or a value the type's declarations refuse.*/
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
     #[inline]
     pub fn encode_into<__B: ::layline::Buffer>(
         &self,
@@ -248,10 +249,11 @@ impl Packet {
         )
     }
     ::layline::__private::alloc_only! {
-        #[doc =
-        "The wire bytes, in a new vector.\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse."]
-        #[inline] pub fn encode(& self) -> ::core::result::Result <
-        ::layline::__private::Vec < ::core::primitive::u8 >, ::layline::EncodeError > { <
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode(& self) -> ::core::result::Result < ::layline::__private::Vec <
+        ::core::primitive::u8 >, ::layline::EncodeError > { <
         ::layline::__private::Fallibility < true > as ::layline::__private::Encodes <
         ::layline::__private::Vec < ::core::primitive::u8 > >> ::finish(< Self as
         ::layline::Message > ::encode_with(self, ())) }
@@ -402,11 +404,11 @@ impl ::layline::Choice for Payload {
     }
 }
 impl Payload {
-    /**Append the wire bytes to `out`.
-
-# Errors
-
-`EncodeError`: a full buffer, or a value the type's declarations refuse.*/
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
     #[inline]
     pub fn encode_into_with<__B: ::layline::Buffer>(
         &self,
@@ -420,10 +422,11 @@ impl Payload {
         )
     }
     ::layline::__private::alloc_only! {
-        #[doc =
-        "The wire bytes, in a new vector.\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse."]
-        #[inline] pub fn encode_with(& self, ctx : < Self as ::layline::Choice > ::Ctx)
-        -> ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Choice > ::Ctx) ->
+        ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
         ::layline::EncodeError > { < ::layline::__private::Fallibility < true > as
         ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
         > >> ::finish(< Self as ::layline::Choice > ::encode_with(self, ctx)) }
@@ -713,11 +716,11 @@ impl ::layline::Message for Pdws {
     }
 }
 impl Pdws {
-    /**Append the wire bytes to `out`.
-
-# Errors
-
-`EncodeError`: a full buffer, or a value the type's declarations refuse.*/
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
     #[inline]
     pub fn encode_into_with<__B: ::layline::Buffer>(
         &self,
@@ -731,10 +734,11 @@ impl Pdws {
         )
     }
     ::layline::__private::alloc_only! {
-        #[doc =
-        "The wire bytes, in a new vector.\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse."]
-        #[inline] pub fn encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx)
-        -> ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx) ->
+        ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
         ::layline::EncodeError > { < ::layline::__private::Fallibility < true > as
         ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
         > >> ::finish(< Self as ::layline::Message > ::encode_with(self, ctx)) }
@@ -836,11 +840,11 @@ impl ::layline::Message for Pdw {
     }
 }
 impl Pdw {
-    /**Append the wire bytes to `out`.
-
-# Errors
-
-`EncodeError`: a full buffer, or a value the type's declarations refuse.*/
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
     #[inline]
     pub fn encode_into_with<__B: ::layline::Buffer>(
         &self,
@@ -854,10 +858,11 @@ impl Pdw {
         )
     }
     ::layline::__private::alloc_only! {
-        #[doc =
-        "The wire bytes, in a new vector.\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse."]
-        #[inline] pub fn encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx)
-        -> ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx) ->
+        ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
         ::layline::EncodeError > { < ::layline::__private::Fallibility < true > as
         ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
         > >> ::finish(< Self as ::layline::Message > ::encode_with(self, ctx)) }

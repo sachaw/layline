@@ -41,7 +41,7 @@ use crate::walk::derive_attr;
 #[cfg(feature = "emit")]
 use crate::walk::doc_attr;
 use crate::walk::tokens::ident;
-use crate::walk::{references, row, scalar_ty};
+use crate::walk::{doc_lines, references, row, scalar_ty};
 use crate::{Endian, Error, MessageDef, Root};
 
 /// A compile-time assertion about a type known only by name.
@@ -383,13 +383,13 @@ pub(super) fn inherent_encodes(
         Some(false) => "",
         _ => "\n\n# Errors\n\n`EncodeError` for a value the type's declarations refuse.",
     };
-    let into_doc = format!("Append the wire bytes to `out`.\n\n{errors}");
+    let into_doc = doc_lines(&format!("Append the wire bytes to `out`.\n\n{errors}"));
     // A `Result` is already `#[must_use]`.
     let must_use = (refuse::known(fallible) == Some(false)).then(|| quote!(#[must_use]));
-    let vec_doc = format!("The wire bytes, in a new vector.{vec_doc}");
+    let vec_doc = doc_lines(&format!("The wire bytes, in a new vector.{vec_doc}"));
     match needs {
         None => quote! {
-            #[doc = #into_doc]
+            #into_doc
             #[inline]
             pub fn encode_into<__B: #root::Buffer>(
                 &self,
@@ -399,7 +399,7 @@ pub(super) fn inherent_encodes(
             }
 
             #root::__private::alloc_only! {
-                #[doc = #vec_doc]
+                #vec_doc
                 #[inline]
                 #must_use
                 pub fn encode(&self) -> #bytes {
@@ -410,7 +410,7 @@ pub(super) fn inherent_encodes(
         Some(with) => {
             let plain = (!with).then(|| {
                 quote! {
-                    #[doc = #into_doc]
+                    #into_doc
                     #[inline]
                     pub fn encode_into<__B: #root::Buffer>(
                         &self,
@@ -420,7 +420,7 @@ pub(super) fn inherent_encodes(
                     }
 
                     #root::__private::alloc_only! {
-                        #[doc = #vec_doc]
+                        #vec_doc
                         #[inline]
                         #must_use
                         pub fn encode(&self) -> #bytes {
@@ -430,7 +430,7 @@ pub(super) fn inherent_encodes(
                 }
             });
             quote! {
-                #[doc = #into_doc]
+                #into_doc
                 #[inline]
                 pub fn encode_into_with<__B: #root::Buffer>(
                     &self,
@@ -441,7 +441,7 @@ pub(super) fn inherent_encodes(
                 }
 
                 #root::__private::alloc_only! {
-                    #[doc = #vec_doc]
+                    #vec_doc
                     #[inline]
                     #must_use
                     pub fn encode_with(&self, ctx: <Self as #of>::Ctx) -> #bytes {

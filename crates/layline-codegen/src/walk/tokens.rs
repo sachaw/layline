@@ -93,16 +93,17 @@ pub(crate) fn ident(name: &str) -> proc_macro2::Ident {
 
 /// Documentation, as `#[doc]` lines.
 pub fn doc_attr(doc: &Option<String>) -> TokenStream {
-    match doc {
-        Some(text) => {
-            let lines = text.lines().map(|l| {
-                let l = format!(" {l}");
-                quote! { #[doc = #l] }
-            });
-            quote! { #(#lines)* }
-        }
-        None => quote!(),
-    }
+    doc.as_deref().map(doc_lines).unwrap_or_default()
+}
+
+/// Text as one `#[doc]` attribute per line, which prints as `///` lines: a `#[doc]` holding a
+/// newline prints as a `/** */` block, whose lines a formatter may indent into a doctest.
+pub fn doc_lines(text: &str) -> TokenStream {
+    let lines = text.lines().map(|l| {
+        let l = format!(" {l}");
+        quote! { #[doc = #l] }
+    });
+    quote! { #(#lines)* }
 }
 
 /// [`Scalar::primitive`], as tokens.

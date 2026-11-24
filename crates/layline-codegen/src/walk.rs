@@ -15,8 +15,8 @@ pub(crate) use reference::references;
 pub use row::field_rows;
 pub use tokens::{WidthAttr, kind_ty, width_attr};
 pub(crate) use tokens::{
-    block_field, doc_attr, emit_field, emit_message_field, endian_arg, hidden_block, path,
-    scalar_ty,
+    block_field, doc_attr, doc_lines, emit_field, emit_message_field, endian_arg, hidden_block,
+    path, scalar_ty,
 };
 
 #[cfg(feature = "emit")]
