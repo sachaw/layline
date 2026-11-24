@@ -14,6 +14,7 @@
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
+#![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -109,7 +110,7 @@ pub mod __private {
     pub use crate::__layline_alloc as alloc_only;
     pub use crate::field::{Decoded, Decodes, Fallibility, assert_layout};
     pub use crate::order::{Be, ByteOrder, Le};
-    pub use crate::reach::{Link, Node};
+    pub use crate::reach::{Link, Node, Unfrozen};
 
     /// The searches that work out a message's constants across the types it holds.
     pub mod reach {

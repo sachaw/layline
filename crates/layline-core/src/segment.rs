@@ -406,9 +406,10 @@ pub trait Message: Sized {
     /// This type's part of the graph that `OPEN_ENDED` and `ENCODE_FALLIBLE` are searched in,
     /// so a type that holds itself has constants. A type that holds no message keeps the default.
     #[doc(hidden)]
-    const NODE: crate::__private::Link = crate::__private::Link::new(
-        &crate::__private::Node::leaf(Self::OPEN_ENDED, Self::ENCODE_FALLIBLE),
-    );
+    const NODE: crate::__private::Link = crate::__private::Link::Leaf {
+        open_ended: Self::OPEN_ENDED,
+        refuses: Self::ENCODE_FALLIBLE,
+    };
 
     /// The deepest this type decodes: the number of messages and catalogues it may be nested in,
     /// counted from the one decode started at. Deeper, decode returns
@@ -550,7 +551,7 @@ pub trait MessageRef<'a>: Sized {
     /// This type's part of the graph its constants are searched in, as [`Message::NODE`].
     #[doc(hidden)]
     const NODE: crate::__private::Link =
-        crate::__private::Link::new(&crate::__private::Node::leaf(false, Self::ENCODE_FALLIBLE));
+        crate::__private::Link::Leaf { open_ended: false, refuses: Self::ENCODE_FALLIBLE };
 
     /// Append the wire bytes to `out`.
     ///
@@ -594,9 +595,10 @@ pub trait Choice: Sized {
 
     /// This type's part of the graph its constants are searched in, as [`Message::NODE`].
     #[doc(hidden)]
-    const NODE: crate::__private::Link = crate::__private::Link::new(
-        &crate::__private::Node::leaf(Self::OPEN_ENDED, Self::ENCODE_FALLIBLE),
-    );
+    const NODE: crate::__private::Link = crate::__private::Link::Leaf {
+        open_ended: Self::OPEN_ENDED,
+        refuses: Self::ENCODE_FALLIBLE,
+    };
 
     /// The deepest this catalogue decodes, as [`Message::MAX_DEPTH`].
     const MAX_DEPTH: u32 = crate::MAX_NESTING_DEPTH;

@@ -51,12 +51,16 @@ impl ::layline::Message for Object {
             refuses: true,
             ends: &[<Body as ::layline::Choice>::NODE],
             holds: &[<Body as ::layline::Choice>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
-    const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(
-        <Self as ::layline::Message>::NODE,
-    );
+    const OPEN_ENDED: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::open_ended(
+            <Object as ::layline::Message>::NODE,
+        );
+        SEARCHED
+    };
     const ENCODE_FALLIBLE: bool = true;
     const MAX_DEPTH: u32 = 16;
     fn decode_with_nested(
@@ -300,15 +304,22 @@ impl ::layline::Choice for Body {
             refuses: <__BodyBlock0 as ::layline::Layout>::ENCODE_FALLIBLE,
             ends: &[<MessageId as ::layline::Message>::NODE],
             holds: &[<MessageId as ::layline::Message>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
-    const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(
-        <Self as ::layline::Choice>::NODE,
-    );
-    const ENCODE_FALLIBLE: bool = ::layline::__private::reach::refuses(
-        <Self as ::layline::Choice>::NODE,
-    );
+    const OPEN_ENDED: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::open_ended(
+            <Body as ::layline::Choice>::NODE,
+        );
+        SEARCHED
+    };
+    const ENCODE_FALLIBLE: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::refuses(
+            <Body as ::layline::Choice>::NODE,
+        );
+        SEARCHED
+    };
     fn decode_with_nested(
         discriminant: i64,
         body: &[u8],
@@ -495,15 +506,22 @@ impl ::layline::Message for Nested {
             refuses: false,
             ends: &[<Object as ::layline::Message>::NODE],
             holds: &[<Object as ::layline::Message>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
-    const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(
-        <Self as ::layline::Message>::NODE,
-    );
-    const ENCODE_FALLIBLE: bool = ::layline::__private::reach::refuses(
-        <Self as ::layline::Message>::NODE,
-    );
+    const OPEN_ENDED: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::open_ended(
+            <Nested as ::layline::Message>::NODE,
+        );
+        SEARCHED
+    };
+    const ENCODE_FALLIBLE: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::refuses(
+            <Nested as ::layline::Message>::NODE,
+        );
+        SEARCHED
+    };
     fn decode_with_nested(
         body: &[u8],
         __depth: u32,
@@ -688,8 +706,9 @@ impl ::layline::Message for NullArray {
             refuses: true,
             ends: &[],
             holds: &[<Nested as ::layline::Message>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
     const OPEN_ENDED: bool = false;
     const ENCODE_FALLIBLE: bool = true;
@@ -897,15 +916,22 @@ impl ::layline::Message for MessageId {
                 <NullArray as ::layline::Message>::NODE,
                 <Nested as ::layline::Message>::NODE,
             ],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
-    const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(
-        <Self as ::layline::Message>::NODE,
-    );
-    const ENCODE_FALLIBLE: bool = ::layline::__private::reach::refuses(
-        <Self as ::layline::Message>::NODE,
-    );
+    const OPEN_ENDED: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::open_ended(
+            <MessageId as ::layline::Message>::NODE,
+        );
+        SEARCHED
+    };
+    const ENCODE_FALLIBLE: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::refuses(
+            <MessageId as ::layline::Message>::NODE,
+        );
+        SEARCHED
+    };
     fn decode_with_nested(
         body: &[u8],
         __depth: u32,

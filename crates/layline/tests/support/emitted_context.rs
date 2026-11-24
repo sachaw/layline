@@ -57,12 +57,16 @@ impl ::layline::Message for Packet {
             refuses: true,
             ends: &[<Payload as ::layline::Choice>::NODE],
             holds: &[<Payload as ::layline::Choice>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
-    const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(
-        <Self as ::layline::Message>::NODE,
-    );
+    const OPEN_ENDED: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::open_ended(
+            <Packet as ::layline::Message>::NODE,
+        );
+        SEARCHED
+    };
     const ENCODE_FALLIBLE: bool = true;
     fn decode_with_nested(
         body: &[u8],
@@ -352,12 +356,16 @@ impl ::layline::Choice for Payload {
             refuses: true,
             ends: &[<Pdws as ::layline::Message>::NODE],
             holds: &[<Pdws as ::layline::Message>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
-    const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(
-        <Self as ::layline::Choice>::NODE,
-    );
+    const OPEN_ENDED: bool = {
+        static SEARCHED: bool = ::layline::__private::reach::open_ended(
+            <Payload as ::layline::Choice>::NODE,
+        );
+        SEARCHED
+    };
     const ENCODE_FALLIBLE: bool = true;
     fn decode_with_nested(
         discriminant: i64,
@@ -631,8 +639,9 @@ impl ::layline::Message for Pdws {
             refuses: true,
             ends: &[],
             holds: &[<Pdw as ::layline::Message>::NODE],
+            unfrozen: ::layline::__private::Unfrozen::new(),
         };
-        ::layline::__private::Link::new(&NODE)
+        ::layline::__private::Link::Node(&NODE)
     };
     const OPEN_ENDED: bool = false;
     const ENCODE_FALLIBLE: bool = true;

@@ -321,7 +321,7 @@ fn a_cycle_in_the_open_endedness_constants_is_searched_rather_than_refused() {
     ]))
     .expect("the cycle resolves");
 
-    let searched = "const OPEN_ENDED: bool = ::layline::__private::reach::open_ended(";
+    let searched = "static SEARCHED: bool = ::layline::__private::reach::open_ended(";
     assert_eq!(src.matches(searched).count(), 2, "both search their node:\n{src}");
     assert!(src.contains("ends: &[<B as ::layline::Message>::NODE]"), "{src}");
     assert!(src.contains("ends: &[<A as ::layline::Message>::NODE]"), "{src}");

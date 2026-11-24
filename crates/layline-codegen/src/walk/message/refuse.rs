@@ -111,8 +111,8 @@ impl Constants {
 /// `links` and ends as `end` says. `id` distinguishes its node from every other.
 ///
 /// An item that links to nothing keeps the default node, and its constants are what it decides
-/// alone. Otherwise its node is a `static`, and each constant is a search from it, which a cycle
-/// of types cannot make depend on itself.
+/// alone. Otherwise its node is a `static`, and each constant copies a `static` that is a search
+/// from it, which a cycle of types cannot make depend on itself.
 pub(super) fn constants(
     own: &TokenStream,
     links: &[TokenStream],
@@ -128,17 +128,18 @@ pub(super) fn constants(
     let reach = quote!(#root::__private::reach);
     let (node, link) = (quote!(#root::__private::Node), quote!(#root::__private::Link));
     let linked = !links.is_empty() || !ends.is_empty();
-    let open_ended = if ends.is_empty() {
-        quote!(#open)
-    } else {
-        quote!(#reach::open_ended(<Self as #of>::NODE))
+    // Only a `static` may read a node, so the search is one and the constant copies it.
+    let searched = |search: TokenStream| {
+        quote!({
+            static SEARCHED: #bool_ty = #reach::#search(<#name as #of>::NODE);
+            SEARCHED
+        })
     };
+    let open_ended = if ends.is_empty() { quote!(#open) } else { searched(quote!(open_ended)) };
     let (fallible, value) = match known(own) {
         Some(true) => (quote!(true), quote!(true)),
         _ if links.is_empty() => (own.clone(), own.clone()),
-        _ => {
-            (quote!(<#name as #of>::ENCODE_FALLIBLE), quote!(#reach::refuses(<Self as #of>::NODE)))
-        }
+        _ => (quote!(<#name as #of>::ENCODE_FALLIBLE), searched(quote!(refuses))),
     };
     let node = linked.then(|| {
         quote! {
@@ -151,8 +152,9 @@ pub(super) fn constants(
                     refuses: #own,
                     ends: &[#(#ends),*],
                     holds: &[#(#links),*],
+                    unfrozen: #root::__private::Unfrozen::new(),
                 };
-                #link::new(&NODE)
+                #link::Node(&NODE)
             };
         }
     });
