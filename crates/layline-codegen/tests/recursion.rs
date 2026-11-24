@@ -403,9 +403,10 @@ fn a_direct_self_reference_settles_to_false() {
     assert!(src.contains("pub next: Option<Box<Link>>"), "{src}");
 }
 
+/// The first attribute writes `n`, and encode checks the second against it.
 #[test]
-fn a_field_may_not_be_both_a_byte_length_and_a_count() {
-    let why = refusal(vec![
+fn a_field_may_be_both_a_byte_length_and_a_count() {
+    let items = vec![
         item("Leaf", vec![Segment::Block(vec![Field::new("v", Kind::Scalar(Scalar::U(8)))])]),
         item(
             "Both",
@@ -421,11 +422,9 @@ fn a_field_may_not_be_both_a_byte_length_and_a_count() {
                 ),
             ],
         ),
-    ]);
-    assert!(
-        why.contains("`n` is the byte length of a collection and also the length of a collection"),
-        "{why}"
-    );
+    ];
+    let src = emit_module(&module(items)).expect("the second is checked");
+    assert!(src.contains("EncodeError::agree(\"pad\""), "{src}");
 }
 
 /// Generated code refers to other items only by path, so a cycle cannot repeat the output.

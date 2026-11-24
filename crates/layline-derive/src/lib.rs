@@ -369,10 +369,17 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   reads a field encode fills in only after a later segment, such as a `#[seek]` record's
 ///   offset, is refused when the type is built.
 ///
-/// Where two attributes would write one field, the first writes it and the second is checked. A
-/// `Stated<T>` that no attribute writes is refused when the type is built: `#[count(n * m)]` reads
-/// two fields, so it writes neither. A `#[with(..)]` value is only read: `#[with(n)]` passes a
-/// written field as encode writes it, and `#[with(n - 1)]` writes nothing back to `n`.
+/// Where several expressions are written in one field, the first in declaration order writes it:
+/// field by field, and on one field `#[when]`, then `#[count]` or `#[len]`, then `#[stride]`,
+/// then `#[seek]`, and a `#[switch]` selector before its `#[len]`. Encode checks every other
+/// against the field as the first writes it, with `EncodeError::Mismatch` where they disagree.
+/// Kaitai's `rfextgeo_ext` sizes its text and its padding with one length:
+/// `#[len(markings_len)] #[text] markings: String` writes `markings_len`, and
+/// `#[len(ext_len * 4 - (13 + markings_len))] padding: Vec<u8>`, with `ext_len` a parameter, is
+/// checked. A `Stated<T>` that no attribute writes is refused when the type is built:
+/// `#[count(n * m)]` reads two fields, so it writes neither. A `#[with(..)]` value is only read:
+/// `#[with(n)]` passes a written field as encode writes it, and `#[with(n - 1)]` writes nothing
+/// back to `n`.
 /// An `#[other]` arm has no discriminant, so encode refuses one with `EncodeError::Unstated` when
 /// a `Stated<T>` selects it. In a `Stated<T>` flags word, bits no `#[when]` tests are zero:
 /// encode writes them so, and decode refuses them set.

@@ -127,7 +127,7 @@ pub struct Packet {
 
 #[test]
 fn message_when_flag_is_also_a_count() {
-    refused(
+    checked(
         r#"use layline::Message;
 
 #[derive(Message)]
@@ -138,7 +138,22 @@ pub struct Packet {
     #[count(flags)]
     pub items: Vec<u8>,
 }"#,
-        "`flags` is already the count of `items`",
+    );
+}
+
+#[test]
+fn one_bool_marks_two_fields_either_way() {
+    checked(
+        r#"use layline::Message;
+
+#[derive(Message)]
+pub struct Node {
+    pub short: bool,
+    #[when(short)]
+    pub a: Option<u8>,
+    #[when(!short)]
+    pub b: Option<u16>,
+}"#,
     );
 }
 
@@ -285,33 +300,6 @@ pub struct Header {
 }
 
 #[test]
-fn message_when_two_fields_share_a_bool() {
-    refused(
-        r#"use layline::{Layout, Message};
-
-#[derive(Debug, Clone, PartialEq, Layout)]
-#[layout(bits = 8)]
-pub struct PackedHeader {
-    #[bits(1)]
-    pub on: bool,
-    #[bits(7)]
-    pub spare: u8,
-}
-
-#[derive(Debug, Clone, Message)]
-pub struct Packet {
-    #[bytes(1)]
-    pub header: PackedHeader,
-    #[when(header.on)]
-    pub a: Option<u16>,
-    #[when(header.on)]
-    pub b: Option<u16>,
-}"#,
-        "`header.on` is a `bool`, and `b` also uses it",
-    );
-}
-
-#[test]
 fn message_when_unknown_field() {
     refused(
         r#"use layline::Message;
@@ -428,23 +416,6 @@ pub struct Node {
     pub translation: Option<u32>,
 }"#,
         "`#[when(flag & 0)]` masks no bits",
-    );
-}
-
-#[test]
-fn one_bool_cannot_mark_two_fields_either_way() {
-    refused(
-        r#"use layline::Message;
-
-#[derive(Message)]
-pub struct Node {
-    pub short: bool,
-    #[when(short)]
-    pub a: Option<u8>,
-    #[when(!short)]
-    pub b: Option<u16>,
-}"#,
-        "`short` is a `bool`, and `b` also uses it",
     );
 }
 

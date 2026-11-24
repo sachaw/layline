@@ -1300,3 +1300,325 @@ impl Dw {
         ::layline::Message > ::encode_with(self, ())) }
     }
 }
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marked {
+    pub markings_len: ::layline::Stated<u8>,
+    pub markings: String,
+    pub padding: Vec<u8>,
+}
+#[derive(Debug, Clone, PartialEq, ::layline::Layout)]
+#[layout(bytes = 1, internal)]
+#[doc(hidden)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+pub struct __MarkedBlock0 {
+    pub markings_len: u8,
+}
+///The parameters `Marked` reads from its holder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MarkedCtx {
+    ///Parameter `extension_len`.
+    pub extension_len: u16,
+}
+impl MarkedCtx {
+    ///Build a context for `Marked`, parameters in declaration order.
+    #[must_use]
+    pub fn new(extension_len: u16) -> Self {
+        Self { extension_len }
+    }
+}
+impl ::layline::Message for Marked {
+    const NAME: &'static str = "Marked";
+    type Ctx = MarkedCtx;
+    /// Each segment in wire order, with its start and length.
+    const SEGMENTS: &'static [::layline::table::SegmentDef<'static>] = &[
+        ::layline::table::SegmentDef::new(
+            "__MarkedBlock0",
+            ::layline::table::Start::At(0),
+            ::layline::table::Span::Fixed(8),
+            None,
+            None,
+            <__MarkedBlock0 as ::layline::Layout>::FIELDS,
+        ),
+        ::layline::table::SegmentDef::new(
+            "markings",
+            ::layline::table::Start::At(8),
+            ::layline::table::Span::Window {
+                by: ::layline::table::By::field("markings_len"),
+            },
+            None,
+            None,
+            &[],
+        ),
+        ::layline::table::SegmentDef::new(
+            "padding",
+            ::layline::table::Start::After {
+                segment: "markings",
+                bits: 0,
+            },
+            ::layline::table::Span::Window {
+                by: ::layline::table::By::field("extension_len*4-(1+markings_len)"),
+            },
+            None,
+            None,
+            &[],
+        ),
+    ];
+    /// The parameters the holder supplies, in declaration order.
+    const PARAMS: &'static [::layline::table::ParamDef<'static>] = &[
+        ::layline::table::ParamDef::new("extension_len", "u16"),
+    ];
+    const OPEN_ENDED: bool = false;
+    const ENCODE_FALLIBLE: bool = true;
+    fn decode_with_nested(
+        body: &[u8],
+        __depth: u32,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
+        type __O = ::layline::__private::Le;
+        if __depth > <Self as ::layline::Message>::MAX_DEPTH {
+            return Err(::layline::ParseError::TooDeep {
+                limit: <Self as ::layline::Message>::MAX_DEPTH,
+            });
+        }
+        let __body = body;
+        let mut __at = 0usize;
+        let mut __hi = 0usize;
+        let __b0 = __MarkedBlock0::decode_slice_in::<
+            __O,
+        >(
+                __body
+                    .get(__at..__at + 1)
+                    .ok_or(::layline::ParseError::Short {
+                        need_bytes: __at + 1,
+                        got_bytes: __body.len(),
+                        at: __at,
+                    })?,
+            )
+            .map_err(|__err| __err.rebased(__at))?;
+        __at += 1;
+        if __at > __hi {
+            __hi = __at;
+        }
+        let __n = ::layline::__private::value::size(
+                Some(::layline::WireInt::to_i64(&__b0.markings_len)),
+            )
+            .ok_or(::layline::ParseError::Malformed {
+                field: "markings_len",
+                at: __at,
+            })?;
+        let __end = __at
+            .checked_add(__n)
+            .ok_or(::layline::ParseError::Malformed {
+                field: "markings_len",
+                at: __at,
+            })?;
+        let markings = {
+            let __s = __body
+                .get(__at..__end)
+                .ok_or(::layline::ParseError::Short {
+                    need_bytes: __end,
+                    got_bytes: __body.len(),
+                    at: __at,
+                })?;
+            match <::layline::__private::Utf8 as ::layline::__private::TextCodec>::decode(
+                __s,
+            ) {
+                Some(__t) => __t,
+                None => {
+                    return Err(::layline::ParseError::Malformed {
+                        field: "markings",
+                        at: __at,
+                    });
+                }
+            }
+        };
+        __at = __end;
+        if __at > __hi {
+            __hi = __at;
+        }
+        let __n = ::layline::__private::value::size(
+                ::layline::__private::value::sub(
+                    ::layline::__private::value::mul(
+                        Some(::layline::WireInt::to_i64(&__ctx.extension_len)),
+                        Some(4i64),
+                    ),
+                    ::layline::__private::value::add(
+                        Some(1i64),
+                        Some(::layline::WireInt::to_i64(&__b0.markings_len)),
+                    ),
+                ),
+            )
+            .ok_or(::layline::ParseError::Malformed {
+                field: "extension_len",
+                at: __at,
+            })?;
+        let __end = __at
+            .checked_add(__n)
+            .ok_or(::layline::ParseError::Malformed {
+                field: "padding",
+                at: __at,
+            })?;
+        let __window = __body
+            .get(__at..__end)
+            .ok_or(::layline::ParseError::Short {
+                need_bytes: __end,
+                got_bytes: __body.len(),
+                at: __at,
+            })?;
+        let __walk = |__body: &[u8]| -> Result<_, ::layline::ParseError> {
+            let mut __at = 0usize;
+            let mut __v: Vec<u8> = Vec::new();
+            while __at < __body.len() {
+                let __s = __body
+                    .get(__at..__at + 1)
+                    .ok_or(::layline::ParseError::Short {
+                        need_bytes: __at + 1,
+                        got_bytes: __body.len(),
+                        at: __at,
+                    })?;
+                let __e = __s[0];
+                __at += 1;
+                __v.push(__e);
+            }
+            let __e = __v;
+            if __at != __body.len() {
+                return Err(::layline::ParseError::Malformed {
+                    field: "padding",
+                    at: 0,
+                });
+            }
+            Ok(__e)
+        };
+        let __e = __walk(__window)
+            .map_err(|__err| match __err {
+                ::layline::ParseError::Short { .. } => {
+                    ::layline::ParseError::Malformed {
+                        field: "padding",
+                        at: __at,
+                    }
+                }
+                __err => __err.rebased(__at),
+            })?;
+        __at = __end;
+        let padding = __e;
+        if __at > __hi {
+            __hi = __at;
+        }
+        Ok((
+            Self {
+                markings_len: ::layline::Stated::new(__b0.markings_len),
+                markings,
+                padding,
+            },
+            __hi,
+        ))
+    }
+    fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
+        type __O = ::layline::__private::Le;
+        out.push(
+            &__MarkedBlock0 {
+                markings_len: {
+                    ::layline::EncodeError::fit::<
+                        u8,
+                    >(
+                        "markings_len",
+                        {
+                            let __source = <::layline::__private::Utf8 as ::layline::__private::TextCodec>::encoded_len(
+                                self.markings.as_str(),
+                            );
+                            ::layline::__private::value::Wide::wide(__source)
+                        },
+                        0,
+                    )?;
+                    <u8 as ::layline::WireInt>::from_i64({
+                        let __source = <::layline::__private::Utf8 as ::layline::__private::TextCodec>::encoded_len(
+                            self.markings.as_str(),
+                        );
+                        ::layline::__private::value::Wide::wide(__source)
+                    })
+                },
+            }
+                .encode_in::<__O>()?,
+        )?;
+        {
+            let __mark = out.len();
+            for __c in self.markings.chars() {
+                <::layline::__private::Utf8 as ::layline::__private::TextCodec>::encode_char(
+                        __c,
+                        &mut *out,
+                    )
+                    .map_err(|__e| __e.named("markings"))?;
+            }
+            let __text = &out.written()[__mark..];
+        }
+        let __span_start = out.len();
+        for __e in &self.padding {
+            let __elem = out.len();
+            out.push(&[*__e])?;
+        }
+        {
+            let __value = ::layline::__private::value::Wide::wide(
+                out.len() - __span_start,
+            );
+            match ::layline::__private::value::sub(
+                ::layline::__private::value::mul(
+                    Some(::layline::WireInt::to_i64(&__ctx.extension_len)),
+                    Some(4i64),
+                ),
+                ::layline::__private::value::add(
+                    Some(1i64),
+                    Some({
+                        let __source = <::layline::__private::Utf8 as ::layline::__private::TextCodec>::encoded_len(
+                            self.markings.as_str(),
+                        );
+                        ::layline::__private::value::Wide::wide(__source)
+                    }),
+                ),
+            ) {
+                Some(__stated) => {
+                    ::layline::EncodeError::agree("padding", __value, __stated)?
+                }
+                _ => {
+                    return Err(::layline::EncodeError::Inexact {
+                        field: "padding",
+                        value: __value,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+impl Marked {
+    /// Append the wire bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// `EncodeError`: a full buffer, or a value the type's declarations refuse.
+    #[inline]
+    pub fn encode_into_with<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        ctx: <Self as ::layline::Message>::Ctx,
+    ) -> ::core::result::Result<(), ::layline::EncodeError> {
+        <::layline::__private::Fallibility<
+            true,
+        > as ::layline::__private::Buffers>::finish(
+            <Self as ::layline::Message>::encode_into_with(self, out, ctx),
+        )
+    }
+    ::layline::__private::alloc_only! {
+        #[doc = " The wire bytes, in a new vector."] #[doc = " "] #[doc = " # Errors"]
+        #[doc = " "] #[doc =
+        " `EncodeError` for a value the type's declarations refuse."] #[inline] pub fn
+        encode_with(& self, ctx : < Self as ::layline::Message > ::Ctx) ->
+        ::core::result::Result < ::layline::__private::Vec < ::core::primitive::u8 >,
+        ::layline::EncodeError > { < ::layline::__private::Fallibility < true > as
+        ::layline::__private::Encodes < ::layline::__private::Vec < ::core::primitive::u8
+        > >> ::finish(< Self as ::layline::Message > ::encode_with(self, ctx)) }
+    }
+}

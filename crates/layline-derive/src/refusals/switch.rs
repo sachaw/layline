@@ -149,32 +149,6 @@ pub struct Packet {
 }
 
 #[test]
-fn switch_window_field_claimed_twice() {
-    refused(
-        r#"use layline::Message;
-
-#[derive(Message)]
-#[message(closed)]
-pub enum Body {
-    #[value(0)]
-    Level(u8),
-}
-
-#[derive(Message)]
-pub struct Packet {
-    pub kind: u8,
-    pub n: u8,
-    #[count(n)]
-    pub items: Vec<u8>,
-    #[switch(kind)]
-    #[len(n)]
-    pub body: Body,
-}"#,
-        "`n` is the length of a collection and also the byte length of a switch",
-    );
-}
-
-#[test]
 fn switch_window_names_a_later_field() {
     refused(
         r#"use layline::Message;

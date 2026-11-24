@@ -13,7 +13,7 @@ use super::table::{Row, Rows};
 use crate::model::{Ty, split_ref};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{Derived, arguments, derivations, endian_arg, expressions, row};
+use crate::walk::{Derived, arguments, derivations, endian_arg, expressions, row, writers};
 use crate::{Absence, Count, Endian, Error, Expr, Kind, Len, Param, Presence, Root, Segment};
 
 /// Where encode reads a body's values from.
@@ -181,7 +181,7 @@ pub(super) fn walk_segments(
         derived.iter().any(|(_, d)| matches!(d, Derived::Offset { .. } | Derived::Checksum { .. }));
     // The holder owns a parameter's bytes, so encode never writes one.
     derived.retain(|(field, _)| !item.needs.iter().any(|p| p.name == *field));
-    clashes(owner, &derived)?;
+    let derived = writers(derived);
 
     let mut w = Walk {
         root,
@@ -602,56 +602,6 @@ impl Walk<'_> {
             },
             _ => Err(refuse()),
         }
-    }
-}
-
-/// Refuse a field that two derivations write.
-fn clashes(owner: &str, derived: &[(String, Derived)]) -> Result<(), Error> {
-    if let Some((field, a, b)) = derived.iter().enumerate().find_map(|(i, (f, d))| {
-        let other = derived[i + 1..]
-            .iter()
-            .find(|(g, e)| g == f && core::mem::discriminant(d) != core::mem::discriminant(e))?;
-        Some((f, d, &other.1))
-    }) {
-        return Err(Error::Refused(format!(
-            "{owner}: `{field}` is the {} and also the {}. {}",
-            a.what(),
-            b.what(),
-            a.instead().or_else(|| b.instead()).unwrap_or("Give the second a field of its own"),
-        )));
-    }
-
-    if let Some((flag, of)) = derived.iter().enumerate().find_map(|(i, (f, d))| {
-        let Derived::Presence { of, .. } = d else { return None };
-        derived[i + 1..]
-            .iter()
-            .find(|(g, e)| g == f && matches!(e, Derived::Presence { .. }))
-            .map(|_| (f, of))
-    }) {
-        return Err(Error::Refused(format!(
-            "{owner}: `{flag}` is the whole of `{of}`'s presence flag and another optional field's. \
-             Use a flags word with one mask per field (`#[when(w & 0x01)]`)"
-        )));
-    }
-
-    if let Some(field) = derived.iter().enumerate().find_map(|(i, (f, d))| {
-        derived[i + 1..].iter().find(|(g, e)| g == f && stride_clash(d, e)).map(|_| f)
-    }) {
-        return Err(Error::Refused(format!(
-            "{owner}: `{field}` is the element width of two runs with different elements. \
-             Give each stride its own field"
-        )));
-    }
-    Ok(())
-}
-
-/// Whether two strides on one field give different widths.
-fn stride_clash(a: &Derived, b: &Derived) -> bool {
-    match (a, b) {
-        (Derived::Stride { elem: x, by: a }, Derived::Stride { elem: y, by: b }) => {
-            x != y || a != b
-        }
-        _ => false,
     }
 }
 

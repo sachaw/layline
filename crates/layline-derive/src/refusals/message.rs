@@ -451,25 +451,6 @@ pub struct Packet {
 }
 
 #[test]
-fn two_claims_one_field() {
-    refused(
-        r#"use layline::Message;
-
-#[derive(Debug, Clone, PartialEq, Message)]
-#[message(endian = be)]
-struct Two {
-    n: u8,
-    #[count(n)]
-    items: Vec<u8>,
-    #[text]
-    #[len(n)]
-    label: String,
-}"#,
-        "Two: `n` is the length of a collection and also the encoded length of a string",
-    );
-}
-
-#[test]
 fn two_kind_words() {
     refused(
         r#"use layline::Message;

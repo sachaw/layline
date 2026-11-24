@@ -1,9 +1,10 @@
 //! One language for values: counts, lengths, strides, conditions, selectors and offsets are
-//! expressions. Encode writes the one field an invertible expression reads, and checks any other.
+//! expressions. Encode writes the one field an invertible expression reads, and checks any other,
+//! and where several would write one field, the first writes it and encode checks the rest.
 
 #![cfg(feature = "derive")]
 
-use layline::{EncodeError, Layout, Message, ParseError};
+use layline::{EncodeError, Layout, Message, ParseError, Stated};
 
 #[path = "support/rng.rs"]
 mod rng;
@@ -251,4 +252,178 @@ fn random_values_round_trip_or_are_refused() {
         }
     }
     assert!(wrote > 1000, "too few values encoded, so little was proven: {wrote}");
+}
+
+/// Kaitai's `rfextgeo_ext`: one length sizes the markings and, with the holder's extension
+/// length, the padding after them. The text writes it, and encode checks the padding.
+#[derive(Debug, Clone, PartialEq, Message)]
+#[message(endian = be, needs(extension_len: u16))]
+pub struct RfextgeoExt {
+    pub timestamp_seconds: u64,
+    pub timestamp_nanos: u32,
+    pub markings_len: Stated<u8>,
+    #[len(markings_len)]
+    #[text]
+    pub markings: String,
+    #[len(extension_len * 4 - (13 + markings_len))]
+    pub padding: Vec<u8>,
+}
+
+/// One count for a collection and a string: the collection, first, writes it.
+#[derive(Debug, Clone, PartialEq, Message)]
+pub struct Twice {
+    pub n: Stated<u8>,
+    #[count(n)]
+    pub items: Vec<u8>,
+    #[len(n)]
+    #[text]
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Message)]
+#[message(closed)]
+pub enum Level {
+    #[value(0)]
+    Bytes(Vec<u8>),
+}
+
+/// A count that also sizes a switch: the count writes it, and the arm is checked.
+#[derive(Debug, Clone, PartialEq, Message)]
+pub struct Sized {
+    pub kind: u8,
+    pub n: u8,
+    #[count(n)]
+    pub items: Vec<u8>,
+    #[switch(kind)]
+    #[len(n)]
+    pub body: Level,
+}
+
+/// One flag for two fields, present together: the first writes it.
+#[derive(Debug, Clone, PartialEq, Message)]
+pub struct Either {
+    pub on: Stated<bool>,
+    #[when(on)]
+    pub yes: Option<u8>,
+    #[when(!on)]
+    pub no: Option<u16>,
+}
+
+/// A flags word that also counts: its presence bit writes it, and encode checks the count.
+#[derive(Debug, Clone, PartialEq, Message)]
+pub struct Counted {
+    pub flags: u8,
+    #[when(flags & 0x01)]
+    pub extra: Option<u8>,
+    #[count(flags)]
+    pub items: Vec<u8>,
+}
+
+fn rfextgeo(markings: &str, padding: usize) -> RfextgeoExt {
+    RfextgeoExt {
+        timestamp_seconds: 0x0102_0304_0506_0708,
+        timestamp_nanos: 999_999_999,
+        markings_len: Stated::default(),
+        markings: String::from(markings),
+        padding: vec![0; padding],
+    }
+}
+
+#[test]
+fn one_length_for_two_values_is_written_by_the_first_and_checked_by_the_second() {
+    // Four words: 13 fixed bytes, 1 of markings and 2 of padding.
+    let ctx = RfextgeoExtCtx { extension_len: 4 };
+    let ext = rfextgeo("U", 2);
+    let wire = ext.encode_with(ctx).unwrap();
+    #[rustfmt::skip]
+    assert_eq!(wire, [
+        1, 2, 3, 4, 5, 6, 7, 8,     // seconds
+        0x3B, 0x9A, 0xC9, 0xFF,     // nanoseconds
+        1, b'U',                    // the markings, which state their length
+        0, 0,                       // the padding the extension's length leaves
+    ]);
+    let (back, used) = RfextgeoExt::decode_with(&wire, ctx).unwrap();
+    assert_eq!((back.markings_len.get(), used), (1, 16));
+    assert_eq!(back, ext);
+
+    assert_eq!(
+        rfextgeo("U", 3).encode_with(ctx),
+        Err(EncodeError::Mismatch { field: "padding", value: 3, stated: 2 })
+    );
+    assert_eq!(
+        rfextgeo("UNCLASSIFIED", 2).encode_with(ctx),
+        Err(EncodeError::Mismatch { field: "padding", value: 2, stated: -9 })
+    );
+    assert!(rfextgeo("", 3).encode_with(ctx).is_ok());
+
+    let twice = Twice { n: Stated::default(), items: vec![7, 8], label: String::from("ab") };
+    assert_eq!(twice.encode().unwrap(), [2, 7, 8, b'a', b'b']);
+    assert_eq!(Twice::decode(&[2, 7, 8, b'a', b'b']).unwrap().0, twice);
+    let long = Twice { label: String::from("abc"), ..twice };
+    assert_eq!(long.encode(), Err(EncodeError::Mismatch { field: "label", value: 3, stated: 2 }));
+
+    let sized = Sized { kind: 0, n: 0, items: vec![1], body: Level::Bytes(vec![2]) };
+    assert_eq!(sized.encode().unwrap(), [0, 1, 1, 2]);
+    assert_eq!(Sized::decode(&[0, 1, 1, 2]).unwrap().0, Sized { n: 1, ..sized.clone() });
+    let short = Sized { body: Level::Bytes(vec![]), ..sized };
+    assert_eq!(short.encode(), Err(EncodeError::Mismatch { field: "body", value: 0, stated: 1 }));
+}
+
+#[test]
+fn a_flag_one_field_writes_is_checked_for_every_other() {
+    let yes = Either { on: Stated::default(), yes: Some(1), no: None };
+    assert_eq!(yes.encode().unwrap(), [1, 1]);
+    assert_eq!(Either::decode(&[1, 1]).unwrap().0, yes);
+    let no = Either { on: Stated::default(), yes: None, no: Some(0x0302) };
+    assert_eq!(no.encode().unwrap(), [0, 2, 3]);
+    assert_eq!(Either::decode(&[0, 2, 3]).unwrap().0, no);
+    let both = Either { on: Stated::default(), yes: Some(1), no: Some(2) };
+    assert_eq!(both.encode(), Err(EncodeError::Mismatch { field: "no", value: 1, stated: 0 }));
+    let neither = Either { on: Stated::default(), yes: None, no: None };
+    assert_eq!(neither.encode(), Err(EncodeError::Mismatch { field: "no", value: 0, stated: 1 }));
+
+    let counted = Counted { flags: 2, extra: Some(9), items: vec![1, 2, 3] };
+    assert_eq!(counted.encode().unwrap(), [3, 9, 1, 2, 3]);
+    assert_eq!(Counted::decode(&[3, 9, 1, 2, 3]).unwrap().0, Counted { flags: 3, ..counted });
+    let short = Counted { flags: 2, extra: Some(9), items: vec![1, 2] };
+    assert_eq!(short.encode(), Err(EncodeError::Mismatch { field: "items", value: 2, stated: 3 }));
+}
+
+#[test]
+fn hostile_lengths_for_two_values_are_refused() {
+    let ctx = RfextgeoExtCtx { extension_len: 4 };
+    let mut wire = rfextgeo("U", 2).encode_with(ctx).unwrap();
+    // Markings past the extension leave a negative padding.
+    wire[12] = 4;
+    assert!(RfextgeoExt::decode_with(&wire, ctx).is_err());
+    // An extension too short for its fixed bytes.
+    assert!(RfextgeoExt::decode_with(&wire, RfextgeoExtCtx { extension_len: 3 }).is_err());
+    assert!(RfextgeoExt::decode_with(&wire, RfextgeoExtCtx { extension_len: u16::MAX }).is_err());
+    assert!(Twice::decode(&[3, 1, 2, 3, b'a', b'b']).is_err());
+}
+
+#[test]
+fn random_bytes_with_one_length_for_two_values_decode_to_what_encodes_back() {
+    let mut r = rng::Rng(0x0e1e_c7ed_0000_0c0c);
+    let mut read = 0;
+    for _ in 0..20_000 {
+        let mut buf = vec![0u8; 13 + (r.next() % 20) as usize];
+        r.fill(&mut buf);
+        buf[12] %= 8;
+        for b in &mut buf[13..] {
+            *b &= 0x7F;
+        }
+        let ctx = RfextgeoExtCtx { extension_len: (r.next() % 9) as u16 };
+        if let Ok((ext, used)) = RfextgeoExt::decode_with(&buf, ctx) {
+            assert_eq!(ext.encode_with(ctx).unwrap(), &buf[..used]);
+            read += 1;
+        }
+        if let Ok((twice, used)) = Twice::decode(&buf[12..]) {
+            assert_eq!(twice.encode().unwrap(), &buf[12..12 + used]);
+        }
+        if let Ok((either, used)) = Either::decode(&buf[..3]) {
+            assert_eq!(either.encode().unwrap(), &buf[..used]);
+        }
+    }
+    assert!(read > 1000, "the corpus reaches whole extensions: {read}");
 }

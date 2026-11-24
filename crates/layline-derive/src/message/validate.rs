@@ -61,34 +61,6 @@ pub(super) fn reference_site<'a>(
     None
 }
 
-/// The segment whose number `target` is written as, and what number, if one writes it.
-fn other_claim<'a>(p: &'a Parsed, target: &str) -> Option<(&'a str, &'static str)> {
-    // A bare name is written. Other expressions may be too, but the model refuses those clashes.
-    let named = |v: Option<&Value>| v.and_then(Value::bare).is_some_and(|r| r.name == target);
-    for f in &p.fields {
-        let what = match &f.body {
-            Body::Repeat { count: CountSpec::Window { by, .. }, .. } if named(Some(by)) => {
-                "byte length"
-            }
-            Body::Repeat { count, .. } if named(count.by()) => "count",
-            Body::Repeat { count, .. } if named(count.stride()) => "stride",
-            Body::Repeat { at, .. } if named(at.as_ref()) => "offset",
-            Body::Placed { at, .. } if named(Some(at)) => "offset",
-            Body::Placed { absent: Some(PlacedAbsence::ZeroLength(by)), .. }
-                if by.name == target =>
-            {
-                "byte length"
-            }
-            Body::Value { len_ref, .. } if named(len_ref.as_ref()) => "length prefix",
-            Body::Switch { on, .. } if named(on.field()) => "discriminant",
-            Body::Switch { window, .. } if named(window.field()) => "byte length",
-            _ => continue,
-        };
-        return Some((&f.name, what));
-    }
-    None
-}
-
 fn choices(p: &Parsed, at_index: usize) -> String {
     let earlier: Vec<String> = p.fields[..at_index]
         .iter()
@@ -361,37 +333,10 @@ pub(super) fn check_predicates(p: &Parsed) -> syn::Result<()> {
         let Body::Opt { when: Some(when), .. } = &f.body else {
             continue;
         };
-        // Only a test of one field writes it. Encode checks any other condition.
+        // Only a test of one field writes it. Encode checks any other condition, and any other
+        // attribute that would write the same field.
         let Some((by, test)) = when.tested() else { continue };
-
-        if let Some((owner, what)) = other_claim(p, &by.name) {
-            return Err(syn::Error::new(
-                by.span,
-                format!(
-                    "field `{}`: `{}` is already the {what} of `{owner}`, so it cannot also be a flags word. \
-                     Use a separate field for the presence bits",
-                    f.name, by.name,
-                ),
-            ));
-        }
-
-        let Some(mask) = test.mask else {
-            if let Some(other) = p.fields.iter().find(|g| {
-                g.name != f.name
-                    && matches!(&g.body, Body::Opt { when: Some(w), .. }
-                        if w.tested().is_some_and(|(r, t)| r.name == by.name && t.mask.is_none()))
-            }) {
-                return Err(syn::Error::new(
-                    by.span,
-                    format!(
-                        "field `{}`: `{}` is a `bool`, and `{}` also uses it. \
-                         Make it an integer flags word and test one bit per field",
-                        f.name, by.name, other.name,
-                    ),
-                ));
-            }
-            continue;
-        };
+        let Some(mask) = test.mask else { continue };
         let Some(mask) = mask.fold().map(|m| m as u64) else { continue };
 
         let Some(bits) = p

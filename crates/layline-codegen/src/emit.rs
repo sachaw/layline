@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bool_presence_flag_governs_exactly_one_field() {
+    fn a_bool_presence_flag_is_written_from_its_first_field_and_checked_for_the_rest() {
         let opt = |name: &str, kind| Segment::Opt {
             when: Presence::When(Expr::name("head.on")),
             field: Field::new(name, kind),
@@ -485,10 +485,7 @@ mod tests {
         };
 
         let out = message_parts(&msg(opt("b", Kind::Scalar(Scalar::U(8)))), &[], &Root::default());
-        let Err(Error::Refused(why)) = out else {
-            panic!("two presence writes over one `bool` must be refused");
-        };
-        assert!(why.contains("is the whole of `a`'s presence flag"), "{why}");
+        assert!(out.is_ok(), "`a` writes the flag and `b` is checked against it");
 
         let out = message_parts(
             &msg(Segment::Repeat {

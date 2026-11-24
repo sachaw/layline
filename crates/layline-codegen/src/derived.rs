@@ -115,37 +115,6 @@ pub(crate) enum Derived {
 
 #[cfg_attr(not(feature = "walk"), allow(dead_code))]
 impl Derived {
-    /// The noun phrase an error message uses for this derivation.
-    pub(crate) fn what(&self) -> &'static str {
-        match self {
-            Derived::Count { .. } => "length of a collection",
-            Derived::TextLen { .. } => "encoded length of a string",
-            Derived::Offset { record: false, .. } => "position of a collection",
-            Derived::Offset { record: true, .. } => "position of a record",
-            Derived::ByteLen { record: false, .. } => "byte length of a collection",
-            Derived::ByteLen { record: true, .. } => "byte length of a record",
-            Derived::Stride { .. } => "wire width of one element",
-            Derived::ArmLen { .. } => "byte length of a switch",
-            Derived::Discriminant { .. } => "discriminant of a switch",
-            Derived::Flags { .. } => "presence bits of optional fields",
-            Derived::Presence { .. } => "presence of an optional field",
-            Derived::Checksum { .. } => "check value over the bytes it covers",
-        }
-    }
-
-    /// The fix to suggest, for derivations that have one.
-    pub(crate) fn instead(&self) -> Option<&'static str> {
-        match self {
-            Derived::Flags { .. } => Some("Give the presence bits a word of their own"),
-            Derived::Presence { .. } => {
-                Some("Write a flags word with a mask per field (`#[when(w & 0x01)]`)")
-            }
-            Derived::Checksum { .. } => Some("Give the checksum a field of its own"),
-            Derived::Stride { .. } => Some("Give the stride a field of its own"),
-            _ => None,
-        }
-    }
-
     /// The slot this derivation reserves, and the segment it describes.
     ///
     /// Encode writes zeros to a reserved field, then fills in the number after the segment.
@@ -257,11 +226,7 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                 }
             }
             Segment::Placed { name, at, absent, .. } => {
-                derive(&mut out, at, &|_, by| Derived::Offset {
-                    of: name.clone(),
-                    record: true,
-                    by,
-                });
+                // A record's `#[when]` comes before its `#[seek]`, as a collection's does.
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
                     derive(&mut out, &Expr::name(by), &|_, by| Derived::ByteLen {
                         of: name.clone(),
@@ -270,6 +235,11 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                         cap: None,
                     });
                 }
+                derive(&mut out, at, &|_, by| Derived::Offset {
+                    of: name.clone(),
+                    record: true,
+                    by,
+                });
             }
             Segment::Value {
                 name: text,
@@ -312,6 +282,19 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
     out
 }
 
+/// The first derivation of each field, in declaration order, which encode writes the field from.
+/// Encode checks every later one against it.
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
+pub(crate) fn writers(derived: Vec<(String, Derived)>) -> Vec<(String, Derived)> {
+    let mut out: Vec<(String, Derived)> = Vec::new();
+    for (field, d) in derived {
+        if !out.iter().any(|(f, _)| *f == field) {
+            out.push((field, d));
+        }
+    }
+    out
+}
+
 /// The presence condition of an optional field, and the field.
 fn tested(seg: &Segment) -> Option<(&Expr, &str)> {
     match seg {
@@ -326,7 +309,7 @@ fn tested(seg: &Segment) -> Option<(&Expr, &str)> {
 /// Reserved fields filled in after a later segment, as `(field, segment)`.
 #[cfg_attr(not(feature = "walk"), allow(dead_code))]
 pub(crate) fn back_patched(segments: &[Segment]) -> Vec<(String, String)> {
-    derivations(segments)
+    writers(derivations(segments))
         .into_iter()
         .filter_map(|(field, d)| d.reserves().map(|(_, of)| (field, String::from(of))))
         .collect()

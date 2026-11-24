@@ -1,6 +1,7 @@
 //! A tail from `layline-codegen`'s model: RTP-shaped padding, counted by the last byte, a CRC
 //! trailer over everything before it, and a listed arm that reads to the tail past a condition.
-//! The emitted source compiles and round-trips.
+//! One length that sizes two values is written by the first and checked by the second. The
+//! emitted source compiles and round-trips.
 //! `support/emitted_tail.rs` is the generator's output, and a test keeps it current.
 
 #![cfg(feature = "derive")]
@@ -9,7 +10,7 @@ use layline::{EncodeError, Message, Stated};
 use layline_codegen::emit::{Module, generate};
 use layline_codegen::{
     Arm, ChoiceDef, Collection, Count, CoverFrom, CoverTo, Coverage, Discriminant, Endian, Expr,
-    Field, Item, Kind, MessageDef, Op, Presence, Scalar, Segment,
+    Field, Item, Kind, Len, MessageDef, Op, Param, Presence, Scalar, Segment,
 };
 
 /// CRC-32/ISO-HDLC.
@@ -116,6 +117,37 @@ fn tails() -> Module {
             .with_tail(vec![Segment::Block(vec![Field::new("foot", bytes())])])
             .with_endian(Endian::Be),
         ),
+        Item::Message(
+            MessageDef::new(
+                "Marked",
+                vec![
+                    Segment::Block(vec![Field::new("markings_len", bytes()).with_stated()]),
+                    Segment::value(
+                        "markings",
+                        Kind::Text {
+                            len: Len::Field {
+                                by: Expr::name("markings_len"),
+                                cap: None,
+                                align: None,
+                            },
+                            codec: None,
+                        },
+                    ),
+                    Segment::repeat(
+                        "padding",
+                        bytes(),
+                        Count::Window(Len::Field {
+                            by: Expr::parse("extension_len * 4 - (1 + markings_len)").unwrap(),
+                            cap: None,
+                            align: None,
+                        }),
+                        None,
+                        Collection::Vec,
+                    ),
+                ],
+            )
+            .with_needs(vec![Param::new("extension_len", Scalar::U(16))]),
+        ),
     ])
 }
 
@@ -176,4 +208,23 @@ fn an_emitted_listed_arm_reads_to_the_tail_past_a_condition() {
     assert!(matches!(Dw::decode(&[1, 0, 16, 7, 8, 9]), Err(ParseError::Malformed { .. })));
     let bent = Dw { kind: 1, profile: 17, body: Body::Level(7), foot: 9 };
     assert_eq!(bent.encode(), Err(EncodeError::Mismatch { field: "profile", value: 0, stated: 1 }));
+}
+
+#[test]
+fn an_emitted_length_for_two_values_is_written_once_and_checked_once() {
+    let ctx = MarkedCtx { extension_len: 1 };
+    let marked = Marked {
+        markings_len: Stated::default(),
+        markings: String::from("U"),
+        padding: vec![0, 0],
+    };
+    let wire = marked.encode_with(ctx).unwrap();
+    assert_eq!(wire, [1, b'U', 0, 0]);
+    assert_eq!(Marked::decode_with(&wire, ctx).unwrap().0, marked);
+    let long = Marked { padding: vec![0; 3], ..marked };
+    assert_eq!(
+        long.encode_with(ctx),
+        Err(EncodeError::Mismatch { field: "padding", value: 3, stated: 2 })
+    );
+    assert!(Marked::decode_with(&[4, b'U', 0, 0], ctx).is_err());
 }
