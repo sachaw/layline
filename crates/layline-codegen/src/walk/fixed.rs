@@ -90,7 +90,8 @@ pub(crate) fn emit_layout(
 pub struct EnumParts {
     /// Variant declarations in order, then the variant for unknown values if the enum is open.
     pub variants: TokenStream,
-    /// `impl FieldCodec for Name`, total in both directions.
+    /// `impl FieldCodec for Name`, total in both directions, and `impl WireInt for Name`, so a
+    /// field of it can be a switch's selector, as `#[derive(FieldCodec)]` writes.
     pub codec: TokenStream,
     /// `impl Name { pub const fn code(self) -> Repr }`, the wire value in `const` contexts.
     pub code: TokenStream,
@@ -102,7 +103,7 @@ pub struct EnumParts {
 ///
 /// [`Error::Invalid`], naming the enumeration, when [`validate`](crate::validate()) refuses it.
 pub fn enum_parts(e: &EnumDef, root: &Root) -> Result<EnumParts, Error> {
-    let Prelude { u32, u64, .. } = root.prelude();
+    let Prelude { u32, u64, i64, .. } = root.prelude();
     crate::validate::validate_enum(e).map_err(|why| Error::Invalid(e.name.clone(), why))?;
     let name = ident(&e.name);
     let repr = root.prelude().primitive(e.repr.primitive());
@@ -172,6 +173,16 @@ pub fn enum_parts(e: &EnumDef, root: &Root) -> Result<EnumParts, Error> {
                         #(#to_arms)*
                         #to_fallback
                     }) as #u64
+                }
+            }
+
+            impl #root::WireInt for #name {
+                fn to_i64(&self) -> #i64 {
+                    <Self as #root::FieldCodec>::to_raw(self) as #i64
+                }
+
+                fn from_i64(n: #i64) -> Self {
+                    <Self as #root::FieldCodec>::from_raw(n as #u64)
                 }
             }
         },

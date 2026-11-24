@@ -23,7 +23,8 @@ pub use message::{Absence, Collection, Count, MessageDef, Param, Presence, Segme
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Item {
-    /// An enumeration.
+    /// An enumeration. It implements `FieldCodec` and `WireInt`, as `#[derive(FieldCodec)]`
+    /// writes, so a field of it can select a switch's arm.
     Enum(EnumDef),
     /// A fixed-size layout.
     Layout(LayoutDef),
