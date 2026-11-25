@@ -13,7 +13,7 @@ type that declares nothing of the kind, and holds no type that does, returns the
 
 ```toml
 [dependencies]
-layline = "0.6"
+layline = "0.7"
 ```
 
 ## Layouts
