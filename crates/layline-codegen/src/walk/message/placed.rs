@@ -63,7 +63,9 @@ impl Walk<'_> {
             });
         }
         self.rows.push(row);
-        self.held_message(item, field, kind, last)?;
+        // A record in a window ends where the window does, however far it would read.
+        let bounded = window.is_some() || matches!(absent, Some(Absence::ZeroLength { .. }));
+        self.held_message(item, field, kind, last || bounded)?;
 
         let read = step.read_one(true, root);
         let parse = match (absent, window) {

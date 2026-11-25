@@ -167,3 +167,36 @@ fn an_offset_read_before_its_section_is_the_callers_and_encode_checks_it() {
     let early = Sections { data_start: 5, gap: vec![0; 3], ..s };
     assert!(early.encode().is_err());
 }
+
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(endian = be)]
+pub struct Rest {
+    #[fill]
+    pub bytes: Vec<u8>,
+}
+
+/// A message that reads to the end of what it is given, in a window of its own, before a field.
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(endian = be)]
+pub struct Windowed {
+    pub at: Stated<u8>,
+    pub len: Stated<u8>,
+    #[seek(at)]
+    #[len(len)]
+    #[message]
+    pub rest: Rest,
+    pub after: u8,
+}
+
+#[test]
+fn a_record_in_a_window_ends_where_the_window_does() {
+    let w = Windowed {
+        at: Stated::default(),
+        len: Stated::default(),
+        rest: Rest { bytes: vec![1, 2, 3] },
+        after: 9,
+    };
+    let wire = w.encode().unwrap();
+    assert_eq!(wire, [2, 3, 1, 2, 3, 9]);
+    assert_eq!(Windowed::decode(&wire).unwrap(), (w, wire.len()));
+}
