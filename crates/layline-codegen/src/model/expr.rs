@@ -15,19 +15,31 @@ use core::fmt;
 /// |---|---|
 /// | `\|\|` | conditions |
 /// | `&&` | conditions |
-/// | `==` `!=` `<` `<=` `>` `>=` | integers, or two `bool`s for `==` and `!=`; not chained |
+/// | `==` `!=` `<` `<=` `>` `>=` | two integers or two reals, or two `bool`s for `==` and `!=`; not chained |
 /// | `\|` | integers |
 /// | `^` | integers |
 /// | `&` | integers |
 /// | `<<` `>>` | integers |
-/// | `+` `-` | integers |
-/// | `*` `/` `%` | integers |
-/// | unary `!` `-` | a `bool`; an integer |
+/// | `+` `-` | two integers or two reals |
+/// | `*` `/` `%` | two integers or two reals |
+/// | `as i64` `as f64` | an integer or a real |
+/// | unary `!` `-` | a `bool`; an integer or a real |
 /// | `if c { a } else { b }` | a condition, then two of a kind |
 ///
-/// An operand is an integer literal (`12`, `0x0f`, `0b1010`, `1_000`), a constant (a
-/// `SCREAMING_CASE` name or a path with `::`), an earlier field (`n`, or `hdr.n` for a field of the
-/// nested layout `hdr`), a parameter, or a parenthesised expression.
+/// An operand is an integer literal (`12`, `0x0f`, `0b1010`, `1_000`), a real literal (`0.5`,
+/// `276.0`, `1e-6`), a constant (a `SCREAMING_CASE` name or a path with `::`), an earlier field
+/// (`n`, or `hdr.n` for a field of the nested layout `hdr`), a parameter, or a parenthesised
+/// expression.
+///
+/// **Reals.** An `f32` or `f64` field or parameter, and a real literal, is a real. `+`, `-`, `*`,
+/// `/`, `%`, unary `-` and the comparisons take two reals as they take two integers, in IEEE 754
+/// `f64` as Rust computes them: a real operation always has a value, an infinity or NaN where
+/// IEEE 754 gives one, and a comparison with NaN does not hold. An integer and a real do not mix,
+/// as in Rust: `n as f64` makes an integer a real, and `x as i64` a real an integer, rounded
+/// toward zero. `as i64` has no value for NaN, an infinity or a real outside `i64`, where Rust
+/// saturates. A count, length, offset or discriminant is an integer, so a real reaches one only
+/// through `as i64`; a condition may compare reals, and a parameter of type `f32` or `f64` takes
+/// a real.
 ///
 /// `if c { a } else { b }` is `a` where `c` holds and `b` where it does not, as in Rust: `b` may be
 /// another `if`, and the two give the same type. It is an operand, so `if c { 1 } else { 2 } * 4`
@@ -36,16 +48,20 @@ use core::fmt;
 /// A condition is a `bool`, or the result of `&`, `|` or `^`, which holds when any bit is set.
 /// `!` takes a `bool`: on an integer, Rust would flip its bits rather than test them.
 ///
-/// Evaluation is in `i64` and total. An operation that overflows, divides by zero, or shifts by a
-/// count outside `0..64` gives no number, and decode refuses the bytes with `Malformed` rather
-/// than wrapping. `<<` is multiplication by a power of two, so a set bit shifted out overflows.
-/// `/` and `%` round toward zero. `&&` and `||` short-circuit, and `if` evaluates only the branch it
-/// takes.
+/// Integer evaluation is in `i64` and total. An operation that overflows, divides by zero, or
+/// shifts by a count outside `0..64` gives no number, and decode refuses the bytes with
+/// `Malformed` rather than wrapping. `<<` is multiplication by a power of two, so a set bit
+/// shifted out overflows. `/` and `%` round toward zero. `&&` and `||` short-circuit, and `if`
+/// evaluates only the branch it takes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Expr {
     /// An integer literal.
     Int(i64),
+    /// A real literal, as the bits of its `f64`, so that expressions compare and hash.
+    Real(u64),
+    /// `e as i64` or `e as f64`.
+    Cast(Box<Expr>, Cast),
     /// A Rust constant, by path: `FLAG_EXT` or `proto::FLAG_EXT`.
     Const(String),
     /// An earlier field, a field of an earlier nested layout (`hdr.n`), or a parameter.
@@ -164,11 +180,49 @@ impl Op {
     }
 }
 
+/// What `as` converts to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Cast {
+    /// `as i64`: a real rounded toward zero, with no value outside `i64`. An integer is itself.
+    Int,
+    /// `as f64`: an integer as the nearest real. A real is itself.
+    Real,
+}
+
+impl Cast {
+    /// The type named after `as`.
+    #[must_use]
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Cast::Int => "i64",
+            Cast::Real => "f64",
+        }
+    }
+}
+
 impl Expr {
     /// An integer literal.
     #[must_use]
     pub fn int(value: i64) -> Self {
         Expr::Int(value)
+    }
+
+    /// A real literal.
+    ///
+    /// # Panics
+    ///
+    /// If `value` is NaN or an infinity, which no literal spells.
+    #[must_use]
+    pub fn real(value: f64) -> Self {
+        assert!(value.is_finite(), "a real literal is finite, not {value}");
+        Expr::Real(value.to_bits())
+    }
+
+    /// `e as i64` or `e as f64`.
+    #[must_use]
+    pub fn cast(e: Expr, to: Cast) -> Self {
+        Expr::Cast(Box::new(e), to)
     }
 
     /// An earlier field (`n`, `hdr.n`) or a parameter.
@@ -245,7 +299,12 @@ impl Expr {
         use layline_core::__private::value as v;
         match self {
             Expr::Int(n) => Some(*n),
-            Expr::Const(_) | Expr::Name(_) | Expr::Not(_) | Expr::If(..) => None,
+            Expr::Const(_)
+            | Expr::Name(_)
+            | Expr::Not(_)
+            | Expr::If(..)
+            | Expr::Real(_)
+            | Expr::Cast(..) => None,
             Expr::Neg(e) => v::neg(e.fold()),
             Expr::Binary(op, a, b) => {
                 let (a, b) = (a.fold(), b.fold());
@@ -269,7 +328,7 @@ impl Expr {
     fn visit<'a>(&'a self, f: &mut impl FnMut(&'a Expr)) {
         f(self);
         match self {
-            Expr::Not(e) | Expr::Neg(e) => e.visit(f),
+            Expr::Not(e) | Expr::Neg(e) | Expr::Cast(e, _) => e.visit(f),
             Expr::Binary(_, a, b) => {
                 a.visit(f);
                 b.visit(f);
@@ -279,7 +338,7 @@ impl Expr {
                 a.visit(f);
                 b.visit(f);
             }
-            Expr::Int(_) | Expr::Const(_) | Expr::Name(_) => {}
+            Expr::Int(_) | Expr::Real(_) | Expr::Const(_) | Expr::Name(_) => {}
         }
     }
 
@@ -292,8 +351,16 @@ impl Expr {
     ///
     /// `if c { a } else { b }` is invertible where `a` and `b` both are, in the same field, and
     /// `c` does not read it: encode tests `c`, then works back through the branch it takes.
+    ///
+    /// Encode works back through integer arithmetic only: an expression with a real in it, a
+    /// literal or an `as`, is checked instead.
     #[cfg_attr(not(feature = "walk"), allow(dead_code))]
     pub(crate) fn inverse(&self, is_field: &dyn Fn(&str) -> bool) -> Option<Inverse<'_>> {
+        let mut real = false;
+        self.visit(&mut |e| real |= matches!(e, Expr::Real(_) | Expr::Cast(..)));
+        if real {
+            return None;
+        }
         let fields: Vec<&str> = self.names().into_iter().filter(|n| is_field(n)).collect();
         let [field] = fields[..] else { return None };
         Some(Inverse { field, steps: self.undo(field)? })
@@ -379,6 +446,8 @@ pub(crate) enum Ty {
     Int,
     /// A `bool`.
     Bool,
+    /// A real: an `f64`.
+    Real,
 }
 
 impl core::ops::Not for Expr {
@@ -469,6 +538,25 @@ fn write_expr(
         Expr::Int(n) if *n >= 0 && parent.is_some_and(Op::on_bits) => write!(f, "{n:#x}"),
         Expr::Int(n) if *n < 0 && parent.is_some() => write!(f, "({n})"),
         Expr::Int(n) => write!(f, "{n}"),
+        // `{:?}` always writes a point or an exponent, so the literal reads back as a real.
+        Expr::Real(bits) => {
+            let r = f64::from_bits(*bits);
+            if r.is_sign_negative() && parent.is_some() {
+                write!(f, "({r:?})")
+            } else {
+                write!(f, "{r:?}")
+            }
+        }
+        Expr::Cast(x, to) => {
+            if matches!(&**x, Expr::Binary(..) | Expr::If(..)) {
+                f.write_str("(")?;
+                write_expr(f, x, None, compact)?;
+                f.write_str(")")?;
+            } else {
+                write_expr(f, x, None, compact)?;
+            }
+            write!(f, " as {}", to.spelling())
+        }
         Expr::Const(c) | Expr::Name(c) => f.write_str(c),
         Expr::If(c, a, b) => {
             let (open, close) = if compact { ("{", "}") } else { (" { ", " }") };
@@ -490,7 +578,7 @@ fn write_expr(
         Expr::Not(x) | Expr::Neg(x) => {
             f.write_str(if matches!(e, Expr::Not(_)) { "!" } else { "-" })?;
             match &**x {
-                Expr::Binary(..) | Expr::Neg(_) | Expr::Int(_) => {
+                Expr::Binary(..) | Expr::Neg(_) | Expr::Int(_) | Expr::Real(_) | Expr::Cast(..) => {
                     f.write_str("(")?;
                     write_expr(f, x, None, compact)?;
                     f.write_str(")")
@@ -530,6 +618,7 @@ fn write_expr(
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
     Int(i64),
+    Real(f64),
     /// A name, constant or path, with any `.field`.
     Word(String),
     Op(Op),
@@ -544,12 +633,15 @@ enum Tok {
     Begin,
     /// `}`.
     End,
+    /// `as`.
+    As,
 }
 
 impl fmt::Display for Tok {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Tok::Int(n) => write!(f, "{n}"),
+            Tok::Real(r) => write!(f, "{r:?}"),
             Tok::Word(w) => f.write_str(w),
             Tok::Op(op) => f.write_str(op.spelling()),
             Tok::Not => f.write_str("!"),
@@ -559,6 +651,7 @@ impl fmt::Display for Tok {
             Tok::Else => f.write_str("else"),
             Tok::Begin => f.write_str("{"),
             Tok::End => f.write_str("}"),
+            Tok::As => f.write_str("as"),
         }
     }
 }
@@ -574,6 +667,11 @@ fn lex(text: &str) -> Result<Vec<Tok>, String> {
         if c.is_ascii_whitespace() {
             i += 1;
         } else if c.is_ascii_digit() {
+            if let Some(len) = real_len(rest) {
+                out.push(Tok::Real(real_literal(&rest[..len])?));
+                i += len;
+                continue;
+            }
             let start = i;
             while i < bytes.len() && ident_char(bytes[i]) {
                 i += 1;
@@ -641,12 +739,59 @@ fn lex(text: &str) -> Result<Vec<Tok>, String> {
     Ok(out)
 }
 
-/// `if` or `else` at the start of `rest`, as a whole word, and its length. `r#if` is a name.
+/// `if`, `else` or `as` at the start of `rest`, as a whole word, and its length. `r#if` is a
+/// name.
 fn keyword(rest: &str) -> Option<(Tok, usize)> {
-    let (word, tok) =
-        [("if", Tok::If), ("else", Tok::Else)].into_iter().find(|(w, _)| rest.starts_with(w))?;
-    let after = rest.as_bytes().get(word.len());
-    (!after.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')).then_some((tok, word.len()))
+    [("if", Tok::If), ("else", Tok::Else), ("as", Tok::As)].into_iter().find_map(|(word, tok)| {
+        let after = rest.as_bytes().get(word.len());
+        (rest.starts_with(word) && !after.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_'))
+            .then_some((tok, word.len()))
+    })
+}
+
+/// The length of the real literal at the start of `rest`, if one is: decimal digits, then a
+/// point and a digit, or an exponent, or both, then an optional `f32` or `f64` suffix, as Rust
+/// spells one. `1.5`, `0.0`, `1e-6`, `2.5E3f64`.
+fn real_len(rest: &str) -> Option<usize> {
+    let b = rest.as_bytes();
+    let digits = |mut i: usize| {
+        while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'_') {
+            i += 1;
+        }
+        i
+    };
+    if b.len() > 1 && b[0] == b'0' && b[1].is_ascii_alphabetic() && !matches!(b[1], b'e' | b'E') {
+        return None;
+    }
+    let mut i = digits(0);
+    let mut real = false;
+    if b.get(i) == Some(&b'.') && b.get(i + 1).is_some_and(u8::is_ascii_digit) {
+        i = digits(i + 1);
+        real = true;
+    }
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        let sign = usize::from(matches!(b.get(i + 1), Some(b'+' | b'-')));
+        if b.get(i + 1 + sign).is_some_and(u8::is_ascii_digit) {
+            i = digits(i + 1 + sign);
+            real = true;
+        }
+    }
+    if !real {
+        return None;
+    }
+    if rest[i..].starts_with("f64") || rest[i..].starts_with("f32") {
+        i += 3;
+    }
+    Some(i)
+}
+
+/// A real literal [`real_len`] found: a finite `f64`.
+fn real_literal(text: &str) -> Result<f64, String> {
+    let clean: String = text.trim_end_matches("f64").trim_end_matches("f32").replace('_', "");
+    match clean.parse::<f64>() {
+        Ok(r) if r.is_finite() => Ok(r),
+        _ => Err(format!("`{text}` is not a real literal that fits an `f64`")),
+    }
 }
 
 /// An integer literal, with Rust's prefixes, `_` separators and type suffixes.
@@ -686,7 +831,7 @@ impl Parser<'_> {
 
     /// Precedence climbing: operators that bind at least as tightly as `min`.
     fn expr(&mut self, min: u8) -> Result<Expr, String> {
-        let mut left = self.unary()?;
+        let mut left = self.cast()?;
         while let Some(Tok::Op(op)) = self.peek() {
             let op = *op;
             if op.precedence() < min {
@@ -716,10 +861,12 @@ impl Parser<'_> {
         self.at += 1;
         match t {
             Tok::Int(n) => Ok(Expr::Int(n)),
+            Tok::Real(r) => Ok(Expr::Real(r.to_bits())),
             Tok::Word(w) => word(w),
             Tok::Not => Ok(!self.unary()?),
             Tok::Op(Op::Sub) => match self.unary()? {
                 Expr::Int(n) => Ok(Expr::Int(n.wrapping_neg())),
+                Expr::Real(r) => Ok(Expr::Real((-f64::from_bits(r)).to_bits())),
                 e => Ok(-e),
             },
             Tok::Open => {
@@ -746,6 +893,29 @@ impl Parser<'_> {
             }
             other => Err(format!("`{other}` where an operand should be")),
         }
+    }
+
+    /// An operand and any `as` after it, which binds tighter than every binary operator and
+    /// looser than unary `-` and `!`, as in Rust: `-x as i64` is `(-x) as i64`.
+    fn cast(&mut self) -> Result<Expr, String> {
+        let mut e = self.unary()?;
+        while self.peek() == Some(&Tok::As) {
+            self.at += 1;
+            let to = match self.peek() {
+                Some(Tok::Word(w)) if w == "i64" => Cast::Int,
+                Some(Tok::Word(w)) if w == "f64" => Cast::Real,
+                other => {
+                    let other = other.map_or_else(String::new, |t| format!(" `{t}`"));
+                    return Err(format!(
+                        "`{e} as`{other}: `as` makes an integer of a real (`as i64`) or a real of \
+                         an integer (`as f64`)"
+                    ));
+                }
+            };
+            self.at += 1;
+            e = Expr::cast(e, to);
+        }
+        Ok(e)
     }
 }
 
@@ -920,5 +1090,43 @@ mod tests {
         assert!(p("!(f & 1)").test().is_none());
         assert!(p("a && b").test().is_none());
         assert!(p("n > 0").test().is_none());
+    }
+
+    #[test]
+    fn reals_and_casts_spell_as_rust_does() {
+        assert_eq!(p("0.0"), Expr::real(0.0));
+        assert_eq!(p("1e-6"), Expr::real(1e-6));
+        assert_eq!(p("2.5E3f64"), Expr::real(2500.0));
+        assert_eq!(p("1_000.5"), Expr::real(1000.5));
+        assert_eq!(p("-276.0"), Expr::real(-276.0));
+        assert_eq!(p("0x1e5"), Expr::int(0x1e5), "hex, not a real");
+        assert_eq!(p("12u8"), Expr::int(12));
+        assert_eq!(p("x as i64"), Expr::cast(Expr::name("x"), Cast::Int));
+        assert_eq!(p("-x as i64"), Expr::cast(-Expr::name("x"), Cast::Int), "`as` after unary");
+        assert_eq!(
+            p("a * n as f64"),
+            Expr::binary(Op::Mul, Expr::name("a"), Expr::cast(Expr::name("n"), Cast::Real)),
+            "`as` before binary"
+        );
+        assert_eq!(p("hdr.x as i64").names(), ["hdr.x"]);
+        assert_eq!(p("r#as + asking").names(), ["as", "asking"]);
+        for s in [
+            "data_start as i64",
+            "(data_start - 276.0) as i64",
+            "(if a < (b * 512) as f64 { a } else { (b * 512) as f64 }) as i64",
+            "x > 0.0 && y <= 1e-6",
+            "-(x as i64)",
+            "n as f64 * (-0.5)",
+            "x as i64 as f64",
+        ] {
+            let e = p(s);
+            assert_eq!(e.to_string(), s);
+            assert_eq!(p(&format!("{e:#}")), e, "{e:#}");
+        }
+        assert!(p("x as i64 + 1").inverse(&|_| true).is_none(), "a cast does not work back");
+        assert_eq!(p("1.5").fold(), None);
+        assert!(Expr::parse("x as u8").is_err());
+        assert!(Expr::parse("x as").is_err());
+        assert!(Expr::parse("1e999").is_err());
     }
 }

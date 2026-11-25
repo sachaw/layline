@@ -269,7 +269,9 @@ impl Walk<'_> {
         let (root, owner) = (self.root, self.owner);
         let mut read = Vec::new();
         for arg in with {
-            let Some(name) = arg.as_name() else {
+            // A real passes as the parameter's real type, which may be narrower.
+            let bare = arg.as_name().filter(|n| self.env.ty(n) != Some(Ty::Real));
+            let Some(name) = bare else {
                 let look = |name: &str, want| self.env.read(owner, "#[with]", name, want);
                 let (value, ty) = argument(arg, &look, root)?;
                 let blamed = blamed(arg, field);
@@ -277,6 +279,9 @@ impl Walk<'_> {
                 read.push(match ty {
                     Ty::Int => quote!(#root::__private::value::narrow(#value).ok_or(#refuse)?),
                     Ty::Bool => quote!(#value.ok_or(#refuse)?),
+                    Ty::Real => {
+                        quote!(#root::__private::value::real::narrow(#value).ok_or(#refuse)?)
+                    }
                 });
                 continue;
             };
@@ -310,13 +315,18 @@ impl Walk<'_> {
         let root = self.root;
         let mut held = Vec::new();
         for arg in with {
-            let Some(name) = arg.as_name() else {
+            let bare = arg.as_name().filter(|n| self.env.ty(n) != Some(Ty::Real));
+            let Some(name) = bare else {
                 let look = |name: &str, want| self.written(own, name, want);
                 let (value, ty) = argument(arg, &look, root)?;
                 held.push(match ty {
                     Ty::Int => quote!(#root::EncodeError::passed(#field, #value)?),
                     Ty::Bool => quote! {
                         #value.ok_or(#root::EncodeError::Inexact { field: #field, value: 0 })?
+                    },
+                    Ty::Real => quote! {
+                        #root::__private::value::real::narrow(#value)
+                            .ok_or(#root::EncodeError::Inexact { field: #field, value: 0 })?
                     },
                 });
                 continue;
@@ -330,7 +340,7 @@ impl Walk<'_> {
             if self.derived.iter().any(|(f, _)| f == name) {
                 let (value, ty) = self.written(own, name, Ty::Int)?;
                 held.push(match ty {
-                    Ty::Bool => value,
+                    Ty::Bool | Ty::Real => value,
                     Ty::Int => quote!(#root::WireInt::from_i64(#value)),
                 });
                 continue;

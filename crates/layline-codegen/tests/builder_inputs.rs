@@ -195,12 +195,17 @@ fn a_parameter_declared_twice_is_refused() {
 }
 
 #[test]
-fn a_parameter_that_is_not_an_integer_is_refused() {
+fn a_parameter_is_a_number_or_a_bool() {
     let m = needs(
-        vec![param("scale", Scalar::F32)],
+        vec![param("scale", Scalar::ByteBool)],
         vec![Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(8)))])],
     );
-    refused(&m, "A parameter must be an integer");
+    refused(&m, "A parameter must be an integer, a real or a `bool`");
+    let real = needs(
+        vec![param("scale", Scalar::F32), param("rate", Scalar::F64)],
+        vec![Segment::block(vec![Field::new("a", Kind::Scalar(Scalar::U(8)))])],
+    );
+    assert!(validate_message(&real).is_ok());
 }
 
 #[test]

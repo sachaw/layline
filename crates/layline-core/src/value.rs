@@ -277,9 +277,160 @@ pub fn root(t: Option<i64>) -> Option<i64> {
     if r * r == t { Some(r) } else { None }
 }
 
+/// The arithmetic of real expressions: IEEE 754 `f64`, as Rust computes it.
+///
+/// An operation on reals always has a value: one too large is an infinity, and one with no
+/// answer is NaN, as IEEE 754 gives them, and a comparison with NaN does not hold. A real becomes
+/// an integer only through `as i64`, which has no value for NaN, an infinity, or a real outside
+/// `i64`, so a count, length or offset never comes from one silently.
+pub mod real {
+    /// `a + b`.
+    #[must_use]
+    pub fn add(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+        Some(a? + b?)
+    }
+
+    /// `a - b`.
+    #[must_use]
+    pub fn sub(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+        Some(a? - b?)
+    }
+
+    /// `a * b`.
+    #[must_use]
+    pub fn mul(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+        Some(a? * b?)
+    }
+
+    /// `a / b`.
+    #[must_use]
+    pub fn div(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+        Some(a? / b?)
+    }
+
+    /// `a % b`, with the sign of `a`.
+    #[must_use]
+    pub fn rem(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+        Some(a? % b?)
+    }
+
+    /// `-a`.
+    #[must_use]
+    pub fn neg(a: Option<f64>) -> Option<f64> {
+        Some(-a?)
+    }
+
+    /// `a < b`.
+    #[must_use]
+    pub fn lt(a: Option<f64>, b: Option<f64>) -> Option<bool> {
+        Some(a? < b?)
+    }
+
+    /// `a <= b`.
+    #[must_use]
+    pub fn le(a: Option<f64>, b: Option<f64>) -> Option<bool> {
+        Some(a? <= b?)
+    }
+
+    /// `a > b`.
+    #[must_use]
+    pub fn gt(a: Option<f64>, b: Option<f64>) -> Option<bool> {
+        Some(a? > b?)
+    }
+
+    /// `a >= b`.
+    #[must_use]
+    pub fn ge(a: Option<f64>, b: Option<f64>) -> Option<bool> {
+        Some(a? >= b?)
+    }
+
+    /// `a as i64`: rounded toward zero, and `None` for NaN, an infinity, or a real outside `i64`,
+    /// where Rust's `as` would saturate.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn int(a: Option<f64>) -> Option<i64> {
+        // -2^63 and 2^63, exactly.
+        const LO: f64 = -9_223_372_036_854_775_808.0;
+        const HI: f64 = 9_223_372_036_854_775_808.0;
+        let a = a?;
+        // NaN is in no range.
+        (LO..HI).contains(&a).then_some(a as i64)
+    }
+
+    /// `a as f64`: the nearest real, as Rust's `as` rounds.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn of(a: Option<i64>) -> Option<f64> {
+        Some(a? as f64)
+    }
+
+    /// A real field or parameter's value, as an `f64`.
+    pub trait Real {
+        /// The value. An `f32` widens exactly.
+        fn real(&self) -> f64;
+    }
+
+    impl Real for f64 {
+        fn real(&self) -> f64 {
+            *self
+        }
+    }
+
+    impl Real for f32 {
+        fn real(&self) -> f64 {
+            f64::from(*self)
+        }
+    }
+
+    /// A real parameter's type, which a real expression is passed as.
+    pub trait FromReal: Sized {
+        /// `a` as this type, or `None` where it has no such value.
+        fn from_real(a: f64) -> Option<Self>;
+    }
+
+    impl FromReal for f64 {
+        fn from_real(a: f64) -> Option<Self> {
+            Some(a)
+        }
+    }
+
+    impl FromReal for f32 {
+        /// The nearest `f32`, or `None` for a finite real past `f32`'s range, which would round
+        /// to an infinity.
+        #[allow(clippy::cast_possible_truncation)]
+        fn from_real(a: f64) -> Option<Self> {
+            let narrow = a as f32;
+            if narrow.is_infinite() && a.is_finite() { None } else { Some(narrow) }
+        }
+    }
+
+    /// `a` as the real type `T` a parameter takes, if it has a value and `T` holds it.
+    #[must_use]
+    pub fn narrow<T: FromReal>(a: Option<f64>) -> Option<T> {
+        T::from_real(a?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_real_becomes_an_integer_only_where_it_has_one() {
+        assert_eq!(real::int(Some(512.9)), Some(512));
+        assert_eq!(real::int(Some(-512.9)), Some(-512));
+        assert_eq!(real::int(Some(f64::NAN)), None);
+        assert_eq!(real::int(Some(f64::INFINITY)), None);
+        assert_eq!(real::int(Some(-9_223_372_036_854_775_808.0)), Some(i64::MIN));
+        assert_eq!(real::int(Some(9_223_372_036_854_775_808.0)), None);
+        assert_eq!(real::of(Some(276)), Some(276.0));
+        assert_eq!(real::div(Some(1.0), Some(0.0)), Some(f64::INFINITY));
+        assert_eq!(real::lt(Some(f64::NAN), Some(1.0)), Some(false));
+        assert_eq!(real::rem(Some(-7.5), Some(2.0)), Some(-1.5));
+        assert_eq!(real::narrow::<f32>(Some(1e300)), None);
+        assert_eq!(real::narrow::<f32>(Some(f64::INFINITY)), Some(f32::INFINITY));
+        assert_eq!(real::narrow::<f64>(Some(1e300)), Some(1e300));
+    }
 
     #[test]
     fn arithmetic_refuses_what_it_cannot_hold() {

@@ -137,14 +137,14 @@ pub struct M {
 }
 
 #[test]
-fn a_parameter_that_is_not_an_integer() {
+fn a_parameter_that_is_not_a_number_or_a_bool() {
     refused(
         r#"#[derive(Message)]
-#[message(needs(scale: f32))]
+#[message(needs(scale: String))]
 pub struct M {
     pub a: u8,
 }"#,
-        "`M`: parameter `scale` must be an integer or a `bool`, not `f32`",
+        "`M`: parameter `scale` must be an integer, a real or a `bool`, not `String`",
     );
 }
 

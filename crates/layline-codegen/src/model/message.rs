@@ -530,7 +530,7 @@ impl Segment {
     }
 }
 
-/// A read-only integer or `bool` the enclosing message passes in.
+/// A read-only integer, real or `bool` the enclosing message passes in.
 ///
 /// Fields can refer to it like an earlier field. Encode never writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -538,7 +538,7 @@ impl Segment {
 pub struct Param {
     /// The name fields refer to.
     pub name: String,
-    /// The integer type, or [`Scalar::Bool`].
+    /// The integer type, [`Scalar::F32`] or [`Scalar::F64`], or [`Scalar::Bool`].
     pub repr: Scalar,
 }
 

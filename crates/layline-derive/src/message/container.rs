@@ -60,7 +60,7 @@ fn refuse_misplaced_on_container(input: &DeriveInput) -> syn::Result<()> {
     Ok(())
 }
 
-/// `needs(a: u8, b: u16)`: one name and one integer type per parameter.
+/// `needs(a: u8, b: f64)`: one name and one integer, real or `bool` type per parameter.
 fn parse_needs(
     meta: &syn::meta::ParseNestedMeta<'_>,
     ident: &syn::Ident,
@@ -77,13 +77,14 @@ fn parse_needs(
         content.parse::<syn::Token![:]>()?;
         let ty: Type = content.parse()?;
         let repr = match scalar_of(&ty) {
-            Some(repr @ (Scalar::U(_) | Scalar::I(_))) => repr,
+            Some(repr @ (Scalar::U(_) | Scalar::I(_) | Scalar::F32 | Scalar::F64)) => repr,
             _ if crate::ty::bare_ident(&ty).is_some_and(|i| i == "bool") => Scalar::Bool,
             _ => {
                 return Err(syn::Error::new(
                     ty.span(),
                     format!(
-                        "`{ident}`: parameter `{name}` must be an integer or a `bool`, not `{}`",
+                        "`{ident}`: parameter `{name}` must be an integer, a real or a `bool`, \
+                         not `{}`",
                         crate::attr::spelled(&ty),
                     ),
                 ));

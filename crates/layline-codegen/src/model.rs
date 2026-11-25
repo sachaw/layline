@@ -16,7 +16,7 @@ pub use derive::Derive;
 pub use dispatch::{DispatchArm, DispatchDef};
 pub use enumeration::{EnumDef, Variant};
 pub(crate) use expr::Ty;
-pub use expr::{Expr, Op, Test};
+pub use expr::{Cast, Expr, Op, Test};
 #[cfg(feature = "walk")]
 pub(crate) use expr::{Inverse, Undo};
 pub use field::{Field, Kind, Len, Position, Range, Scalar};

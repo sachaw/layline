@@ -82,11 +82,17 @@ pub(super) fn stated_with(seen: &Seen<'_>, kind: &Kind) -> Result<(), Invalid> {
     stated_args(seen, with)
 }
 
+/// Whether `name` is an earlier real field or a real parameter.
+fn is_real(seen: &Seen<'_>, name: &str) -> bool {
+    seen.iter().any(|k| k.name == name && matches!(k.kind, Kind::Scalar(Scalar::F32 | Scalar::F64)))
+}
+
 /// Checks a `#[with(..)]` list, of a nested message or a switch's catalogue. A bare name is an
-/// integer or a `bool`; any other expression is typed by its operators.
+/// integer, a real or a `bool`; any other expression is typed by its operators.
 pub(super) fn stated_args(seen: &Seen<'_>, with: &[crate::Expr]) -> Result<(), Invalid> {
     for arg in with {
         match arg.as_name() {
+            Some(name) if is_real(seen, name) => {}
             Some(name) => {
                 if resolve(seen, name, Reads::Flag).is_err() {
                     resolve(seen, name, Reads::Number)?;

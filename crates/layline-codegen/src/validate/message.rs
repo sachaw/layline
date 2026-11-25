@@ -237,10 +237,12 @@ fn params<'a>(
                 "{what} `{owner}`: `{name}` is both a parameter and a field. Rename one"
             )));
         }
-        if !Kind::Scalar(*repr).is_integer() && *repr != Scalar::Bool {
+        if !Kind::Scalar(*repr).is_integer()
+            && !matches!(repr, Scalar::Bool | Scalar::F32 | Scalar::F64)
+        {
             return Err(Invalid::Other(format!(
-                "{what} `{owner}`: parameter `{name}` is `{}`. A parameter must be an integer or \
-                 a `bool`",
+                "{what} `{owner}`: parameter `{name}` is `{}`. A parameter must be an integer, \
+                 a real or a `bool`",
                 repr.primitive(),
             )));
         }

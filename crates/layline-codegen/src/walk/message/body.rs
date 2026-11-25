@@ -181,6 +181,13 @@ pub(super) fn walk_segments(
         derived.iter().any(|(_, d)| matches!(d, Derived::Offset { .. } | Derived::Checksum { .. }));
     // The holder owns a parameter's bytes, so encode never writes one.
     derived.retain(|(field, _)| !item.needs.iter().any(|p| p.name == *field));
+    // Encode works back through integers: an expression that reads a real parameter is checked.
+    let real = |name: &str| {
+        item.needs
+            .iter()
+            .any(|p| p.name == name && matches!(p.repr, crate::Scalar::F32 | crate::Scalar::F64))
+    };
+    derived.retain(|(_, d)| !d.by().is_some_and(|by| by.names().into_iter().any(real)));
     let derived = writers(derived);
 
     let mut w = Walk {
@@ -208,6 +215,7 @@ pub(super) fn walk_segments(
         let id = ident(&p.name);
         match p.repr {
             crate::Scalar::Bool => w.env.bind_flag(&p.name, quote!(__ctx.#id)),
+            crate::Scalar::F32 | crate::Scalar::F64 => w.env.bind_real(&p.name, quote!(__ctx.#id)),
             _ => w.env.bind(&p.name, quote!(__ctx.#id)),
         }
     }
@@ -246,7 +254,22 @@ pub(super) fn walk_segments(
 
     // Every field of a nested layout an expression reads, and whether it reads it as a number.
     let nested: core::cell::RefCell<Vec<(String, bool)>> = core::cell::RefCell::default();
+    // The real fields and parameters, which read as reals wherever they are named.
+    let real = |kind: &Kind| matches!(kind, Kind::Scalar(crate::Scalar::F32 | crate::Scalar::F64));
+    let reals: Vec<&str> = segments
+        .iter()
+        .flat_map(|s| match s {
+            Segment::Block(fields) => fields.iter().collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .filter(|f| real(&f.kind))
+        .map(|f| f.name.as_str())
+        .chain(item.needs.iter().filter(|p| real(&Kind::Scalar(p.repr))).map(|p| p.name.as_str()))
+        .collect();
     let record = |name: &str, ty: Ty| -> Result<(TokenStream, Ty), Error> {
+        if reals.contains(&name) {
+            return Ok((quote!(0.0), Ty::Real));
+        }
         if split_ref(name).1.is_some() {
             let mut nested = nested.borrow_mut();
             match nested.iter_mut().find(|(n, _)| n == name) {
@@ -258,7 +281,7 @@ pub(super) fn walk_segments(
     };
     for (e, want) in expressions(segments) {
         match want {
-            Ty::Int => number(&e, &record, root)?,
+            Ty::Int | Ty::Real => number(&e, &record, root)?,
             Ty::Bool => condition(&e, &record, root)?,
         };
     }
@@ -680,6 +703,7 @@ impl Walk<'_> {
         Ok(match ty {
             Ty::Int => (quote!(#root::WireInt::to_i64(&#held)), Ty::Int),
             Ty::Bool => (quote!(#root::__private::WireFlag::to_flag(&#held)), Ty::Bool),
+            Ty::Real => (quote!(#root::__private::value::real::Real::real(&#held)), Ty::Real),
         })
     }
 

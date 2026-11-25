@@ -103,7 +103,7 @@ fn a_conditional_gives_one_kind_and_tests_a_condition() {
         &message(
             "pub on: bool,\npub n: u8,\n#[count(if on { n } else { on })]\npub items: Vec<u8>,",
         ),
-        "gives a `bool` one way and an integer the other",
+        "gives an integer one way and a `bool` the other",
     );
     refused(
         &message("pub n: u8,\n#[count(if n { n } else { 1 })]\npub items: Vec<u8>,"),
@@ -112,5 +112,35 @@ fn a_conditional_gives_one_kind_and_tests_a_condition() {
     refused(
         &message("pub on: bool,\npub n: u8,\n#[count(if on { n })]\npub items: Vec<u8>,"),
         "`if on { n }` has no `else`",
+    );
+}
+
+#[test]
+fn a_real_reaches_a_number_only_through_as() {
+    refused(
+        &message("pub size: f64,\n#[count(size)]\npub items: Vec<u8>,"),
+        "needs an integer, and `size` is a float. Write `size as i64`, or name an earlier integer",
+    );
+    refused(
+        &message("pub size: f64,\n#[count(size * 2.0)]\npub items: Vec<u8>,"),
+        "`size * 2.0` is a real, and an integer is needed here. Write `(size * 2.0) as i64`",
+    );
+    refused(
+        &message(
+            "pub size: f64,\npub n: u8,\n#[count(n + size as i64 + 1.5)]\npub items: Vec<u8>,",
+        ),
+        "mixes an integer and a real. Convert one",
+    );
+    refused(
+        &message("pub size: f64,\n#[valid(size)]\npub m: u8,"),
+        "`size` is a real, and a condition is needed here",
+    );
+    refused(
+        &message("pub on: bool,\n#[count(on as i64)]\npub items: Vec<u8>,"),
+        "converts a `bool`, which has no number",
+    );
+    refused(
+        &message("pub n: u8,\n#[count(n as u16)]\npub items: Vec<u8>,"),
+        "`as` makes an integer",
     );
 }

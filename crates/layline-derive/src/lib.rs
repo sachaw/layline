@@ -319,17 +319,20 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// Every attribute that takes a value, `#[count]`, `#[len]`, `#[stride]`, `#[seek]`,
 /// `#[switch]`, `#[when]`, `#[valid]` and each of `#[with]`'s, takes one expression in one
 /// language. Its operands are
-/// integer literals (`12`, `0x0f`, `0b1010`, `1_000`), constants (a `SCREAMING_CASE` name or a
-/// path with `::`), earlier fields (`n`, or `hdr.n` in an earlier nested layout), parameters, and
-/// parenthesised expressions. Its operators bind as Rust's do, loosest first:
+/// integer literals (`12`, `0x0f`, `0b1010`, `1_000`), real literals (`0.5`, `1e-6`), constants
+/// (a `SCREAMING_CASE` name or a path with `::`), earlier fields (`n`, or `hdr.n` in an earlier
+/// nested layout), parameters, and parenthesised expressions. Its operators bind as Rust's do,
+/// loosest first:
 ///
 /// | Operators | Operands |
 /// |---|---|
 /// | `\|\|`, then `&&` | conditions |
-/// | `==` `!=` `<` `<=` `>` `>=`, not chained | integers, or two `bool`s for `==` and `!=` |
+/// | `==` `!=` `<` `<=` `>` `>=`, not chained | two of a kind: integers, reals, or `bool`s for `==` and `!=` |
 /// | `\|`, then `^`, then `&` | integers |
-/// | `<<` `>>`, then `+` `-`, then `*` `/` `%` | integers |
-/// | unary `!`, `-` | a `bool`; an integer |
+/// | `<<` `>>` | integers |
+/// | `+` `-`, then `*` `/` `%` | two integers or two reals |
+/// | `as i64`, `as f64` | an integer or a real |
+/// | unary `!`, `-` | a `bool`; an integer or a real |
 /// | `if c { a } else { b }`, an operand | a condition, then two of a kind |
 ///
 /// `if c { a } else { b }` is `a` where `c` holds and `b` where it does not; `b` may be another
@@ -344,6 +347,15 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// `ParseError::Malformed`, naming the first field the expression reads, rather than wrapping.
 /// `<<` multiplies by a power of two, so a set bit shifted out overflows. `/` and `%` round
 /// toward zero, `&&` and `||` short-circuit, and `if` evaluates only the branch it takes.
+///
+/// An `f32` or `f64` field or parameter is a real, and reals compute in IEEE 754 `f64` as Rust
+/// does: a real operation always has a value, an infinity or NaN where IEEE 754 gives one, and a
+/// comparison with NaN does not hold. An integer and a real do not mix: `n as f64` makes an
+/// integer a real, and `x as i64` a real an integer, rounded toward zero, with no value for NaN,
+/// an infinity or a real outside `i64`. A count, length, offset or selector is an integer, so a
+/// real reaches one through `as i64`: Midas BLUE's sample data is `#[count(data_size as i64)]`.
+/// `#[valid(rate > 0.0)]` compares reals, and a `needs(x: f64)` parameter takes a real. Encode
+/// works back through integer arithmetic only, so it checks an expression with a real in it.
 ///
 /// What encode does with an expression is decided when the type is built, by one rule: **what
 /// encode can work backwards.** A field holds a value encode has: the caller's in a plain field,
@@ -393,7 +405,8 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///   `endian`, and an integer `#[magic]` wider than a byte is refused: write its bytes.
 /// - `#[message(bits)]`, `#[message(bits, order = lsb | msb)]`: all fields are bit fields, padded
 ///   with zero bits to a whole byte. Default order `lsb`.
-/// - `#[message(needs(a: u8, b: bool))]`: integer and `bool` parameters the holder supplies.
+/// - `#[message(needs(a: u8, b: bool, c: f64))]`: integer, `bool` and real parameters the holder
+///   supplies.
 ///   They become `Message::Ctx`, or `Choice::Ctx` on an enum, a generated `<Name>Ctx` struct. An
 ///   enum's arms read them as fields, and pass them on with `#[with]`. The holder writes a
 ///   parameter, so encode cannot derive it: encode returns `EncodeError::Mismatch` when a

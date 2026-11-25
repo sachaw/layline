@@ -125,11 +125,16 @@ fn non_integer_reference(p: &Parsed, target: &str) -> syn::Error {
     let owner = &p.fields[at_index].name;
     let carries = carried_by(p, target);
     let choices = choices(p, at_index);
+    let real = if carries == "a float" {
+        format!(" Write `{target} as i64`, or name")
+    } else {
+        String::from(" Name")
+    };
     syn::Error::new(
         r.span,
         format!(
-            "field `{owner}`: {what} needs an integer, and `{target}` is {carries}. \
-             Name an earlier integer or `#[var]` field. {choices}"
+            "field `{owner}`: {what} needs an integer, and `{target}` is {carries}.{real} an \
+             earlier integer or `#[var]` field. {choices}"
         ),
     )
 }

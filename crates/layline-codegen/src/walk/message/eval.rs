@@ -11,20 +11,30 @@ use crate::model::{Inverse, Ty, Undo};
 use crate::root::Prelude;
 use crate::walk::path;
 use crate::walk::tokens::ident;
-use crate::{Error, Expr, Op, Root};
+use crate::{Cast, Error, Expr, Op, Root};
 
-/// How a name reads where the expression is evaluated: the value as an `i64` or a `bool`, and
-/// which. `Ty` is the type the place wants, which a field of a nested layout takes.
+/// How a name reads where the expression is evaluated: the value as an `i64`, a `bool` or an
+/// `f64`, and which. `Ty` is the type the place wants, which a field of a nested layout takes.
 pub(super) type Lookup<'a> = dyn Fn(&str, Ty) -> Result<(TokenStream, Ty), Error> + 'a;
 
-/// `e` as an `Option<i64>` or `Option<bool>`, and which.
+/// The type a numeric operand wants: a real where a real is wanted, else an integer.
+fn numeric(want: Ty) -> Ty {
+    if want == Ty::Real { Ty::Real } else { Ty::Int }
+}
+
+/// `e` as an `Option<i64>`, `Option<bool>` or `Option<f64>`, and which.
 fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStream, Ty), Error> {
     let Prelude { some, .. } = root.prelude();
     let v = quote!(#root::__private::value);
+    let r = quote!(#root::__private::value::real);
     Ok(match e {
         Expr::Int(n) => {
             let n = Literal::i64_suffixed(*n);
             (quote!(#some(#n)), Ty::Int)
+        }
+        Expr::Real(bits) => {
+            let x = Literal::f64_suffixed(f64::from_bits(*bits));
+            (quote!(#some(#x)), Ty::Real)
         }
         Expr::Const(c) => {
             let p = path(c);
@@ -34,9 +44,26 @@ fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStre
             let (read, ty) = look(name, want)?;
             (quote!(#some(#read)), ty)
         }
-        Expr::Neg(x) => {
-            let x = number(x, look, root)?;
-            (quote!(#v::neg(#x)), Ty::Int)
+        Expr::Neg(x) => match eval(x, numeric(want), look, root)? {
+            (x, Ty::Int) => (quote!(#v::neg(#x)), Ty::Int),
+            (x, Ty::Real) => (quote!(#r::neg(#x)), Ty::Real),
+            (_, Ty::Bool) => {
+                return Err(Error::Refused(format!("`{e}` negates a `bool`, which has no sign")));
+            }
+        },
+        Expr::Cast(x, to) => {
+            let from = if *to == Cast::Int { Ty::Real } else { Ty::Int };
+            match (eval(x, from, look, root)?, to) {
+                ((x, Ty::Int), Cast::Int) => (x, Ty::Int),
+                ((x, Ty::Real), Cast::Int) => (quote!(#r::int(#x)), Ty::Int),
+                ((x, Ty::Int), Cast::Real) => (quote!(#r::of(#x)), Ty::Real),
+                ((x, Ty::Real), Cast::Real) => (x, Ty::Real),
+                ((_, Ty::Bool), _) => {
+                    return Err(Error::Refused(format!(
+                        "`{e}` converts a `bool`, which has no number"
+                    )));
+                }
+            }
         }
         Expr::Not(x) => {
             let x = condition(x, look, root)?;
@@ -48,7 +75,7 @@ fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStre
             let (b, other) = eval(b, ty, look, root)?;
             if other != ty {
                 return Err(Error::Refused(format!(
-                    "`{e}` gives a `bool` one way and an integer the other"
+                    "`{e}` gives a value of one type one way and of another the other"
                 )));
             }
             (quote!(#v::pick(#c, || #a, || #b)), ty)
@@ -59,8 +86,13 @@ fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStre
             (quote!(#v::#f(#a, || #b)), Ty::Bool)
         }
         Expr::Binary(op, a, b) => {
-            let (a, ty) = eval(a, Ty::Int, look, root)?;
-            let (b, _) = eval(b, ty, look, root)?;
+            let (a, ty) = eval(a, numeric(want), look, root)?;
+            let (b, other) = eval(b, ty, look, root)?;
+            if other != ty {
+                return Err(Error::Refused(format!(
+                    "`{e}` mixes an integer and a real. Convert one with `as f64` or `as i64`"
+                )));
+            }
             let f = match op {
                 Op::Mul => quote!(mul),
                 Op::Div => quote!(div),
@@ -80,14 +112,24 @@ fn eval(e: &Expr, want: Ty, look: &Lookup<'_>, root: &Root) -> Result<(TokenStre
                 Op::Ge => quote!(ge),
                 Op::And | Op::Or => unreachable!("joined above"),
             };
-            let ty = if op.compares() { Ty::Bool } else { Ty::Int };
-            (quote!(#v::#f(#a, #b)), ty)
+            let out = if op.compares() { Ty::Bool } else { ty };
+            match ty {
+                // `==` and `!=` take any two of a kind.
+                _ if matches!(op, Op::Eq | Op::Ne) => (quote!(#v::#f(#a, #b)), out),
+                Ty::Real if op.on_bits() || matches!(op, Op::Shl | Op::Shr) => {
+                    return Err(Error::Refused(format!(
+                        "`{e}` works on the bits of a real, which has none to work on"
+                    )));
+                }
+                Ty::Real => (quote!(#r::#f(#a, #b)), out),
+                _ => (quote!(#v::#f(#a, #b)), out),
+            }
         }
     })
 }
 
-/// `e` as an `Option<i64>` or `Option<bool>`, as its operators type it, and which: a value passed to
-/// a parameter.
+/// `e` as an `Option<i64>`, `Option<bool>` or `Option<f64>`, as its operators type it, and
+/// which: a value passed to a parameter.
 pub(super) fn argument(
     e: &Expr,
     look: &Lookup<'_>,
@@ -102,6 +144,9 @@ pub(super) fn number(e: &Expr, look: &Lookup<'_>, root: &Root) -> Result<TokenSt
     match ty {
         Ty::Int => Ok(tokens),
         Ty::Bool => Err(Error::Refused(format!("`{e}` is a condition where a number is needed"))),
+        Ty::Real => Err(Error::Refused(format!(
+            "`{e}` is a real where an integer is needed. Write `({e}) as i64`"
+        ))),
     }
 }
 
@@ -111,6 +156,11 @@ pub(super) fn condition(e: &Expr, look: &Lookup<'_>, root: &Root) -> Result<Toke
     Ok(match ty {
         Ty::Bool => tokens,
         Ty::Int => quote!(#root::__private::value::any_bit(#tokens)),
+        Ty::Real => {
+            return Err(Error::Refused(format!(
+                "`{e}` is a real where a condition is needed. Compare it"
+            )));
+        }
     })
 }
 

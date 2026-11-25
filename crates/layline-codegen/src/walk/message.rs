@@ -563,9 +563,16 @@ pub(super) fn context_struct(owner: &str, needs: &[crate::Param]) -> TokenStream
         quote! { #id, }
     });
     let new_doc = format!("Build a context for `{owner}`, parameters in declaration order.");
+    // A real has no `Eq` or `Hash`.
+    let real = needs.iter().any(|p| matches!(p.repr, crate::Scalar::F32 | crate::Scalar::F64));
+    let derives = if real {
+        quote!(Debug, Clone, Copy, PartialEq)
+    } else {
+        quote!(Debug, Clone, Copy, PartialEq, Eq, Hash)
+    };
     quote! {
         #[doc = #doc]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(#derives)]
         pub struct #name {
             #(#fields)*
         }

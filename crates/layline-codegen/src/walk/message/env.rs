@@ -22,6 +22,8 @@ enum Bound {
     Number(TokenStream),
     /// A `bool` field: the expression that reads it. Number lookups skip it.
     Flag(TokenStream),
+    /// A real field: the expression that reads it, as an `f64`.
+    Real(TokenStream),
     /// A nested layout: the expression that reads it. Dotted references read its fields.
     Nested(TokenStream),
 }
@@ -44,6 +46,14 @@ impl Env {
         self.values.push((
             String::from(name),
             Bound::Flag(quote!(#root::__private::WireFlag::to_flag(&#access))),
+        ));
+    }
+
+    pub(super) fn bind_real(&mut self, name: &str, access: TokenStream) {
+        let root = &self.root;
+        self.values.push((
+            String::from(name),
+            Bound::Real(quote!(#root::__private::value::real::Real::real(&#access))),
         ));
     }
 
@@ -72,6 +82,7 @@ impl Env {
         match (self.bound(split_ref(name).0)?, split_ref(name).1) {
             (Bound::Number(_), None) => Some(Ty::Int),
             (Bound::Flag(_), None) => Some(Ty::Bool),
+            (Bound::Real(_), None) => Some(Ty::Real),
             _ => None,
         }
     }
@@ -88,6 +99,7 @@ impl Env {
         match self.ty(name).unwrap_or(want) {
             Ty::Int => Ok((self.get(msg, what, name)?, Ty::Int)),
             Ty::Bool => Ok((self.get_flag(msg, what, name)?, Ty::Bool)),
+            Ty::Real => Ok((self.get_real(msg, what, name)?, Ty::Real)),
         }
     }
 
@@ -151,10 +163,15 @@ impl Env {
             (Some(Bound::Flag(_)), None) => Err(Error::Refused(format!(
                 "{msg}: {what} refers to `{field}`, which is a `bool`. Name an integer field"
             ))),
-            (Some(Bound::Number(_) | Bound::Flag(_)), Some(_)) => Err(Error::Refused(format!(
-                "{msg}: {what} refers to `{field}`, but `{outer}` is not a nested layout. \
-                 Name `{outer}` itself"
+            (Some(Bound::Real(_)), None) => Err(Error::Refused(format!(
+                "{msg}: {what} refers to `{field}`, which is a real. Write `{field} as i64`"
             ))),
+            (Some(Bound::Number(_) | Bound::Flag(_) | Bound::Real(_)), Some(_)) => {
+                Err(Error::Refused(format!(
+                    "{msg}: {what} refers to `{field}`, but `{outer}` is not a nested layout. \
+                 Name `{outer}` itself"
+                )))
+            }
             (None, None) => Err(Error::Refused(format!(
                 "{msg}: {what} refers to `{field}`, which is not an earlier integer field. \
                  Name an earlier integer field of this message"
@@ -185,14 +202,20 @@ impl Env {
                 "{msg}: {what} tests `{field}` as a `bool`, but `{field}` is an integer. \
                  Write `{field} & 0x01`"
             ))),
+            (Some(Bound::Real(_)), None) => Err(Error::Refused(format!(
+                "{msg}: {what} tests `{field}` as a `bool`, but `{field}` is a real. \
+                 Compare it: `{field} != 0.0`"
+            ))),
             (Some(Bound::Nested(_)), None) => Err(Error::Refused(format!(
                 "{msg}: {what} refers to `{field}`, which is a nested layout. \
                  Name the `bool` inside it: `{field}.<field>`"
             ))),
-            (Some(Bound::Number(_) | Bound::Flag(_)), Some(_)) => Err(Error::Refused(format!(
-                "{msg}: {what} refers to `{field}`, but `{outer}` is not a nested layout. \
+            (Some(Bound::Number(_) | Bound::Flag(_) | Bound::Real(_)), Some(_)) => {
+                Err(Error::Refused(format!(
+                    "{msg}: {what} refers to `{field}`, but `{outer}` is not a nested layout. \
                  Name `{outer}` itself"
-            ))),
+                )))
+            }
             (None, None) => Err(Error::Refused(format!(
                 "{msg}: {what} refers to `{field}`, which is not an earlier `bool` field. \
                  Name an earlier `bool` field of this message"
@@ -200,6 +223,33 @@ impl Env {
             (None, Some(_)) => Err(Error::Refused(format!(
                 "{msg}: {what} refers to `{field}`, but `{outer}` is not an earlier nested layout. \
                  Name an earlier field of this message"
+            ))),
+        }
+    }
+
+    /// The real `field` refers to, as an `f64`: a real field or parameter, or a field of a nested
+    /// layout read as one. `what` is the attribute named in a refusal.
+    pub(super) fn get_real(
+        &self,
+        msg: &str,
+        what: &str,
+        field: &str,
+    ) -> Result<TokenStream, Error> {
+        let root = &self.root;
+        let (outer, inner) = split_ref(field);
+        match (self.bound(outer), inner) {
+            (Some(Bound::Real(read)), None) => Ok(read.clone()),
+            (Some(Bound::Nested(access)), Some(inner)) => {
+                let f = ident(inner);
+                Ok(quote!(#root::__private::value::real::Real::real(&#access.#f)))
+            }
+            (Some(Bound::Number(_)), None) => Err(Error::Refused(format!(
+                "{msg}: {what} reads `{field}` as a real, but `{field}` is an integer. \
+                 Write `{field} as f64`"
+            ))),
+            _ => Err(Error::Refused(format!(
+                "{msg}: {what} refers to `{field}`, which is not an earlier real field, \
+                 a real field of an earlier nested layout, or a real parameter"
             ))),
         }
     }

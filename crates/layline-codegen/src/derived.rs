@@ -115,6 +115,20 @@ pub(crate) enum Derived {
 
 #[cfg_attr(not(feature = "walk"), allow(dead_code))]
 impl Derived {
+    /// The expression encode works back from, if the derivation has one.
+    pub(crate) fn by(&self) -> Option<&Expr> {
+        match self {
+            Derived::Count { by, .. }
+            | Derived::TextLen { by, .. }
+            | Derived::Offset { by, .. }
+            | Derived::Stride { by, .. }
+            | Derived::ByteLen { by, .. }
+            | Derived::ArmLen { by, .. }
+            | Derived::Discriminant { by, .. } => Some(by),
+            Derived::Flags { .. } | Derived::Presence { .. } | Derived::Checksum { .. } => None,
+        }
+    }
+
     /// The slot this derivation reserves, and the segment it describes.
     ///
     /// Encode writes zeros to a reserved field, then fills in the number after the segment.
