@@ -13,7 +13,9 @@ use super::table::{Row, Rows};
 use crate::model::{Ty, split_ref};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{Derived, arguments, derivations, endian_arg, expressions, row, writers};
+use crate::walk::{
+    Derived, arguments, callers, derivations, endian_arg, expressions, row, writers,
+};
 use crate::{
     Absence, Count, Endian, Error, Expr, Kind, Len, Origin, Param, Presence, Root, Segment,
 };
@@ -190,7 +192,7 @@ pub(super) fn walk_segments(
             .any(|p| p.name == name && matches!(p.repr, crate::Scalar::F32 | crate::Scalar::F64))
     };
     derived.retain(|(_, d)| !d.by().is_some_and(|by| by.names().into_iter().any(real)));
-    let derived = writers(derived);
+    let derived = writers(callers(segments, derived));
 
     let mut w = Walk {
         root,

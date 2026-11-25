@@ -124,3 +124,46 @@ fn decoded_alone_a_header_is_its_own_stream() {
     assert_eq!(alone[..8], [1, 5, 0, 8, 0, 4, 1, 4]);
     assert_eq!(Header::decode(&alone).unwrap().0, h);
 }
+
+#[derive(layline::Layout, Debug, Clone, Copy, PartialEq)]
+#[layout(bytes = 2, endian = be)]
+pub struct Rec {
+    pub v: u16,
+}
+
+/// BLUE's shape: the gap after the header is sized from both sections' offsets, before either
+/// section is written, so the offsets are the caller's and encode checks each section's place.
+#[derive(Message, Debug, Clone, PartialEq)]
+#[message(endian = be)]
+pub struct Sections {
+    pub data_start: u8,
+    pub ext_start: u8,
+    #[count(if data_start < ext_start { data_start - 2 } else { ext_start - 2 })]
+    pub gap: Vec<u8>,
+    #[seek(data_start, from = stream)]
+    #[bytes(2)]
+    pub data: Rec,
+    #[seek(ext_start, from = stream)]
+    #[bytes(2)]
+    #[valid(ext_start > data_start)]
+    pub ext: Rec,
+}
+
+#[test]
+fn an_offset_read_before_its_section_is_the_callers_and_encode_checks_it() {
+    let s = Sections {
+        data_start: 4,
+        ext_start: 6,
+        gap: vec![0, 0],
+        data: Rec { v: 0x0102 },
+        ext: Rec { v: 0x0304 },
+    };
+    let wire = s.encode().unwrap();
+    assert_eq!(wire, [4, 6, 0, 0, 1, 2, 3, 4]);
+    assert_eq!(Sections::decode(&wire).unwrap(), (s.clone(), wire.len()));
+    // An offset that is not where encode puts the section is refused, not rewritten.
+    let off = Sections { ext_start: 7, ..s.clone() };
+    assert!(matches!(off.encode(), Err(layline::EncodeError::Mismatch { .. })));
+    let early = Sections { data_start: 5, gap: vec![0; 3], ..s };
+    assert!(early.encode().is_err());
+}

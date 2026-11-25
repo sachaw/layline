@@ -7,7 +7,7 @@ pub(crate) mod row;
 mod tokens;
 
 pub(crate) use crate::derived::{
-    Derived, SlotOf, arguments, back_patched, derivations, expressions, writers,
+    Derived, SlotOf, arguments, back_patched, callers, derivations, expressions, writers,
 };
 pub use fixed::{DispatchParts, EnumParts, LayoutParts, dispatch_parts, enum_parts, layout_parts};
 pub use message::{

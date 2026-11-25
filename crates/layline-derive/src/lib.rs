@@ -377,9 +377,12 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 /// - Any other expression is checked. It reads each field as encode writes it: a plain field
 ///   holds the caller's value unless an attribute writes it, a `Stated<T>` only what an attribute
 ///   writes, and a parameter the holder's. Encode returns `EncodeError::Mismatch` where the value
-///   disagrees with the expression, naming the field the attribute is on. An expression that
-///   reads a field encode fills in only after a later segment, such as a `#[seek]` record's
-///   offset, is refused when the type is built.
+///   disagrees with the expression, naming the field the attribute is on. An expression may read
+///   an offset or length encode would fill in only after a later segment, such as a `#[seek]`
+///   record's offset, where it is a plain field: the field holds the caller's value, and encode
+///   checks the segment's place or length against it instead of writing it. Midas BLUE sizes the
+///   gap after its header from its sections' offsets, before either section. In a `Stated<T>`,
+///   which holds nothing until encode writes it, such a read is refused when the type is built.
 ///
 /// Where several expressions are written in one field, the first in declaration order writes it:
 /// field by field, and on one field `#[when]`, then `#[count]` or `#[len]`, then `#[stride]`,

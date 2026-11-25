@@ -335,10 +335,51 @@ fn tested(seg: &Segment) -> Option<(&Expr, &str)> {
     }
 }
 
+/// `derived` without the offsets and lengths encode would fill in only after an expression has
+/// read them: where such a field is a plain field, it holds the caller's value, which the
+/// expression reads, and encode checks the segment's place or length against it instead of
+/// writing it. Midas BLUE sizes the gap after its header from its data's and extended header's
+/// offsets, before either section. A `Stated<T>` holds no value until encode writes one, so its
+/// derivation stays, and the read is refused when the type is built.
+#[cfg_attr(not(feature = "walk"), allow(dead_code))]
+pub(crate) fn callers(
+    segments: &[Segment],
+    derived: Vec<(String, Derived)>,
+) -> Vec<(String, Derived)> {
+    let reads = |seg: &Segment, field: &str| {
+        let one = core::slice::from_ref(seg);
+        let exprs = expressions(one);
+        let mut all: Vec<&Expr> = exprs.iter().map(|(e, _)| e).collect();
+        all.extend(arguments(one));
+        all.iter().flat_map(|e| e.names()).any(|n| split_ref(n).0 == field)
+    };
+    let early: Vec<String> = writers(derived.clone())
+        .into_iter()
+        .filter_map(|(field, d)| {
+            let (_, of) = d.reserves()?;
+            if framing(segments, &field) {
+                return None;
+            }
+            let s = segments.iter().position(|seg| seg.name() == Some(of))?;
+            // A record's number is stamped at the end of encode; a collection's after it.
+            let record = matches!(
+                d,
+                Derived::Offset { record: true, .. } | Derived::ByteLen { record: true, .. }
+            );
+            let early = segments
+                .iter()
+                .enumerate()
+                .any(|(i, seg)| i != s && (record || i < s) && reads(seg, &field));
+            early.then_some(field)
+        })
+        .collect();
+    derived.into_iter().filter(|(field, _)| !early.contains(field)).collect()
+}
+
 /// Reserved fields filled in after a later segment, as `(field, segment)`.
 #[cfg_attr(not(feature = "walk"), allow(dead_code))]
 pub(crate) fn back_patched(segments: &[Segment]) -> Vec<(String, String)> {
-    writers(derivations(segments))
+    writers(callers(segments, derivations(segments)))
         .into_iter()
         .filter_map(|(field, d)| d.reserves().map(|(_, of)| (field, String::from(of))))
         .collect()

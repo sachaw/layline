@@ -22,7 +22,7 @@ pub struct Rec {
 #[derive(Message)]
 pub struct M {
     pub at: u8,
-    pub len: u8,
+    pub len: layline::Stated<u8>,
     pub n: u8,
     #[count(n * len)]
     pub items: Vec<u8>,
