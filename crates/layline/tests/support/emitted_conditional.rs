@@ -73,6 +73,14 @@ impl ::layline::Message for Packet {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Message>::decode_in_stream(body, __depth, 0, __ctx)
+    }
+    fn decode_in_stream(
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
         if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
@@ -98,7 +106,7 @@ impl ::layline::Message for Packet {
         if __at > __hi {
             __hi = __at;
         }
-        let (payload, __used) = <Payload as ::layline::Choice>::decode_with_nested(
+        let (payload, __used) = <Payload as ::layline::Choice>::decode_in_stream(
                 ::layline::__private::value::pick(
                         ::layline::__private::value::either(
                             Some(::layline::__private::WireFlag::to_flag(&__b0.marker)),
@@ -116,6 +124,7 @@ impl ::layline::Message for Packet {
                     })?,
                 &__body[__at..],
                 __depth,
+                __origin + __at,
                 <Payload as ::layline::Choice>::Ctx::new(
                     ::layline::__private::WireFlag::to_flag(&__b0.wide),
                 ),
@@ -140,6 +149,15 @@ impl ::layline::Message for Packet {
         out: &mut __B,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
+        let __stream = out.len();
+        <Self as ::layline::Message>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
         type __O = ::layline::__private::Be;
         out.push(
             &__PacketBlock0 {
@@ -150,9 +168,10 @@ impl ::layline::Message for Packet {
                 .encode_in::<__O>()?,
         )?;
         let __chosen = out.len();
-        ::layline::Choice::encode_into_with(
+        ::layline::Choice::encode_in_stream(
             &self.payload,
             out,
+            __stream,
             <Payload as ::layline::Choice>::Ctx::new(
                 ::layline::__private::WireFlag::to_flag(&self.wide),
             ),

@@ -34,6 +34,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
     let position = a.at;
     let align = a.align;
     let tail = a.tail;
+    let from = a.seek_from;
     let valid = a.valid.take();
     let walk_span = walked_by(&a)
         .map(|(_, s)| s)
@@ -74,9 +75,13 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
             let Some(r) = &a.seek else { unreachable!("just matched") };
             let named = (r.to_string(), r.span);
             match field_body(inner, &name, span, a)? {
-                Body::Placed { kind, at, assert, .. } => {
-                    Body::Placed { kind, at, absent: Some(PlacedAbsence::ZeroOffset), assert }
-                }
+                Body::Placed { kind, at, assert, .. } => Body::Placed {
+                    kind,
+                    at,
+                    absent: Some(PlacedAbsence::ZeroOffset),
+                    assert,
+                    window: None,
+                },
                 _ => {
                     let (at, at_span) = named;
                     return Err(syn::Error::new(
@@ -114,6 +119,7 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
                     valid,
                     stated: false,
                     tail,
+                    from,
                 });
             }
             return Err(syn::Error::new(
@@ -136,7 +142,19 @@ pub(super) fn msg_field(f: &syn::Field) -> syn::Result<MsgField> {
         }
         (None, None) => field_body(&f.ty, &name, span, a)?,
     };
-    Ok(MsgField { name, span, walk_span, body, position, with, align, valid, stated: false, tail })
+    Ok(MsgField {
+        name,
+        span,
+        walk_span,
+        body,
+        position,
+        with,
+        align,
+        valid,
+        stated: false,
+        tail,
+        from,
+    })
 }
 
 /// A `Stated<T>` field: an integer or `bool` in a block, which encode writes.
@@ -203,6 +221,7 @@ fn framing_field(
         valid,
         stated: true,
         tail,
+        from: layline_codegen::Origin::Message,
     })
 }
 
@@ -308,6 +327,7 @@ fn optional(name: &str, when: Result<WhenSpec, Span>, body: Body, tail: bool) ->
                     at,
                     absent: Some(PlacedAbsence::ZeroLength(len)),
                     assert,
+                    window: None,
                 });
             }
             None => {
@@ -372,6 +392,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
         valid: _,
         present: _,
         tail: _,
+        seek_from: _,
     } = a;
     let at = seek;
 
@@ -556,7 +577,6 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
             ));
         }
         let others = [
-            at.as_ref().map(|_| "#[seek]"),
             bits.map(|_| "#[codec]"),
             until.map(|_| "#[until]"),
             stride.as_ref().map(|_| "#[stride]"),
@@ -648,7 +668,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
             }
             (Some(_), _) => unreachable!("a count that is not a byte length was refused above"),
         };
-        return Ok(Body::Switch { on, ty: crate::attr::spelled(ty), window });
+        return Ok(Body::Switch { on, ty: crate::attr::spelled(ty), window, at });
     }
 
     let discovered = match &kind {
@@ -851,7 +871,7 @@ fn field_body(ty: &Type, name: &str, span: Span, a: FieldAttrs) -> syn::Result<B
                 bytes: *child_bytes,
                 span: bytes.expect("a nested kind came from #[bytes]").1,
             }));
-            Ok(Body::Placed { kind, at: r, absent: None, assert })
+            Ok(Body::Placed { kind, at: r, absent: None, assert, window: None })
         }
     }
 }

@@ -31,6 +31,36 @@ pub(super) fn seek_to(start: &TokenStream, field: &str, root: &Root) -> TokenStr
     }
 }
 
+/// Move the cursor to `start`, the offset read from `field`, counted from the start of the stream:
+/// `__origin` bytes before this body. An offset before the body's first byte is `Malformed`, since
+/// the body holds only the bytes from its start.
+pub(super) fn seek_to_stream(start: &TokenStream, field: &str, root: &Root) -> TokenStream {
+    let Prelude { err, usize, .. } = root.prelude();
+    quote! {
+        let __to = #usize::try_from(#start)
+            .ok()
+            .and_then(|__s| __s.checked_sub(__origin))
+            .ok_or(#root::ParseError::Malformed { field: #field, at: __at })?;
+        if __to > __body.len() {
+            return #err(#root::ParseError::Short { need_bytes: __to, got_bytes: __body.len(), at: __at });
+        }
+        __at = __to;
+    }
+}
+
+/// `inner`, read inside a window: a stream of its own, so a seek from the stream counts from the
+/// window's first byte.
+fn substream(inner: TokenStream) -> TokenStream {
+    if super::mentions(&inner, "__origin") {
+        quote! {
+            let __origin: ::core::primitive::usize = 0;
+            #inner
+        }
+    } else {
+        inner
+    }
+}
+
 /// Refuse an `__n` read from the wire that is above its cap, if it has one.
 pub(super) fn cap_guard(cap: Option<usize>, field: &str, root: &Root) -> TokenStream {
     let Prelude { err, .. } = root.prelude();
@@ -81,6 +111,7 @@ pub(super) fn read_layout(bind: &Ident, sub: &Ident, len: &Literal, root: &Root)
 /// `Malformed` on `field`. When `stated` (the length came from a field), a `Short` inside the
 /// window is also `Malformed`, because the length was wrong.
 pub(super) fn windowed(field: &str, stated: bool, inner: TokenStream, root: &Root) -> TokenStream {
+    let inner = substream(inner);
     let Prelude { ok, err, result, u8, .. } = root.prelude();
     let malformed =
         |at: TokenStream| quote!(#root::ParseError::Malformed { field: #field, at: #at });
@@ -125,6 +156,7 @@ pub(super) fn windowed_padded(
     inner: TokenStream,
     root: &Root,
 ) -> TokenStream {
+    let inner = substream(inner);
     let Prelude { ok, err, result, u8, .. } = root.prelude();
     let malformed =
         |at: TokenStream| quote!(#root::ParseError::Malformed { field: #field, at: #at });

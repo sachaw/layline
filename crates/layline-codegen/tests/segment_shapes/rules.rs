@@ -191,6 +191,8 @@ fn one_record_at_a_stated_offset() {
         at: layline_codegen::Expr::name(at),
         absent: optional.then_some(Absence::ZeroOffset),
         doc: None,
+        from: layline_codegen::Origin::Message,
+        window: None,
     };
 
     let m = msg(
@@ -254,6 +256,8 @@ fn a_placed_record_may_be_gated_on_the_length_that_measures_it() {
                     at: layline_codegen::Expr::name("table_at"),
                     absent,
                     doc: None,
+                    from: layline_codegen::Origin::Message,
+                    window: None,
                 },
             ],
         )
@@ -290,6 +294,7 @@ fn a_run_the_wire_places_may_not_state_a_literal_window() {
                     count: Count::Window(Len::Bytes(16)),
                     at,
                     doc: None,
+                    from: layline_codegen::Origin::Message,
                 },
             ],
         )

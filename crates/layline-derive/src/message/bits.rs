@@ -131,6 +131,7 @@ pub(super) fn bit_field(f: &syn::Field) -> syn::Result<MsgField> {
         valid: None,
         stated: false,
         tail: None,
+        from: layline_codegen::Origin::Message,
     })
 }
 

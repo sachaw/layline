@@ -288,7 +288,7 @@ fn opt_u64(value: Option<u64>, root: &Root) -> TokenStream {
     }
 }
 
-fn span_of_len(len: &Len, field: &str) -> row::Span {
+pub(super) fn span_of_len(len: &Len, field: &str) -> row::Span {
     match len {
         Len::Bytes(n) => row::Span::Fixed(*n as u64 * 8),
         Len::Field { by, .. } => row::Span::Window { by: By::of(by) },

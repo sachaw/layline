@@ -58,7 +58,7 @@ pub enum Body {
     #[other]
     Unknown(Vec<u8>),
 }"#,
-        quote::quote!(<Point as ::layline::Message>::decode_with_nested),
+        quote::quote!(<Point as ::layline::Message>::decode_in_stream),
     );
 }
 
@@ -509,7 +509,7 @@ pub struct M {
     #[message]
     pub child: Block,
 }"#,
-        quote::quote!(<Block as ::layline::Message>::decode_with_nested),
+        quote::quote!(<Block as ::layline::Message>::decode_in_stream),
     );
 }
 

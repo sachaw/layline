@@ -1,18 +1,32 @@
-//! A record at an offset read from an earlier field, optionally absent.
+//! A record at an offset read from an earlier field, optionally absent, optionally in a window of
+//! its own.
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 
 use super::body::{Bind, Item, Own, Walk};
-use super::cursor::{seek_to, windowed, windowed_padded, write_padding};
+use super::cursor::{seek_to, seek_to_stream, windowed, windowed_padded, write_padding};
 use super::eval::blamed;
 
 use super::repeat::element_step;
-use super::table::{Row, deferred_type, span_of_kind};
+use super::table::{Row, deferred_type, span_of_kind, span_of_len};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{SlotOf, doc_attr, kind_ty, row};
-use crate::{Absence, Error, Expr, Segment};
+use crate::{Absence, Error, Expr, Len, Origin, Segment};
+
+/// `write`, the bytes of a record in a window that starts at `out.len() == #start`: a stream of
+/// its own, so a record it places from the stream counts from the window's first byte.
+pub(super) fn in_window(write: TokenStream, start: TokenStream) -> TokenStream {
+    if super::mentions(&write, "__stream") {
+        quote! {{
+            let __stream: ::core::primitive::usize = #start;
+            #write
+        }}
+    } else {
+        write
+    }
+}
 
 impl Walk<'_> {
     pub(super) fn placed(
@@ -24,7 +38,7 @@ impl Walk<'_> {
     ) -> Result<(), Error> {
         let Prelude { some, none, option, i64, err, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
-        let Segment::Placed { name: field, kind, at, absent, doc, .. } = seg else {
+        let Segment::Placed { name: field, kind, at, from, absent, window, doc, .. } = seg else {
             unreachable!("just matched")
         };
         let ident = ident(field);
@@ -37,8 +51,11 @@ impl Walk<'_> {
         item.hold(super::refuse::held_refusal(kind, owner, root));
         let ctx = self.with_ctx(kind, field, own)?;
         let step = element_step(kind, field, ctx.as_ref(), root)?;
-        let mut row =
-            Row::new(field, span_of_kind(kind, field)).decoded_by(deferred_type(kind)).seek(at);
+        let span = match window {
+            Some(len) => span_of_len(len, field),
+            None => span_of_kind(kind, field),
+        };
+        let mut row = Row::new(field, span).decoded_by(deferred_type(kind)).seek(at);
         if let Some(absent) = absent {
             row = row.when(match absent {
                 Absence::ZeroOffset => row::Presence::Offset,
@@ -49,15 +66,28 @@ impl Walk<'_> {
         self.held_message(item, field, kind, last)?;
 
         let read = step.read_one(true, root);
-        let parse = match absent {
+        let parse = match (absent, window) {
             // `walk_segments` has already seeked.
-            None => quote! {
+            (None, None) => quote! {
                 #read
                 let #ident = __e;
             },
-            Some(absent) => {
+            (None, Some(len)) => {
+                let n = self.window_len(len, "record", field)?;
+                let stated = matches!(len, Len::Field { .. });
+                let window = windowed(field, stated, read, root);
+                quote! {
+                    #n
+                    #window
+                    let #ident = __e;
+                }
+            }
+            (Some(absent), _) => {
                 let start = self.env.number(owner, "#[seek]", at)?;
-                let seek = seek_to(&quote!(__start), blamed(at, field), root);
+                let seek = match from {
+                    Origin::Message => seek_to(&quote!(__start), blamed(at, field), root),
+                    Origin::Stream => seek_to_stream(&quote!(__start), blamed(at, field), root),
+                };
                 let (test, read) = match absent {
                     Absence::ZeroOffset => (quote!(__start), read),
                     Absence::ZeroLength { by, align } => {
@@ -84,14 +114,14 @@ impl Walk<'_> {
         };
         self.parse_steps.extend(parse);
 
-        let here = self.here();
+        let here = self.here_from(*from);
         let stamp = |of: SlotOf, by: &Expr, value: TokenStream| {
             self.stamp_or_agree(own, field, (of, true), by, value, None)
         };
         let write_one = step.write_one();
         let held = own.get(field);
-        match absent {
-            None => {
+        match (absent, window) {
+            (None, None) => {
                 let stamp = stamp(SlotOf::Position, at, here)?;
                 self.byte_steps.extend(quote! {
                     #stamp
@@ -99,7 +129,32 @@ impl Walk<'_> {
                     #write_one
                 });
             }
-            Some(Absence::ZeroOffset) => {
+            (None, Some(len)) => {
+                let at_stamp = stamp(SlotOf::Position, at, here)?;
+                let written = quote!((out.len() - __span_start) as #i64);
+                let len_stamp = match len {
+                    Len::Field { by, .. } => stamp(SlotOf::Length, by, written)?,
+                    Len::Bytes(n) => {
+                        let lit = Literal::i64_unsuffixed(*n as i64);
+                        quote! { #root::EncodeError::agree(#field, #written, #lit)?; }
+                    }
+                    other => {
+                        return Err(Error::Refused(format!(
+                            "{owner}: record `{field}` has window {other:?}. \
+                             Use a fixed byte count or an earlier field"
+                        )));
+                    }
+                };
+                let write = in_window(write_one, quote!(__span_start));
+                self.byte_steps.extend(quote! {
+                    #at_stamp
+                    let __span_start = out.len();
+                    let __e = &#held;
+                    #write
+                    #len_stamp
+                });
+            }
+            (Some(Absence::ZeroOffset), _) => {
                 let present = stamp(SlotOf::Position, at, here)?;
                 let absent = stamp(SlotOf::Position, at, quote!(0i64))?;
                 self.byte_steps.extend(quote! {
@@ -114,7 +169,7 @@ impl Walk<'_> {
                     }
                 });
             }
-            Some(Absence::ZeroLength { by, align }) => {
+            (Some(Absence::ZeroLength { by, align }), _) => {
                 let pad = align.map(|align| {
                     let pad = write_padding(align);
                     quote! {
@@ -128,12 +183,13 @@ impl Walk<'_> {
                 let len_present =
                     stamp(SlotOf::Length, &len, quote!((out.len() - __span_start) as #i64))?;
                 let len_absent = stamp(SlotOf::Length, &len, quote!(0i64))?;
+                let write = in_window(write_one, quote!(__span_start));
                 self.byte_steps.extend(quote! {
                     match &#held {
                         #some(__e) => {
                             #at_present
                             let __span_start = out.len();
-                            #write_one
+                            #write
                             if out.len() == __span_start {
                                 return #err(#root::EncodeError::Empty { field: #field });
                             }

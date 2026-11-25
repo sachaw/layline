@@ -91,6 +91,8 @@ struct MsgField {
     stated: bool,
     /// `#[at(end)]`: anchored to the end of the body, in its tail.
     tail: Option<Span>,
+    /// Where `#[seek]` counts from: `from = stream`, or the message.
+    from: layline_codegen::Origin,
 }
 
 enum Body {
@@ -118,6 +120,8 @@ enum Body {
         kind: Kind,
         /// The byte offset.
         at: Value,
+        /// `#[len(n)]`: the record's byte length, a window it fills, and the cap.
+        window: Option<(Value, Option<usize>)>,
         /// `Some` on an `Option<T>`: the field that is zero when the record is absent.
         absent: Option<PlacedAbsence>,
         /// Checks `#[bytes(N)]` against a nested layout's size.
@@ -129,6 +133,8 @@ enum Body {
         /// The `#[derive(Message)]` enum that declares the arms.
         ty: String,
         window: SwitchWindow,
+        /// `#[seek(off)]`: where the arm starts.
+        at: Option<Value>,
     },
     /// `#[checksum(Crc, over = ..)]`: a check value over a range of bytes.
     Checksum {
@@ -567,6 +573,8 @@ struct FieldAttrs {
     stride: Option<StrideSpec>,
     at: Option<crate::claim::At>,
     seek: Option<Value>,
+    /// `#[seek(.., from = stream)]`: where the offset counts from.
+    seek_from: layline_codegen::Origin,
     bits: Option<(u32, Span)>,
     bytes: Option<(usize, Span)>,
     until: Option<(UntilSpec, Span)>,

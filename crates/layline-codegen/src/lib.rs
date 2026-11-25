@@ -33,8 +33,8 @@ pub use layline_core::table::PositionUnit;
 pub use model::{
     Absence, Arm, BitOrder, Cast, ChoiceDef, Collection, Container, Count, CoverFrom, CoverTo,
     Coverage, Covered, Derive, Discriminant, DispatchArm, DispatchDef, Endian, EnumDef, Expr,
-    Field, Item, Kind, LayoutDef, Len, MessageDef, Op, Param, Position, Presence, Range, Scalar,
-    Segment, Test, Unit, Variant,
+    Field, Item, Kind, LayoutDef, Len, MessageDef, Op, Origin, Param, Position, Presence, Range,
+    Scalar, Segment, Test, Unit, Variant,
 };
 #[cfg(feature = "walk")]
 pub use root::{Root, Spelling};

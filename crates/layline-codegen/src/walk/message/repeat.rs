@@ -164,7 +164,8 @@ impl Walk<'_> {
     ) -> Result<(), Error> {
         let Prelude { err, some, none, vec, boxed, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
-        let Segment::Repeat { name: coll, element, count, at, collection, doc, when, .. } = seg
+        let Segment::Repeat { name: coll, element, count, at, from, collection, doc, when, .. } =
+            seg
         else {
             unreachable!("just matched")
         };
@@ -231,7 +232,7 @@ impl Walk<'_> {
 
         let mut stamp = TokenStream::new();
         if let Some(at) = at {
-            let here = self.here();
+            let here = self.here_from(*from);
             stamp = self.stamp_or_agree(own, coll, (SlotOf::Position, false), at, here, None)?;
         }
         let read_n = |n: TokenStream| {
@@ -516,9 +517,18 @@ impl Walk<'_> {
             _ => (quote!(), quote!()),
         };
         let write_one = step.write_one();
+        // A window is a stream of its own, which starts where the elements do.
+        let (window, write_one) = match count {
+            Count::Window(_) if super::mentions(&write_one, "__stream") => (
+                quote! { let __window = out.len(); },
+                super::placed::in_window(write_one, quote!(__window)),
+            ),
+            _ => (quote!(), write_one),
+        };
         self.byte_steps.extend(quote! {
             #stamp
             #before
+            #window
             for __e in #held {
                 let __elem = out.len();
                 #write_one
@@ -552,7 +562,7 @@ impl Walk<'_> {
     fn borrowed(&mut self, item: &mut Item<'_>, own: Own, seg: &Segment) -> Result<(), Error> {
         let Prelude { err, ok, u8, .. } = self.root.prelude();
         let (root, owner) = (self.root, self.owner);
-        let Segment::Repeat { name: coll, count, at, collection, doc, .. } = seg else {
+        let Segment::Repeat { name: coll, count, at, from, collection, doc, .. } = seg else {
             unreachable!("just matched")
         };
         let Some(lifetime) = item.lifetime else {
@@ -642,7 +652,7 @@ impl Walk<'_> {
 
         let mut stamp = TokenStream::new();
         if let Some(at) = at {
-            let here = self.here();
+            let here = self.here_from(*from);
             stamp = self.stamp_or_agree(own, coll, (SlotOf::Position, false), at, here, None)?;
         }
         let held = own.get(coll);

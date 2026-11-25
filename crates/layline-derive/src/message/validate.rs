@@ -39,18 +39,20 @@ pub(super) fn reference_site<'a>(
                     found(gate.as_ref().and_then(Gate::when).map(|w| &w.value))
                         .map(|r| (r, "#[when]"))
                 }),
-            Body::Placed { at, absent, .. } => {
-                found(Some(at)).map(|r| (r, "#[seek]")).or_else(|| match absent {
+            Body::Placed { at, absent, window, .. } => found(Some(at))
+                .map(|r| (r, "#[seek]"))
+                .or_else(|| match absent {
                     Some(PlacedAbsence::ZeroLength(by)) if by.name == target => {
                         Some((by, "#[when]"))
                     }
                     _ => None,
                 })
-            }
+                .or_else(|| found(window.as_ref().map(|(by, _)| by)).map(|r| (r, "#[len]"))),
             Body::Value { len_ref, .. } => found(len_ref.as_ref()).map(|r| (r, "#[len]")),
-            Body::Switch { on, window, .. } => found(on.field())
+            Body::Switch { on, window, at, .. } => found(on.field())
                 .map(|r| (r, "#[switch]"))
-                .or_else(|| found(window.field()).map(|r| (r, "#[len]"))),
+                .or_else(|| found(window.field()).map(|r| (r, "#[len]")))
+                .or_else(|| found(at.as_ref()).map(|r| (r, "#[seek]"))),
             Body::Opt { when: Some(when), .. } => found(Some(&when.value)).map(|r| (r, "#[when]")),
             _ => None,
         };

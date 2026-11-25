@@ -12,7 +12,7 @@ use super::recursion::bounded_check;
 use super::table::Row;
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
-use crate::walk::{Derived, doc_attr, path, row};
+use crate::walk::{Derived, SlotOf, doc_attr, path, row};
 use crate::{Discriminant, Error, Len, Root, Segment};
 
 /// Assert that every arm of the union `ty` is exactly `bytes` bytes.
@@ -75,7 +75,11 @@ impl Walk<'_> {
             self.rows.push(p.row(name));
             self.rows.advance(Some(p.repr.bits()));
         }
-        self.rows.push(Row::new(field, span).decoded_by(Some(choice)));
+        let mut row = Row::new(field, span).decoded_by(Some(choice));
+        if let Segment::Switch { at: Some(at), .. } = seg {
+            row = row.seek(at);
+        }
+        self.rows.push(row);
 
         let ctx = self.ctx_of(&quote!(<#cty as #root::Choice>::Ctx), field, with, own)?;
         let (read_ctx, write_ctx) = match ctx {
@@ -101,7 +105,13 @@ impl Walk<'_> {
         match window {
             None => self.parse_steps.extend(quote! {
                 let (#ident, __used) =
-                    <#cty as #root::Choice>::decode_with_nested(#disc, &__body[__at..], __depth, #read_ctx)
+                    <#cty as #root::Choice>::decode_in_stream(
+                        #disc,
+                        &__body[__at..],
+                        __depth,
+                        __origin + __at,
+                        #read_ctx,
+                    )
                         .map_err(|__err| __err.rebased(__at))?;
                 __at += __used;
             }),
@@ -112,7 +122,7 @@ impl Walk<'_> {
                 };
                 let arm = quote! {
                     let (__e, __used) =
-                        <#cty as #root::Choice>::decode_with_nested(#disc, __body, __depth, #read_ctx)?;
+                        <#cty as #root::Choice>::decode_in_stream(#disc, __body, __depth, __origin, #read_ctx)?;
                     __at += __used;
                 };
                 let stated = matches!(len, Len::Field { .. } | Len::Prefix { .. });
@@ -168,10 +178,21 @@ impl Walk<'_> {
             Some(p) => p.reserve(field, root),
             None => (quote!(), quote!()),
         };
+        let Segment::Switch { at, from, .. } = seg else { unreachable!("just matched") };
+        let placed = match at {
+            Some(at) => {
+                let here = self.here_from(*from);
+                self.stamp_or_agree(own, field, (SlotOf::Position, true), at, here, None)?
+            }
+            None => quote!(),
+        };
+        // A window is a stream of its own, which starts where the arm does.
+        let stream = if window.is_some() { quote!(__chosen) } else { quote!(__stream) };
         self.byte_steps.extend(quote! {
+            #placed
             #reserve
             let __chosen = out.len();
-            #root::Choice::encode_into_with(&#held, out, #write_ctx)?;
+            #root::Choice::encode_in_stream(&#held, out, #stream, #write_ctx)?;
             #stamp
             #filled
             #agree

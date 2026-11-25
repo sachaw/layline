@@ -193,6 +193,8 @@ pub enum Segment {
         count: Count,
         /// The byte offset of the elements. Encode writes the field it reads, if it is invertible.
         at: Option<Expr>,
+        /// Where [`at`](Segment::Repeat::at) counts from.
+        from: Origin,
         /// The Rust type.
         collection: Collection,
         /// When an `Option` of the collection is present, or `None` for a collection that always
@@ -205,7 +207,8 @@ pub enum Segment {
     },
     /// One record at a byte offset read from an earlier field.
     ///
-    /// The offset counts from the start of the body, which inside a [`Kind::Msg`] is that message.
+    /// The offset counts from the start of the body, which inside a [`Kind::Msg`] is that message,
+    /// or from the start of the stream: see [`Origin`].
     Placed {
         /// The field name.
         name: String,
@@ -217,6 +220,12 @@ pub enum Segment {
         kind: Kind,
         /// The byte offset. Encode writes the field it reads, if it is invertible.
         at: Expr,
+        /// Where [`at`](Segment::Placed::at) counts from.
+        from: Origin,
+        /// The record's byte length, a window it must fill exactly, for a record that is always
+        /// present: [`Len::Field`], which encode writes if it is invertible, or [`Len::Bytes`].
+        /// An optional record's length is its [`Absence::ZeroLength`].
+        window: Option<Len>,
         /// What makes the record absent, for an `Option<T>` field.
         absent: Option<Absence>,
     },
@@ -242,6 +251,11 @@ pub enum Segment {
         /// [`arms_fit`](layline_core::table::arms_fit). [`Len::Field`] reads the size from an
         /// earlier field, and encode writes it. With a window, fields can follow the switch.
         window: Option<Len>,
+        /// The byte offset the switch is read at, as [`Segment::Repeat::at`]. Encode writes the
+        /// field it reads, if it is invertible.
+        at: Option<Expr>,
+        /// Where [`at`](Segment::Switch::at) counts from.
+        from: Origin,
         /// The values passed, in order, as the choice's [`needs`](crate::ChoiceDef::needs): each an
         /// [`Expr`] over earlier fields, fields of an earlier nested layout, and this body's
         /// parameters. Encode reads them and writes nothing back.
@@ -326,6 +340,7 @@ impl Segment {
             element,
             count,
             at,
+            from: Origin::Message,
             collection,
             when: None,
         }
@@ -344,7 +359,45 @@ impl Segment {
     /// A [`Segment::Placed`] at the byte offset `at`. Optional when `absent` is set.
     #[must_use]
     pub fn placed(name: &str, kind: Kind, at: Expr, absent: Option<Absence>) -> Self {
-        Segment::Placed { name: String::from(name), doc: None, position: None, kind, at, absent }
+        Segment::Placed {
+            name: String::from(name),
+            doc: None,
+            position: None,
+            kind,
+            at,
+            from: Origin::Message,
+            window: None,
+            absent,
+        }
+    }
+
+    /// Counts a [`Segment::Repeat`]'s, [`Segment::Placed`]'s or [`Segment::Switch`]'s offset
+    /// `from` the message or the stream, and seeks a switch to `at`. Does nothing on any other
+    /// segment.
+    #[must_use]
+    pub fn with_seek(mut self, offset: Expr, origin: Origin) -> Self {
+        match &mut self {
+            Segment::Repeat { at, from, .. } | Segment::Switch { at, from, .. } => {
+                *at = Some(offset);
+                *from = origin;
+            }
+            Segment::Placed { at, from, .. } => {
+                *at = offset;
+                *from = origin;
+            }
+            _ => {}
+        }
+        self
+    }
+
+    /// Gives a [`Segment::Placed`] record that is always present the byte length `len`. Does
+    /// nothing on any other segment.
+    #[must_use]
+    pub fn with_window(mut self, len: Len) -> Self {
+        if let Segment::Placed { window, .. } = &mut self {
+            *window = Some(len);
+        }
+        self
     }
 
     /// A [`Segment::Switch`] on `on`, with arms from the choice type `choice`.
@@ -357,6 +410,8 @@ impl Segment {
             on,
             choice: String::from(choice),
             window,
+            at: None,
+            from: Origin::Message,
             with: Vec::new(),
         }
     }
@@ -689,4 +744,19 @@ pub fn split_ref(name: &str) -> (&str, Option<&str>) {
         Some((outer, inner)) => (outer, Some(inner)),
         None => (name, None),
     }
+}
+
+/// Where a seek's byte offset counts from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum Origin {
+    /// The body's first byte: inside a [`Kind::Msg`], that message's.
+    #[default]
+    Message,
+    /// The stream's first byte, as Kaitai's `pos` counts in the stream a type shares with its
+    /// holder: the bytes the outermost decode was given, or a window a holder sizes, which is a
+    /// stream of its own. Decode refuses an offset before the body's own first byte with
+    /// [`ParseError::Malformed`](layline_core::ParseError), since a message holds only the bytes
+    /// from its start, and encode states the offset of the byte it writes, counted from there.
+    Stream,
 }

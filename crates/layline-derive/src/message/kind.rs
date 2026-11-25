@@ -329,6 +329,11 @@ pub(super) fn message_field(
                  Add `#[len(n)]`, or one of {REPEAT_ATTRS}"
             ),
         )),
+        // A record at an offset in a window of its own: `#[seek(off)] #[len(n)] #[message]`.
+        (None, Some((CountSpec::Window { by, cap }, _))) if at.is_some() => {
+            let at = at.expect("just matched");
+            Ok(Body::Placed { kind, at, absent: None, assert: None, window: Some((by, cap)) })
+        }
         (None, Some((count, cspan))) => Err(syn::Error::new(
             cspan,
             format!(
@@ -338,7 +343,7 @@ pub(super) fn message_field(
             ),
         )),
         (None, None) => match at {
-            Some(at) => Ok(Body::Placed { kind, at, absent: None, assert: None }),
+            Some(at) => Ok(Body::Placed { kind, at, absent: None, assert: None, window: None }),
             None => Ok(Body::Value { kind, len_ref: None }),
         },
     }

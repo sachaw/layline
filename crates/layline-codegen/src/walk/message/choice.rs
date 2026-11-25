@@ -79,8 +79,7 @@ fn lower_choice(
     derives: &[Derive],
     root: &Root,
 ) -> Result<(ChoiceParts, Vec<row::ArmDef>), Error> {
-    let Prelude { ok, err, some, none, option, result, vec, u8, u32, usize, i64, .. } =
-        root.prelude();
+    let Prelude { ok, err, some, none, option, vec, u8, i64, .. } = root.prelude();
     crate::validate::validate_choice(c).map_err(|why| Error::Invalid(c.name.clone(), why))?;
     let name = ident(&c.name);
     let skip = crate::walk::tokens::serde_skip(derives, &c.derives);
@@ -315,6 +314,14 @@ fn lower_choice(
         ),
         _ => (decode, encode, quote!()),
     };
+    let of = quote!(#root::Choice);
+    let decode_methods = super::decode_methods(
+        &of,
+        &decode,
+        (&quote!(discriminant: #i64,), &quote!(discriminant,)),
+        root,
+    );
+    let encode_methods = super::encode_methods(&of, &encode, &quote!(#root::EncodeError), root);
     let codec = quote! {
         #ctx_decl
 
@@ -336,14 +343,7 @@ fn lower_choice(
 
             #max_depth
 
-            fn decode_with_nested(
-                discriminant: #i64,
-                body: &[#u8],
-                __depth: #u32,
-                __ctx: Self::Ctx,
-            ) -> #result<(Self, #usize), #root::ParseError> {
-                #decode
-            }
+            #decode_methods
 
             fn discriminant(&self) -> #option<#i64> {
                 match self {
@@ -352,13 +352,7 @@ fn lower_choice(
                 }
             }
 
-            fn encode_into_with<__B: #root::Buffer>(
-                &self,
-                out: &mut __B,
-                __ctx: Self::Ctx,
-            ) -> #result<(), #root::EncodeError> {
-                #encode
-            }
+            #encode_methods
         }
         impl #name {
             #inherent

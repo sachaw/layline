@@ -234,6 +234,9 @@ fn lower_message(
         );
         let constants = quote!(#node #encode_fallible);
         let inherent_ref = inherent_encodes(&fallible, &of, None, root);
+        // A borrowing message is never held, so its stream is its own bytes.
+        let origin = mentions(&decode, "__origin").then(|| quote!(let __origin: #usize = 0;));
+        let stream = mentions(&encode, "__stream").then(|| quote!(let __stream = out.len();));
         let lifetime = syn::Lifetime::new(&format!("'{lifetime}"), proc_macro2::Span::call_site());
         let codec = quote! {
             impl<#lifetime> #root::MessageRef<#lifetime> for #name<#lifetime> {
@@ -249,6 +252,7 @@ fn lower_message(
                 fn decode(body: &#lifetime [#u8]) -> #result<(Self, #usize), #root::ParseError> {
                     let __depth: #u32 = 0;
                     let __ctx = ();
+                    #origin
                     #decode
                 }
 
@@ -257,6 +261,7 @@ fn lower_message(
                     out: &mut __B,
                 ) -> #result<(), #buffered> {
                     let __ctx = ();
+                    #stream
                     #encode
                 }
             }
@@ -292,6 +297,9 @@ fn lower_message(
         ),
         _ => (decode, encode, quote!()),
     };
+    let of = quote!(#root::Message);
+    let decode_methods = decode_methods(&of, &decode, (&quote!(), &quote!()), root);
+    let encode_methods = encode_methods(&of, &encode, &buffered, root);
     let codec = quote! {
         #ctx_decl
 
@@ -308,21 +316,9 @@ fn lower_message(
 
             #max_depth
 
-            fn decode_with_nested(
-                body: &[#u8],
-                __depth: #u32,
-                __ctx: Self::Ctx,
-            ) -> #result<(Self, #usize), #root::ParseError> {
-                #decode
-            }
+            #decode_methods
 
-            fn encode_into_with<__B: #root::Buffer>(
-                &self,
-                out: &mut __B,
-                __ctx: Self::Ctx,
-            ) -> #result<(), #buffered> {
-                #encode
-            }
+            #encode_methods
         }
         impl #name {
             #inherent
@@ -470,9 +466,15 @@ pub(super) fn fixed_order(endian: Endian, body: &TokenStream, root: &Root) -> To
 
 /// Whether `body` reads or writes in the order `__O`.
 pub(super) fn names_order(body: &TokenStream) -> bool {
+    mentions(body, "__O")
+}
+
+/// Whether `body` names the identifier `name` anywhere: a hidden local it needs bound, such as
+/// `__origin` or `__stream`.
+pub(super) fn mentions(body: &TokenStream, name: &str) -> bool {
     body.clone().into_iter().any(|t| match t {
-        proc_macro2::TokenTree::Ident(i) => i == "__O",
-        proc_macro2::TokenTree::Group(g) => names_order(&g.stream()),
+        proc_macro2::TokenTree::Ident(i) => i == name,
+        proc_macro2::TokenTree::Group(g) => mentions(&g.stream(), name),
         _ => false,
     })
 }
@@ -497,6 +499,15 @@ pub(super) fn held_order(
     let p = ident(param);
     let (be, le) = (quote!(#root::__private::Be), quote!(#root::__private::Le));
     let order = quote!(#root::__private::ByteOrder);
+    // The stream's origin and start pass through, where the bodies read them.
+    let (origin_decl, origin) = match mentions(&decode, "__origin") {
+        true => (quote!(__origin: #usize,), quote!(__origin,)),
+        false => (quote!(), quote!()),
+    };
+    let (stream_decl, stream) = match mentions(&encode, "__stream") {
+        true => (quote!(__stream: #usize,), quote!(__stream,)),
+        false => (quote!(), quote!()),
+    };
     let held = quote! {
         impl #name {
             /// Decode in the byte order `__O`.
@@ -505,6 +516,7 @@ pub(super) fn held_order(
                 #lead_decl
                 body: &[#u8],
                 __depth: #u32,
+                #origin_decl
                 __ctx: <Self as #of>::Ctx,
             ) -> #result<(Self, #usize), #root::ParseError> {
                 #decode
@@ -515,6 +527,7 @@ pub(super) fn held_order(
             fn __layline_encode<__O: #order, __B: #root::Buffer>(
                 &self,
                 out: &mut __B,
+                #stream_decl
                 __ctx: <Self as #of>::Ctx,
             ) -> #result<(), #buffered> {
                 #encode
@@ -524,16 +537,16 @@ pub(super) fn held_order(
     (
         quote! {
             if __ctx.#p {
-                Self::__layline_decode::<#be>(#lead body, __depth, __ctx)
+                Self::__layline_decode::<#be>(#lead body, __depth, #origin __ctx)
             } else {
-                Self::__layline_decode::<#le>(#lead body, __depth, __ctx)
+                Self::__layline_decode::<#le>(#lead body, __depth, #origin __ctx)
             }
         },
         quote! {
             if __ctx.#p {
-                self.__layline_encode::<#be, __B>(out, __ctx)
+                self.__layline_encode::<#be, __B>(out, #stream __ctx)
             } else {
-                self.__layline_encode::<#le, __B>(out, __ctx)
+                self.__layline_encode::<#le, __B>(out, #stream __ctx)
             }
         },
         held,
@@ -583,6 +596,92 @@ pub(super) fn context_struct(owner: &str, needs: &[crate::Param]) -> TokenStream
             pub fn new(#(#args)*) -> Self {
                 Self { #(#inits)* }
             }
+        }
+    }
+}
+
+/// The trait `of`'s decode methods for the body `decode`: `decode_with_nested` alone, or where the
+/// body reads `__origin`, `decode_in_stream` with the body, and `decode_with_nested` passing it
+/// the origin of a decode that starts here. `lead` is what decode takes before `body`, declared
+/// and passed: a catalogue's discriminant.
+pub(super) fn decode_methods(
+    of: &TokenStream,
+    decode: &TokenStream,
+    (lead_decl, lead): (&TokenStream, &TokenStream),
+    root: &Root,
+) -> TokenStream {
+    let Prelude { result, u8, u32, usize, .. } = root.prelude();
+    if !mentions(decode, "__origin") {
+        return quote! {
+            fn decode_with_nested(
+                #lead_decl
+                body: &[#u8],
+                __depth: #u32,
+                __ctx: Self::Ctx,
+            ) -> #result<(Self, #usize), #root::ParseError> {
+                #decode
+            }
+        };
+    }
+    quote! {
+        fn decode_with_nested(
+            #lead_decl
+            body: &[#u8],
+            __depth: #u32,
+            __ctx: Self::Ctx,
+        ) -> #result<(Self, #usize), #root::ParseError> {
+            <Self as #of>::decode_in_stream(#lead body, __depth, 0, __ctx)
+        }
+
+        fn decode_in_stream(
+            #lead_decl
+            body: &[#u8],
+            __depth: #u32,
+            __origin: #usize,
+            __ctx: Self::Ctx,
+        ) -> #result<(Self, #usize), #root::ParseError> {
+            #decode
+        }
+    }
+}
+
+/// The trait `of`'s encode methods for the body `encode`, as [`decode_methods`]: where the body
+/// reads `__stream`, `encode_in_stream` with the body, and `encode_into_with` starting a stream.
+pub(super) fn encode_methods(
+    of: &TokenStream,
+    encode: &TokenStream,
+    buffered: &TokenStream,
+    root: &Root,
+) -> TokenStream {
+    let Prelude { result, usize, .. } = root.prelude();
+    if !mentions(encode, "__stream") {
+        return quote! {
+            fn encode_into_with<__B: #root::Buffer>(
+                &self,
+                out: &mut __B,
+                __ctx: Self::Ctx,
+            ) -> #result<(), #buffered> {
+                #encode
+            }
+        };
+    }
+    quote! {
+        fn encode_into_with<__B: #root::Buffer>(
+            &self,
+            out: &mut __B,
+            __ctx: Self::Ctx,
+        ) -> #result<(), #buffered> {
+            let __stream = out.len();
+            <Self as #of>::encode_in_stream(self, out, __stream, __ctx)
+        }
+
+        fn encode_in_stream<__B: #root::Buffer>(
+            &self,
+            out: &mut __B,
+            __stream: #usize,
+            __ctx: Self::Ctx,
+        ) -> #result<(), #buffered> {
+            #encode
         }
     }
 }

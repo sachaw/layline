@@ -47,6 +47,7 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
         stride: None,
         at: None,
         seek: None,
+        seek_from: layline_codegen::Origin::Message,
         bits: None,
         bytes: None,
         until: None,
@@ -91,7 +92,13 @@ pub(super) fn parse_attrs(f: &syn::Field, name: &str) -> syn::Result<FieldAttrs>
             }
             crate::attr::once_attr(&mut a.at, attr, &owner, || parse_at(attr, name))?;
         } else if path.is_ident("seek") {
-            crate::attr::once_attr(&mut a.seek, attr, &owner, || parse_seek(attr, name))?;
+            let mut from = layline_codegen::Origin::Message;
+            crate::attr::once_attr(&mut a.seek, attr, &owner, || {
+                let (value, origin) = parse_seek(attr, name)?;
+                from = origin;
+                Ok(value)
+            })?;
+            a.seek_from = from;
         } else if path.is_ident("codec") {
             crate::attr::once_attr(&mut a.bits, attr, &owner, || crate::attr::int_arg(attr))?;
         } else if path.is_ident("bits") {
@@ -570,23 +577,31 @@ fn parse_at(attr: &syn::Attribute, name: &str) -> syn::Result<crate::claim::At> 
     crate::claim::at_attr(attr, name, layline_codegen::PositionUnit::Byte)
 }
 
-fn parse_seek(attr: &syn::Attribute, name: &str) -> syn::Result<Value> {
+/// `#[seek(e)]`, counted from the message's first byte, or `#[seek(e, from = stream)]`, from the
+/// stream's.
+fn parse_seek(attr: &syn::Attribute, name: &str) -> syn::Result<(Value, layline_codegen::Origin)> {
     let shape = || {
         syn::Error::new(
             attr.meta.span(),
             format!(
-                "field `{name}`: `#[seek(..)]` takes a field name, or an expression over one. \
-                 Write `#[seek(off)]`, where `off` is an earlier field holding the byte offset"
+                "field `{name}`: `#[seek(..)]` takes a field name, or an expression over one, and \
+                 `from = stream` to count from the stream's start. Write `#[seek(off)]`, where \
+                 `off` is an earlier field holding the byte offset"
             ),
         )
     };
     let Args { expr, keys } = args(attr)?;
-    if !keys.is_empty() {
-        return Err(shape());
+    let mut from = layline_codegen::Origin::Message;
+    for (key, value) in keys {
+        match (key.to_string().as_str(), value.to_string().as_str()) {
+            ("from", "stream") => from = layline_codegen::Origin::Stream,
+            ("from", "message") => from = layline_codegen::Origin::Message,
+            _ => return Err(shape()),
+        }
     }
     let value = Value::parse(&expr.ok_or_else(shape)?, name, "#[seek]")?;
     if value.refs.is_empty() {
         return Err(shape());
     }
-    Ok(value)
+    Ok((value, from))
 }

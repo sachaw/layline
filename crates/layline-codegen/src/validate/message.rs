@@ -501,11 +501,37 @@ fn validate_segments<'a>(
                 }
                 stated_with(seen, element)?;
             }
-            Segment::Placed { name, kind, at, absent, .. } => {
+            Segment::Placed { name, kind, at, absent, window, .. } => {
                 kind_paths(name, kind)?;
                 expr::number(seen, at)?;
                 read_only(seen, at, "a record offset")?;
                 stated_with(seen, kind)?;
+                match (window, absent) {
+                    (None, _) => {}
+                    (Some(_), Some(_)) => {
+                        return Err(Invalid::field(
+                            name,
+                            String::from(
+                                "an optional record states its length in its absence. \
+                                 Remove the window, or make the record always present",
+                            ),
+                        ));
+                    }
+                    (Some(Len::Field { by, align: None, .. }), None) => {
+                        expr::number(seen, by)?;
+                        read_only(seen, by, "a record length")?;
+                    }
+                    (Some(Len::Bytes(n)), None) if *n > 0 => {}
+                    (Some(other), None) => {
+                        return Err(Invalid::field(
+                            name,
+                            format!(
+                                "a record's window of {other:?} is not supported. \
+                                 Use a length field, or a fixed number of bytes"
+                            ),
+                        ));
+                    }
+                }
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
                     let len = crate::Expr::name(by);
                     expr::number(seen, &len)?;
@@ -539,9 +565,13 @@ fn validate_segments<'a>(
                     }
                 }
             }
-            Segment::Switch { name, on, choice, window, with, .. } => {
+            Segment::Switch { name, on, choice, window, with, at, .. } => {
                 type_path(name, "the catalogue", choice)?;
                 super::names::stated_args(seen, with)?;
+                if let Some(at) = at {
+                    expr::number(seen, at)?;
+                    read_only(seen, at, "a switch offset")?;
+                }
                 if let Discriminant::Field(on) = on {
                     expr::number(seen, on)?;
                 }

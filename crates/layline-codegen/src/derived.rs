@@ -239,7 +239,15 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                     });
                 }
             }
-            Segment::Placed { name, at, absent, .. } => {
+            Segment::Placed { name, at, absent, window, .. } => {
+                if let Some(Len::Field { by, cap, .. }) = window {
+                    derive(&mut out, by, &|_, by| Derived::ByteLen {
+                        of: name.clone(),
+                        record: true,
+                        by,
+                        cap: *cap,
+                    });
+                }
                 // A record's `#[when]` comes before its `#[seek]`, as a collection's does.
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
                     derive(&mut out, &Expr::name(by), &|_, by| Derived::ByteLen {
@@ -267,7 +275,14 @@ pub(crate) fn derivations(segments: &[Segment]) -> Vec<(String, Derived)> {
                     cap: *cap,
                 });
             }
-            Segment::Switch { name: body, on, window, .. } => {
+            Segment::Switch { name: body, on, window, at, .. } => {
+                if let Some(at) = at {
+                    derive(&mut out, at, &|_, by| Derived::Offset {
+                        of: body.clone(),
+                        record: true,
+                        by,
+                    });
+                }
                 if let Discriminant::Field(on) = on {
                     derive(&mut out, on, &|field, by| Derived::Discriminant {
                         of: body.clone(),
@@ -371,8 +386,11 @@ pub(crate) fn expressions(segments: &[Segment]) -> Vec<(Expr, Ty)> {
                 }
                 at.iter().for_each(&mut number);
             }
-            Segment::Placed { at, absent, .. } => {
+            Segment::Placed { at, absent, window, .. } => {
                 number(at);
+                if let Some(Len::Field { by, .. }) = window {
+                    number(by);
+                }
                 if let Some(Absence::ZeroLength { by, .. }) = absent {
                     number(&Expr::name(by));
                 }
@@ -380,7 +398,8 @@ pub(crate) fn expressions(segments: &[Segment]) -> Vec<(Expr, Ty)> {
             Segment::Value { kind: Kind::Text { len: Len::Field { by, .. }, .. }, .. } => {
                 number(by)
             }
-            Segment::Switch { on, window, .. } => {
+            Segment::Switch { on, window, at, .. } => {
+                at.iter().for_each(&mut number);
                 if let Discriminant::Field(on) = on {
                     number(on);
                 }

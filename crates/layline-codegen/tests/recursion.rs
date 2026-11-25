@@ -105,6 +105,8 @@ fn a_catalogue_with_no_terminating_arm_is_refused() {
                     window: None,
                     doc: None,
                     with: Vec::new(),
+                    at: None,
+                    from: layline_codegen::Origin::Message,
                 },
             ],
         ),
@@ -135,6 +137,8 @@ fn one_bounded_arm_is_enough_for_a_catalogue() {
                     window: None,
                     doc: None,
                     with: Vec::new(),
+                    at: None,
+                    from: layline_codegen::Origin::Message,
                 },
             ],
         ),
@@ -168,6 +172,8 @@ fn an_open_catalogue_is_its_own_way_out() {
                     window: None,
                     doc: None,
                     with: Vec::new(),
+                    at: None,
+                    from: layline_codegen::Origin::Message,
                 },
             ],
         ),
@@ -274,7 +280,7 @@ fn a_sequence_is_its_own_indirection() {
     )];
     let src = emit_module(&module(items)).expect("a self-referencing sequence emits");
     assert!(src.contains("pub children: Vec<Node>"), "{src}");
-    assert!(src.contains("<Node as ::layline::Message>::decode_with_nested"), "{src}");
+    assert!(src.contains("<Node as ::layline::Message>::decode_in_stream"), "{src}");
     // The length field bounds the sequence, so the message is not open-ended.
     assert!(src.contains("const OPEN_ENDED: bool = false;"), "{src}");
 }
@@ -345,6 +351,8 @@ fn a_true_that_did_not_come_from_the_cycle_survives_it() {
                     window: None,
                     doc: None,
                     with: Vec::new(),
+                    at: None,
+                    from: layline_codegen::Origin::Message,
                 },
             ],
         ),
@@ -457,7 +465,7 @@ fn a_cycle_of_three_lowers_to_three_items_and_stops() {
     for name in ["pub struct A", "pub struct B", "pub struct C"] {
         assert_eq!(src.matches(name).count(), 1, "exactly one {name}:\n{src}");
     }
-    assert!(src.contains("<B as ::layline::Message>::decode_with_nested"), "{src}");
-    assert!(src.contains("<C as ::layline::Message>::decode_with_nested"), "{src}");
-    assert!(src.contains("<A as ::layline::Message>::decode_with_nested"), "{src}");
+    assert!(src.contains("<B as ::layline::Message>::decode_in_stream"), "{src}");
+    assert!(src.contains("<C as ::layline::Message>::decode_in_stream"), "{src}");
+    assert!(src.contains("<A as ::layline::Message>::decode_in_stream"), "{src}");
 }

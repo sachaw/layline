@@ -442,6 +442,26 @@ pub trait Message: Sized {
         ctx: Self::Ctx,
     ) -> Result<(Self, usize), crate::ParseError>;
 
+    /// [`decode_with_nested`](Self::decode_with_nested) for bytes that start `origin` bytes into the
+    /// stream decode reads, so that a seek counted from the stream's start finds its place. The
+    /// stream is the bytes the outermost decode was given, or the nearest window a holder sizes.
+    ///
+    /// A type that reads nothing from the stream, or holds nothing that might, keeps this default.
+    ///
+    /// # Errors
+    ///
+    /// As [`decode_with`](Self::decode_with).
+    #[doc(hidden)]
+    fn decode_in_stream(
+        bytes: &[u8],
+        depth: u32,
+        origin: usize,
+        ctx: Self::Ctx,
+    ) -> Result<(Self, usize), crate::ParseError> {
+        let _ = origin;
+        Self::decode_with_nested(bytes, depth, ctx)
+    }
+
     /// Whether encode can refuse a value, as it can when the type declares something a value
     /// can violate or holds a type that does. The inherent encode a derive writes returns a
     /// `Result` exactly then; the trait's methods always do.
@@ -464,6 +484,25 @@ pub trait Message: Sized {
         out: &mut B,
         ctx: Self::Ctx,
     ) -> Result<(), crate::EncodeError>;
+
+    /// [`encode_into_with`](Self::encode_into_with) inside a stream that began at `out.len() ==
+    /// stream`, so that a record placed from the stream's start states its place. As
+    /// [`decode_in_stream`](Self::decode_in_stream), a type that places nothing from the stream,
+    /// or holds nothing that might, keeps this default.
+    ///
+    /// # Errors
+    ///
+    /// As [`encode_into_with`](Self::encode_into_with).
+    #[doc(hidden)]
+    fn encode_in_stream<B: crate::Buffer>(
+        &self,
+        out: &mut B,
+        stream: usize,
+        ctx: Self::Ctx,
+    ) -> Result<(), crate::EncodeError> {
+        let _ = stream;
+        self.encode_into_with(out, ctx)
+    }
 
     /// [`encode_into_with`](Self::encode_into_with) for a message with no parameters.
     ///
@@ -649,6 +688,24 @@ pub trait Choice: Sized {
         ctx: Self::Ctx,
     ) -> Result<(Self, usize), crate::ParseError>;
 
+    /// [`decode_with_nested`](Self::decode_with_nested) for bytes `origin` bytes into the stream, as
+    /// [`Message::decode_in_stream`].
+    ///
+    /// # Errors
+    ///
+    /// As [`decode_with`](Self::decode_with).
+    #[doc(hidden)]
+    fn decode_in_stream(
+        discriminant: i64,
+        bytes: &[u8],
+        depth: u32,
+        origin: usize,
+        ctx: Self::Ctx,
+    ) -> Result<(Self, usize), crate::ParseError> {
+        let _ = origin;
+        Self::decode_with_nested(discriminant, bytes, depth, ctx)
+    }
+
     /// This arm's discriminant, or `None` for the `#[other]` arm. Encode writes it into the parent.
     #[doc(hidden)]
     fn discriminant(&self) -> Option<i64>;
@@ -677,6 +734,23 @@ pub trait Choice: Sized {
         out: &mut B,
         ctx: Self::Ctx,
     ) -> Result<(), crate::EncodeError>;
+
+    /// [`encode_into_with`](Self::encode_into_with) inside a stream that began at `out.len() ==
+    /// stream`, as [`Message::encode_in_stream`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Message::encode_into_with`].
+    #[doc(hidden)]
+    fn encode_in_stream<B: crate::Buffer>(
+        &self,
+        out: &mut B,
+        stream: usize,
+        ctx: Self::Ctx,
+    ) -> Result<(), crate::EncodeError> {
+        let _ = stream;
+        self.encode_into_with(out, ctx)
+    }
 
     /// [`encode_into_with`](Self::encode_into_with) for a catalogue with no parameters.
     ///

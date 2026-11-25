@@ -133,6 +133,8 @@ fn switch_in_a_window_the_wire_states() {
         doc: None,
         position: None,
         with: Vec::new(),
+        at: None,
+        from: layline_codegen::Origin::Message,
     };
     let m = msg(
         "Tlv",
@@ -177,6 +179,8 @@ fn switch_in_a_window_the_wire_states() {
                 doc: None,
                 position: None,
                 with: Vec::new(),
+                at: None,
+                from: layline_codegen::Origin::Message,
             },
         ],
     );
@@ -194,6 +198,8 @@ fn switch_in_a_window_the_wire_states() {
                 doc: None,
                 position: None,
                 with: Vec::new(),
+                at: None,
+                from: layline_codegen::Origin::Message,
             },
         ],
     );

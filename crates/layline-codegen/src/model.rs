@@ -22,7 +22,9 @@ pub(crate) use expr::{Inverse, Undo};
 pub use field::{Field, Kind, Len, Position, Range, Scalar};
 pub(crate) use layout::positioned;
 pub use layout::{BitOrder, Container, Endian, LayoutDef, Unit};
-pub use message::{Absence, Collection, Count, MessageDef, Param, Presence, Segment, split_ref};
+pub use message::{
+    Absence, Collection, Count, MessageDef, Origin, Param, Presence, Segment, split_ref,
+};
 
 /// One item of a model.
 #[derive(Debug, Clone)]

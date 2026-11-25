@@ -443,7 +443,16 @@ pub fn derive_field_codec(input: TokenStream) -> TokenStream {
 ///
 /// - `#[stride(e)]`: the byte size of one element. Use with `#[count]`.
 /// - `#[seek(e)]`: read at the byte offset `e` gives, counted from the start of the message. An
-///   `Option<T>` at offset zero is `None`.
+///   `Option<T>` at offset zero is `None`. A record, a collection or a `#[switch]` may seek; a
+///   `#[message]` record at an offset takes `#[len(n)]` for a window it must fill.
+/// - `#[seek(e, from = stream)]`: counted from the start of the stream instead, as Kaitai's `pos`
+///   counts in the stream a type shares with its holder: the bytes the outermost decode was
+///   given, or a window a holder sizes with `#[len]` or `#[bytes]`, which is a stream of its own.
+///   Midas BLUE's header starts twelve bytes into its file and places its extended header in
+///   512-byte blocks from the file's start: `#[seek(ext_start * 512, from = stream)]
+///   #[len(ext_size)] #[message] ext: Keywords`. Decode refuses an offset before the message's
+///   own first byte with `ParseError::Malformed`, since a message holds only the bytes from its
+///   start, and encode states the offset of the byte it writes, counted from the stream's start.
 /// - `#[at(byte = N)]`: the byte offset where the field starts.
 /// - `#[at(end)]`: the field is anchored to the end of the message, in its tail. The fields that
 ///   take it come last. Decode reads them first, from the end, once it has read the fields

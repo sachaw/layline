@@ -272,6 +272,8 @@ mod tests {
                         window: None,
                         doc: None,
                         with: Vec::new(),
+                        at: None,
+                        from: crate::Origin::Message,
                     }],
                     doc: None,
                     derives: Vec::new(),
@@ -285,7 +287,8 @@ mod tests {
             out.contains("((__body.len() - __at) as i64)"),
             "the discriminant is the body the switch can see:\n{out}"
         );
-        assert!(out.contains("<VelocityForm as ::layline::Choice>::decode_with_nested"), "{out}");
+        assert!(out.contains("<VelocityForm as ::layline::Choice>::decode_in_stream"), "{out}");
+        assert!(out.contains("fn decode_in_stream("), "{out}");
         assert!(out.contains("fn decode_with_nested("), "{out}");
         assert!(out.contains(r#"field: "VelocityForm""#), "{out}");
     }
@@ -341,6 +344,7 @@ mod tests {
                                 element: Kind::Scalar(Scalar::U(8)),
                                 count: Count::Fill { cap: None },
                                 at: None,
+                                from: crate::Origin::Message,
                             },
                         ],
                     ),
@@ -441,6 +445,7 @@ mod tests {
                         count: Count::Field { by: Expr::name("crc"), cap: None },
                         at: None,
                         doc: None,
+                        from: crate::Origin::Message,
                     },
                 ],
                 doc: None,
@@ -497,6 +502,7 @@ mod tests {
                 count: Count::Field { by: Expr::name("head.on"), cap: None },
                 at: None,
                 doc: None,
+                from: crate::Origin::Message,
             }),
             &[],
             &Root::default(),
@@ -542,6 +548,8 @@ mod tests {
                             window: None,
                             doc: None,
                             with: Vec::new(),
+                            at: None,
+                            from: crate::Origin::Message,
                         },
                         Segment::Block(vec![Field::new("trailer", Kind::Scalar(Scalar::U(8)))]),
                     ],

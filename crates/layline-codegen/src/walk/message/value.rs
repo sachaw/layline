@@ -42,7 +42,12 @@ pub(super) fn discovered_read(
             let stated = ctx.map_or_else(|| quote!(()), |c| c.decode.clone());
             Ok(quote! {
                 let (__e, __used) =
-                    <#p as #root::Message>::decode_with_nested(&__body[__at..], __depth + 1, #stated)
+                    <#p as #root::Message>::decode_in_stream(
+                        &__body[__at..],
+                        __depth + 1,
+                        __origin + __at,
+                        #stated,
+                    )
                         .map_err(|__err| __err.rebased(__at))?;
                 #carry
             })
@@ -224,7 +229,7 @@ pub(super) fn value_write(
                 None => quote!(()),
             };
             Ok(quote! {
-                <#p as #root::Message>::encode_into_with(#by_ref, out, #stated)?;
+                <#p as #root::Message>::encode_in_stream(#by_ref, out, __stream, #stated)?;
             })
         }
         Kind::Text { len, codec } => Ok(text_write((field, held), len, codec, root)),

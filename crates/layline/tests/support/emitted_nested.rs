@@ -68,6 +68,14 @@ impl ::layline::Message for Object {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Message>::decode_in_stream(body, __depth, 0, __ctx)
+    }
+    fn decode_in_stream(
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
         if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
@@ -93,7 +101,7 @@ impl ::layline::Message for Object {
         if __at > __hi {
             __hi = __at;
         }
-        let (body, __used) = <Body as ::layline::Choice>::decode_with_nested(
+        let (body, __used) = <Body as ::layline::Choice>::decode_in_stream(
                 Some(::layline::WireInt::to_i64(&__b0.kind))
                     .ok_or(::layline::ParseError::Malformed {
                         field: "kind",
@@ -101,6 +109,7 @@ impl ::layline::Message for Object {
                     })?,
                 &__body[__at..],
                 __depth,
+                __origin + __at,
                 (),
             )
             .map_err(|__err| __err.rebased(__at))?;
@@ -119,6 +128,15 @@ impl ::layline::Message for Object {
     fn encode_into_with<__B: ::layline::Buffer>(
         &self,
         out: &mut __B,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
+        let __stream = out.len();
+        <Self as ::layline::Message>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
         type __O = ::layline::__private::Be;
@@ -160,7 +178,7 @@ impl ::layline::Message for Object {
                 .encode_in::<__O>()?,
         )?;
         let __chosen = out.len();
-        ::layline::Choice::encode_into_with(&self.body, out, ())?;
+        ::layline::Choice::encode_in_stream(&self.body, out, __stream, ())?;
         if ::layline::Choice::discriminant(&self.body).is_none() {
             let __stated = match Some(
                 match ::layline::Choice::discriminant(&self.body) {
@@ -328,6 +346,21 @@ impl ::layline::Choice for Body {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Choice>::decode_in_stream(
+            discriminant,
+            body,
+            __depth,
+            0,
+            __ctx,
+        )
+    }
+    fn decode_in_stream(
+        discriminant: i64,
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
         if __depth > <Self as ::layline::Choice>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
@@ -339,9 +372,10 @@ impl ::layline::Choice for Body {
             110 => {
                 let mut __at = 0usize;
                 let mut __hi = 0usize;
-                let (__e, __used) = <MessageId as ::layline::Message>::decode_with_nested(
+                let (__e, __used) = <MessageId as ::layline::Message>::decode_in_stream(
                         &__body[__at..],
                         __depth + 1,
+                        __origin + __at,
                         (),
                     )
                     .map_err(|__err| __err.rebased(__at))?;
@@ -393,11 +427,25 @@ impl ::layline::Choice for Body {
         out: &mut __B,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
+        let __stream = out.len();
+        <Self as ::layline::Choice>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
         type __O = ::layline::__private::Be;
         match self {
             #[allow(unused_variables)]
             Self::MessageId(inner) => {
-                <MessageId as ::layline::Message>::encode_into_with(inner, out, ())?;
+                <MessageId as ::layline::Message>::encode_in_stream(
+                    inner,
+                    out,
+                    __stream,
+                    (),
+                )?;
             }
             #[allow(unused_variables)]
             Self::ConnectionId(value) => {
@@ -531,6 +579,14 @@ impl ::layline::Message for Nested {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Message>::decode_in_stream(body, __depth, 0, __ctx)
+    }
+    fn decode_in_stream(
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
                 limit: <Self as ::layline::Message>::MAX_DEPTH,
@@ -561,9 +617,10 @@ impl ::layline::Message for Nested {
             __flag
         };
         let object = if __flag {
-            let (__e, __used) = <Object as ::layline::Message>::decode_with_nested(
+            let (__e, __used) = <Object as ::layline::Message>::decode_in_stream(
                     &__body[__at..],
                     __depth + 1,
+                    __origin + __at,
                     (),
                 )
                 .map_err(|__err| __err.rebased(__at))?;
@@ -584,9 +641,18 @@ impl ::layline::Message for Nested {
         out: &mut __B,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
+        let __stream = out.len();
+        <Self as ::layline::Message>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
         out.push(&[::core::primitive::u8::from(self.object.is_some())])?;
         if let Some(__v) = &self.object {
-            <Object as ::layline::Message>::encode_into_with(__v, out, ())?;
+            <Object as ::layline::Message>::encode_in_stream(__v, out, __stream, ())?;
         }
         Ok(())
     }
@@ -723,6 +789,14 @@ impl ::layline::Message for NullArray {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Message>::decode_in_stream(body, __depth, 0, __ctx)
+    }
+    fn decode_in_stream(
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
         if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
@@ -777,9 +851,10 @@ impl ::layline::Message for NullArray {
             };
             let mut __v: Vec<Nested> = Vec::with_capacity(__n.min(__body.len() - __at));
             for _ in 0..__n {
-                let (__e, __used) = <Nested as ::layline::Message>::decode_with_nested(
+                let (__e, __used) = <Nested as ::layline::Message>::decode_in_stream(
                         &__body[__at..],
                         __depth + 1,
+                        __origin + __at,
                         (),
                     )
                     .map_err(|__err| __err.rebased(__at))?;
@@ -801,6 +876,15 @@ impl ::layline::Message for NullArray {
         out: &mut __B,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
+        let __stream = out.len();
+        <Self as ::layline::Message>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
         type __O = ::layline::__private::Be;
         out.push(&[::core::primitive::u8::from(self.items.is_some())])?;
         if let Some(items) = &self.items {
@@ -816,7 +900,12 @@ impl ::layline::Message for NullArray {
             }
             for __e in items {
                 let __elem = out.len();
-                <Nested as ::layline::Message>::encode_into_with(__e, out, ())?;
+                <Nested as ::layline::Message>::encode_in_stream(
+                    __e,
+                    out,
+                    __stream,
+                    (),
+                )?;
             }
         }
         Ok(())
@@ -945,6 +1034,14 @@ impl ::layline::Message for MessageId {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Message>::decode_in_stream(body, __depth, 0, __ctx)
+    }
+    fn decode_in_stream(
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
                 limit: <Self as ::layline::Message>::MAX_DEPTH,
@@ -953,9 +1050,10 @@ impl ::layline::Message for MessageId {
         let __body = body;
         let mut __at = 0usize;
         let mut __hi = 0usize;
-        let (__e, __used) = <NullArray as ::layline::Message>::decode_with_nested(
+        let (__e, __used) = <NullArray as ::layline::Message>::decode_in_stream(
                 &__body[__at..],
                 __depth + 1,
+                __origin + __at,
                 (),
             )
             .map_err(|__err| __err.rebased(__at))?;
@@ -964,9 +1062,10 @@ impl ::layline::Message for MessageId {
         if __at > __hi {
             __hi = __at;
         }
-        let (__e, __used) = <Nested as ::layline::Message>::decode_with_nested(
+        let (__e, __used) = <Nested as ::layline::Message>::decode_in_stream(
                 &__body[__at..],
                 __depth + 1,
+                __origin + __at,
                 (),
             )
             .map_err(|__err| __err.rebased(__at))?;
@@ -982,8 +1081,27 @@ impl ::layline::Message for MessageId {
         out: &mut __B,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
-        <NullArray as ::layline::Message>::encode_into_with(&self.path, out, ())?;
-        <Nested as ::layline::Message>::encode_into_with(&self.producer_id, out, ())?;
+        let __stream = out.len();
+        <Self as ::layline::Message>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
+        <NullArray as ::layline::Message>::encode_in_stream(
+            &self.path,
+            out,
+            __stream,
+            (),
+        )?;
+        <Nested as ::layline::Message>::encode_in_stream(
+            &self.producer_id,
+            out,
+            __stream,
+            (),
+        )?;
         Ok(())
     }
 }

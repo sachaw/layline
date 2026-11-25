@@ -40,6 +40,8 @@ fn switch(name: &str, on: Discriminant, ty: &str) -> Segment {
         doc: None,
         position: None,
         with: Vec::new(),
+        at: None,
+        from: layline_codegen::Origin::Message,
     }
 }
 
@@ -52,6 +54,8 @@ fn switch_in(name: &str, on: Discriminant, ty: &str, n: usize) -> Segment {
         doc: None,
         position: None,
         with: Vec::new(),
+        at: None,
+        from: layline_codegen::Origin::Message,
     }
 }
 

@@ -5,7 +5,7 @@ use quote::quote;
 
 use super::Check;
 use super::checksum::Marked;
-use super::cursor::{seek_to, skip_padding, write_padding};
+use super::cursor::{seek_to, seek_to_stream, skip_padding, write_padding};
 use super::env::Env;
 use super::eval::{argument, condition, number};
 use super::patch::{Slot, arm_ident, derived_flag, derived_value, nested_in_blocks, nested_probe};
@@ -14,7 +14,9 @@ use crate::model::{Ty, split_ref};
 use crate::root::Prelude;
 use crate::walk::tokens::ident;
 use crate::walk::{Derived, arguments, derivations, endian_arg, expressions, row, writers};
-use crate::{Absence, Count, Endian, Error, Expr, Kind, Len, Param, Presence, Root, Segment};
+use crate::{
+    Absence, Count, Endian, Error, Expr, Kind, Len, Origin, Param, Presence, Root, Segment,
+};
 
 /// Where encode reads a body's values from.
 #[derive(Clone, Copy)]
@@ -242,7 +244,7 @@ pub(super) fn walk_segments(
             w.byte_steps.extend(quote! {
                 let #arm = {
                     let __mark = out.len();
-                    let __wrote = #root::Choice::encode_into_with(&#held, out, #ctx);
+                    let __wrote = #root::Choice::encode_in_stream(&#held, out, __mark, #ctx);
                     let __n = out.len() - __mark;
                     out.rewind(__mark);
                     __wrote?;
@@ -440,7 +442,7 @@ pub(super) fn walk_segments(
     });
     Ok(Walked {
         fields: w.public_fields,
-        base: if rebased {
+        base: if rebased || super::mentions(&w.byte_steps, "__base") {
             quote! { let __base = out.len(); }
         } else {
             TokenStream::new()
@@ -510,9 +512,13 @@ impl Walk<'_> {
         last: bool,
     ) -> Result<(), Error> {
         let (root, owner) = (self.root, self.owner);
-        if let Some(at) = seeks(seg) {
+        if let Some((at, from)) = seeks(seg) {
             let start = self.env.number(owner, "#[seek]", at)?;
-            self.parse_steps.extend(seek_to(&start, super::eval::blamed(at, owner), root));
+            let field = super::eval::blamed(at, owner);
+            self.parse_steps.extend(match from {
+                Origin::Message => seek_to(&start, field, root),
+                Origin::Stream => seek_to_stream(&start, field, root),
+            });
         }
         if !matches!(seg, Segment::Block(_)) {
             for name in seg.places() {
@@ -631,9 +637,11 @@ impl Walk<'_> {
 /// The offset to seek to before `seg`, if the seek is unconditional.
 ///
 /// An absent record seeks inside its own presence test.
-fn seeks(seg: &Segment) -> Option<&Expr> {
+fn seeks(seg: &Segment) -> Option<(&Expr, Origin)> {
     match seg {
-        Segment::Repeat { at: Some(at), .. } | Segment::Placed { at, absent: None, .. } => Some(at),
+        Segment::Repeat { at: Some(at), from, .. }
+        | Segment::Switch { at: Some(at), from, .. }
+        | Segment::Placed { at, from, absent: None, .. } => Some((at, *from)),
         _ => None,
     }
 }
@@ -644,10 +652,13 @@ pub(super) fn needs_clone(kind: &Kind) -> bool {
 }
 
 impl Walk<'_> {
-    /// The position of the next byte, counted from this body's first byte.
-    pub(super) fn here(&self) -> TokenStream {
+    /// The position of the next byte, counted from this body's first byte or the stream's.
+    pub(super) fn here_from(&self, from: Origin) -> TokenStream {
         let i64 = self.root.prelude().i64;
-        quote!((out.len() - __base) as #i64)
+        match from {
+            Origin::Message => quote!((out.len() - __base) as #i64),
+            Origin::Stream => quote!((out.len() - __stream) as #i64),
+        }
     }
 
     /// Whether `name` is a parameter of this body.

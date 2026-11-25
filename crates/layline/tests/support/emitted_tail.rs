@@ -1047,6 +1047,14 @@ impl ::layline::Message for Dw {
         __depth: u32,
         __ctx: Self::Ctx,
     ) -> Result<(Self, usize), ::layline::ParseError> {
+        <Self as ::layline::Message>::decode_in_stream(body, __depth, 0, __ctx)
+    }
+    fn decode_in_stream(
+        body: &[u8],
+        __depth: u32,
+        __origin: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(Self, usize), ::layline::ParseError> {
         type __O = ::layline::__private::Be;
         if __depth > <Self as ::layline::Message>::MAX_DEPTH {
             return Err(::layline::ParseError::TooDeep {
@@ -1112,7 +1120,7 @@ impl ::layline::Message for Dw {
         __at = __head_at;
         let __whole = __body;
         let __body = &__whole[..__tail_end];
-        let (body, __used) = <Body as ::layline::Choice>::decode_with_nested(
+        let (body, __used) = <Body as ::layline::Choice>::decode_in_stream(
                 Some(::layline::WireInt::to_i64(&__b0.kind))
                     .ok_or(::layline::ParseError::Malformed {
                         field: "kind",
@@ -1120,6 +1128,7 @@ impl ::layline::Message for Dw {
                     })?,
                 &__body[__at..],
                 __depth,
+                __origin + __at,
                 (),
             )
             .map_err(|__err| __err.rebased(__at))?;
@@ -1165,6 +1174,15 @@ impl ::layline::Message for Dw {
         out: &mut __B,
         __ctx: Self::Ctx,
     ) -> Result<(), ::layline::EncodeError> {
+        let __stream = out.len();
+        <Self as ::layline::Message>::encode_in_stream(self, out, __stream, __ctx)
+    }
+    fn encode_in_stream<__B: ::layline::Buffer>(
+        &self,
+        out: &mut __B,
+        __stream: usize,
+        __ctx: Self::Ctx,
+    ) -> Result<(), ::layline::EncodeError> {
         type __O = ::layline::__private::Be;
         out.push(
             &__DwBlock0 {
@@ -1197,7 +1215,7 @@ impl ::layline::Message for Dw {
                 .encode_in::<__O>()?,
         )?;
         let __chosen = out.len();
-        ::layline::Choice::encode_into_with(&self.body, out, ())?;
+        ::layline::Choice::encode_in_stream(&self.body, out, __stream, ())?;
         if ::layline::Choice::discriminant(&self.body).is_none() {
             let __stated = match Some(
                 match ::layline::Choice::discriminant(&self.body) {

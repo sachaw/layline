@@ -176,11 +176,12 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                         }
                     },
                     at: at.as_ref().map(|r| r.expr.clone()),
+                    from: f.from,
                     doc: None,
                     when: gate.as_ref().map(Gate::presence),
                 });
             }
-            Body::Placed { kind, at, absent, assert } => {
+            Body::Placed { kind, at, absent, assert, window } => {
                 flush(&mut segments, &mut block);
                 if let Some(a) = assert {
                     checks.push(element_size_check(&f.name, a, &p.root));
@@ -190,6 +191,12 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     name: f.name.clone(),
                     kind: kind.clone(),
                     at: at.expr.clone(),
+                    from: f.from,
+                    window: window.as_ref().map(|(by, cap)| Len::Field {
+                        by: by.expr.clone(),
+                        cap: *cap,
+                        align: None,
+                    }),
                     absent: absent.as_ref().map(|g| match g {
                         PlacedAbsence::ZeroOffset => layline_codegen::Absence::ZeroOffset,
                         PlacedAbsence::ZeroLength(by) => layline_codegen::Absence::ZeroLength {
@@ -211,7 +218,7 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                     doc: None,
                 });
             }
-            Body::Switch { on, ty, window } => {
+            Body::Switch { on, ty, window, at } => {
                 flush(&mut segments, &mut block);
                 segments.push(Segment::Switch {
                     position: f.position.map(|a| a.position),
@@ -231,6 +238,8 @@ pub(super) fn lower(p: &Parsed) -> syn::Result<(MessageDef, Vec<TokenStream>)> {
                             Some(Len::Prefix { repr: *repr, cap: *cap })
                         }
                     },
+                    at: at.as_ref().map(|r| r.expr.clone()),
+                    from: f.from,
                     doc: None,
                     with: f.with.iter().map(|v| v.expr.clone()).collect(),
                 });
@@ -390,16 +399,18 @@ fn referenced(p: &Parsed) -> Vec<&str> {
                 values.extend(at.as_ref());
                 values.extend(gate.as_ref().and_then(Gate::when).map(|w| &w.value));
             }
-            Body::Placed { at, absent, .. } => {
+            Body::Placed { at, absent, window, .. } => {
                 values.push(at);
+                values.extend(window.as_ref().map(|(by, _)| by));
                 if let Some(PlacedAbsence::ZeroLength(by)) = absent {
                     names.push(&by.name);
                 }
             }
             Body::Value { len_ref, .. } => values.extend(len_ref.as_ref()),
-            Body::Switch { on, window, .. } => {
+            Body::Switch { on, window, at, .. } => {
                 values.extend(on.field());
                 values.extend(window.field());
+                values.extend(at.as_ref());
             }
             Body::Opt { when: Some(when), .. } => values.push(&when.value),
             _ => {}
